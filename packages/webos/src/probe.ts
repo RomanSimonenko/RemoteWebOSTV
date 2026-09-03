@@ -58,6 +58,7 @@ export interface ProbeArguments {
   readonly inputId?: string;
   readonly text?: string;
   readonly notification?: string;
+  readonly macAddresses?: readonly string[];
 }
 
 export interface ProbeAdapter extends WebOsAdapter {
@@ -110,7 +111,10 @@ export async function runProbe(options: RunProbeOptions): Promise<ProbeResult> {
 
   try {
     for (const operation of operations) {
-      if (pairingBlocked || (requiresPairing(operation) && !pairing)) {
+      if (
+        pairingBlocked ||
+        (requiresPairing(operation, options.args) && !pairing)
+      ) {
         checks.push(notRun(operation));
         continue;
       }
@@ -201,7 +205,8 @@ export async function runProbe(options: RunProbeOptions): Promise<ProbeResult> {
           case 'wake':
             await options.adapter.wake(
               requireValidMacAddresses(
-                requirePairing(pairing).macAddresses,
+                options.args.macAddresses ??
+                  requirePairing(pairing).macAddresses,
                 true,
               ),
               options.signal,
@@ -252,8 +257,14 @@ export async function runProbe(options: RunProbeOptions): Promise<ProbeResult> {
   };
 }
 
-function requiresPairing(operation: ProbeOperation): boolean {
-  return operation !== 'pair';
+function requiresPairing(
+  operation: ProbeOperation,
+  args: ProbeArguments,
+): boolean {
+  return (
+    operation !== 'pair' &&
+    !(operation === 'wake' && args.macAddresses !== undefined)
+  );
 }
 
 function notRun(operation: ProbeOperation): ProbeCheck {

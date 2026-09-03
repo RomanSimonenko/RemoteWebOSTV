@@ -319,4 +319,19 @@ describe('runProbe', () => {
     });
     expect(adapter.calls).not.toContain('wake');
   });
+
+  test('allows standalone wake with an explicitly supplied valid MAC', async () => {
+    const adapter = new FakeProbeAdapter();
+
+    const result = await execute(
+      adapter,
+      ['wake'],
+      createArguments({ macAddresses: ['02:00:00:00:00:01'] }),
+    );
+
+    expect(result.checks).toEqual([
+      { operation: 'wake', status: 'pass', durationMs: 7 },
+    ]);
+    expect(adapter.calls).toEqual(['wake', 'wake-count:1', 'disconnect']);
+  });
 });
