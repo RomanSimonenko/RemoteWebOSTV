@@ -367,7 +367,7 @@ git commit -m "test: add deterministic webos tv protocol double"
 - изменить `packages/webos/src/index.ts`;
 - создать `packages/webos/test/response-parsers.test.ts` и `lgtv2-adapter.test.ts`.
 
-- [ ] **Шаг 1. Проверить фактический контракт зависимости**
+- [x] **Шаг 1. Проверить фактический контракт зависимости**
 
 ```bash
 node -p "require('./node_modules/lgtv2/package.json').version"
@@ -377,7 +377,7 @@ sed -n '1,240p' node_modules/lgtv2/README.md
 
 Ожидается: ровно `2.0.0`; типы содержат `host`, `clientKey`, `saveKey`, `reconnect`, `request`, `getSocket`, `disconnect`, MAC learning, транспорт и Wake-on-LAN. Если контракт другой, сначала исправить план.
 
-- [ ] **Шаг 2. Написать падающие тесты parser**
+- [x] **Шаг 2. Написать падающие тесты parser**
 
 На фактических обезличенных формах ответов проверить identity, volume/mute, списки приложений/входов, корректные и неверные MAC, транспорт и `INVALID_TV_RESPONSE` без исходного payload.
 
@@ -387,15 +387,15 @@ pnpm --filter @remote-webos-tv/webos test -- response-parsers.test.ts
 
 Ожидается: FAIL.
 
-- [ ] **Шаг 3. Реализовать parser через Zod**
+- [x] **Шаг 3. Реализовать parser через Zod**
 
 Неизвестные поля ТВ разрешать, но каждое выходное значение adapter валидировать строго и переводить в типы `@remote-webos-tv/contracts`.
 
-- [ ] **Шаг 4. Написать падающие тесты adapter**
+- [x] **Шаг 4. Написать падающие тесты adapter**
 
 Проверить WSS-first/WS-fallback; ключ только после `registered`; передачу ключа в `ClientKeyStore.save`; reconnect без второго подтверждения; cleanup при timeout/cancel; точное преобразование ошибок; snapshot/apps/inputs; отсутствие host/MAC/key/raw frame/path в публичных ошибках; идемпотентный `disconnect()`.
 
-- [ ] **Шаг 5. Реализовать adapter**
+- [x] **Шаг 5. Реализовать adapter**
 
 ```ts
 export interface Lgtv2AdapterOptions {
@@ -409,7 +409,7 @@ export interface Lgtv2AdapterOptions {
 
 Создавать `lgtv2` только здесь. Настроить `wss:3001` → `ws:3000`, `verifyCert: 'lg'`, `reconnect: 0`, явные timeouts и собственное хранилище. Не использовать стандартные key/MAC-файлы библиотеки.
 
-- [ ] **Шаг 6. Проверить и зафиксировать**
+- [x] **Шаг 6. Проверить и зафиксировать**
 
 ```bash
 pnpm --filter @remote-webos-tv/webos test -- response-parsers.test.ts lgtv2-adapter.test.ts

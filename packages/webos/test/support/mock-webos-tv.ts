@@ -37,13 +37,22 @@ export class MockWebOsTv {
   readonly #scenario: MockScenario;
   readonly #requests: RecordedMockRequest[] = [];
   readonly #pointerFrames: string[] = [];
+  readonly #requestWaiters: Array<{
+    readonly count: number;
+    readonly resolve: () => void;
+  }> = [];
   readonly #pointerWaiters: Array<{
+    readonly count: number;
+    readonly resolve: () => void;
+  }> = [];
+  readonly #socketWaiters: Array<{
     readonly count: number;
     readonly resolve: () => void;
   }> = [];
   readonly #sockets = new Set<WebSocket>();
   #server: WebSocketServer | undefined;
   #url: string | undefined;
+  #pairingPromptCount = 0;
 
   constructor(options: MockWebOsTvOptions) {
     this.#scenario = options.scenario;
@@ -64,6 +73,10 @@ export class MockWebOsTv {
     return [...this.#pointerFrames];
   }
 
+  get pairingPromptCount(): number {
+    return this.#pairingPromptCount;
+  }
+
   get activeSocketCount(): number {
     return this.#sockets.size;
   }
@@ -77,7 +90,10 @@ export class MockWebOsTv {
     this.#server = server;
     server.on('connection', (socket, request) => {
       this.#sockets.add(socket);
-      socket.once('close', () => this.#sockets.delete(socket));
+      socket.once('close', () => {
+        this.#sockets.delete(socket);
+        this.#resolveSocketWaiters();
+      });
 
       if (request.url === '/pointer') {
         socket.on('message', (data) => {
@@ -117,6 +133,7 @@ export class MockWebOsTv {
       socket.terminate();
     }
     this.#sockets.clear();
+    this.#resolveSocketWaiters();
 
     await new Promise<void>((resolve, reject) => {
       server.close((error) => {
@@ -135,6 +152,24 @@ export class MockWebOsTv {
     }
     return new Promise((resolve) => {
       this.#pointerWaiters.push({ count, resolve });
+    });
+  }
+
+  waitForRequestCount(count: number): Promise<void> {
+    if (this.#requests.length >= count) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      this.#requestWaiters.push({ count, resolve });
+    });
+  }
+
+  waitForActiveSocketCount(count: number): Promise<void> {
+    if (this.#sockets.size === count) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      this.#socketWaiters.push({ count, resolve });
     });
   }
 
@@ -233,6 +268,7 @@ export class MockWebOsTv {
       this.#scenario.kind === 'deferred-pairing';
 
     if (shouldPrompt) {
+      this.#pairingPromptCount += 1;
       this.#send(socket, {
         id: envelope.id,
         type: 'response',
@@ -286,6 +322,7 @@ export class MockWebOsTv {
   #record(envelope: ProtocolEnvelope): void {
     if (envelope.type === 'register') {
       this.#requests.push({ id: envelope.id, type: envelope.type });
+      this.#resolveRequestWaiters();
       return;
     }
 
@@ -297,6 +334,7 @@ export class MockWebOsTv {
         ? {}
         : { payload: redactSecrets(envelope.payload) }),
     });
+    this.#resolveRequestWaiters();
   }
 
   #sendError(
@@ -338,6 +376,26 @@ export class MockWebOsTv {
       const waiter = this.#pointerWaiters[index];
       if (waiter && this.#pointerFrames.length >= waiter.count) {
         this.#pointerWaiters.splice(index, 1);
+        waiter.resolve();
+      }
+    }
+  }
+
+  #resolveRequestWaiters(): void {
+    for (let index = this.#requestWaiters.length - 1; index >= 0; index -= 1) {
+      const waiter = this.#requestWaiters[index];
+      if (waiter && this.#requests.length >= waiter.count) {
+        this.#requestWaiters.splice(index, 1);
+        waiter.resolve();
+      }
+    }
+  }
+
+  #resolveSocketWaiters(): void {
+    for (let index = this.#socketWaiters.length - 1; index >= 0; index -= 1) {
+      const waiter = this.#socketWaiters[index];
+      if (waiter && this.#sockets.size === waiter.count) {
+        this.#socketWaiters.splice(index, 1);
         waiter.resolve();
       }
     }
