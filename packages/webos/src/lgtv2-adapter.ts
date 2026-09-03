@@ -35,6 +35,7 @@ import {
   parseMacAddresses,
   parseVolume,
 } from './response-parsers.js';
+import { sendWakeOnLan } from './wake-on-lan.js';
 
 const uris = {
   systemInfo: 'ssap://system/getSystemInfo',
@@ -78,10 +79,15 @@ export interface Lgtv2AdapterOptions {
 
 interface Lgtv2AdapterDependencies {
   readonly createClient: Lgtv2ClientFactory;
+  readonly wake: (
+    macAddresses: readonly string[],
+    signal: AbortSignal,
+  ) => Promise<void>;
 }
 
 const defaultDependencies: Lgtv2AdapterDependencies = {
   createClient: createLgtv2Client,
+  wake: sendWakeOnLan,
 };
 
 export class Lgtv2Adapter implements WebOsAdapter {
@@ -98,10 +104,10 @@ export class Lgtv2Adapter implements WebOsAdapter {
 
   constructor(
     options: Lgtv2AdapterOptions,
-    dependencies: Lgtv2AdapterDependencies = defaultDependencies,
+    dependencies: Partial<Lgtv2AdapterDependencies> = defaultDependencies,
   ) {
     this.#options = options;
-    this.#dependencies = dependencies;
+    this.#dependencies = { ...defaultDependencies, ...dependencies };
   }
 
   async pair(request: PairingRequest): Promise<PairingResult> {
@@ -128,7 +134,7 @@ export class Lgtv2Adapter implements WebOsAdapter {
     const payload = await this.#execute(
       'snapshot',
       signal,
-      client.request(uris.volume),
+      () => client.request(uris.volume),
     );
     const volume = parseVolume(payload);
 
@@ -146,7 +152,7 @@ export class Lgtv2Adapter implements WebOsAdapter {
     this.#pointerSocket = await this.#execute(
       'pointer',
       signal,
-      client.getSocket(uris.pointer),
+      () => client.getSocket(uris.pointer),
     );
   }
 
@@ -155,7 +161,7 @@ export class Lgtv2Adapter implements WebOsAdapter {
     const payload = await this.#execute(
       'apps',
       signal,
-      client.request(uris.apps),
+      () => client.request(uris.apps),
     );
     return parseApps(payload);
   }
@@ -165,7 +171,7 @@ export class Lgtv2Adapter implements WebOsAdapter {
     const payload = await this.#execute(
       'inputs',
       signal,
-      client.request(uris.inputs),
+      () => client.request(uris.inputs),
     );
     return parseInputs(payload);
   }
@@ -188,13 +194,15 @@ export class Lgtv2Adapter implements WebOsAdapter {
     await this.#execute(
       'set-volume',
       signal,
-      client.request(uris.setVolume, { volume }),
+      () => client.request(uris.setVolume, { volume }),
     );
   }
 
   async launchApp(id: string, signal: AbortSignal): Promise<void> {
     const client = this.#requireClient();
-    await this.#execute('launch-app', signal, client.request(uris.launchApp, { id }));
+    await this.#execute('launch-app', signal, () =>
+      client.request(uris.launchApp, { id }),
+    );
   }
 
   async switchInput(id: string, signal: AbortSignal): Promise<void> {
@@ -202,7 +210,7 @@ export class Lgtv2Adapter implements WebOsAdapter {
     await this.#execute(
       'switch-input',
       signal,
-      client.request(uris.switchInput, { inputId: id }),
+      () => client.request(uris.switchInput, { inputId: id }),
     );
   }
 
@@ -211,7 +219,7 @@ export class Lgtv2Adapter implements WebOsAdapter {
     await this.#execute(
       'text',
       signal,
-      client.request(uris.insertText, { text, replace: 0 }),
+      () => client.request(uris.insertText, { text, replace: 0 }),
     );
   }
 
@@ -223,27 +231,25 @@ export class Lgtv2Adapter implements WebOsAdapter {
     await this.#execute(
       'notification',
       signal,
-      client.request(uris.notification, { message }),
+      () => client.request(uris.notification, { message }),
     );
   }
 
   async powerOff(signal: AbortSignal): Promise<void> {
     const client = this.#requireClient();
-    await this.#execute('power-off', signal, client.request(uris.powerOff));
+    await this.#execute('power-off', signal, () => client.request(uris.powerOff));
   }
 
   async wake(
     macAddresses: readonly string[],
     signal: AbortSignal,
   ): Promise<void> {
-    const client = this.#client;
-    if (!client) {
-      throw new WebOsError(
-        'CONNECTION_LOST',
-        'Wake-on-LAN requires an initialized webOS client',
-      );
-    }
-    await this.#execute('wake', signal, client.wake(macAddresses));
+    await this.#execute(
+      'wake',
+      signal,
+      () => this.#dependencies.wake(macAddresses, signal),
+      'owner',
+    );
   }
 
   async disconnect(): Promise<void> {
@@ -450,10 +456,15 @@ export class Lgtv2Adapter implements WebOsAdapter {
   async #execute<T>(
     operation: Lgtv2Operation,
     signal: AbortSignal,
-    pending: Promise<T>,
+    start: () => Promise<T>,
+    abortHandling: 'eager' | 'owner' = 'eager',
   ): Promise<T> {
     try {
-      return await withAbort(pending, signal);
+      throwIfAborted(signal);
+      const pending = start();
+      return await (abortHandling === 'owner'
+        ? pending
+        : withAbort(pending, signal));
     } catch (cause) {
       throw mapLgtv2Error(cause, operation, true);
     }

@@ -10,6 +10,7 @@ import type {
   Lgtv2Client,
   Lgtv2ClientOptions,
 } from '../src/lgtv2-types.js';
+import { WebOsError } from '../src/errors.js';
 import type { ClientKeyStore } from '../src/key-store.js';
 import { MockWebOsTv } from './support/mock-webos-tv.js';
 import { mockClientKey, mockMutationUris } from './support/fixtures.js';
@@ -61,9 +62,11 @@ function createHarness(
 ): {
   readonly adapter: Lgtv2Adapter;
   readonly configuredClients: Lgtv2ClientOptions[];
+  readonly clients: Lgtv2Client[];
 } {
   const port = Number(new URL(mock.url).port);
   const configuredClients: Lgtv2ClientOptions[] = [];
+  const clients: Lgtv2Client[] = [];
   const adapter = new Lgtv2Adapter(
     {
       host: 'tv.invalid',
@@ -76,17 +79,19 @@ function createHarness(
     {
       createClient(options) {
         configuredClients.push(options);
-        return createLgtv2Client({
+        const client = createLgtv2Client({
           ...options,
           host: '127.0.0.1',
           ports: { secure: port, insecure: port },
           verifyCert: false,
         });
+        clients.push(client);
+        return client;
       },
     },
   );
   createdAdapters.push(adapter);
-  return { adapter, configuredClients };
+  return { adapter, configuredClients, clients };
 }
 
 function pair(adapter: Lgtv2Adapter, signal = new AbortController().signal) {
@@ -219,6 +224,107 @@ describe('Lgtv2Adapter', () => {
       },
       { uri: mockMutationUris.powerOff, payload: undefined },
     ]);
+  });
+
+  test('does not send a mutating request when the signal is already aborted', async () => {
+    const mock = await startMock({ kind: 'success' });
+    const { adapter, clients } = createHarness(mock, new MemoryKeyStore());
+    await pair(adapter);
+    const request = vi.spyOn(clients[0]!, 'request');
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(adapter.powerOff(controller.signal)).rejects.toMatchObject({
+      code: 'CONNECTION_LOST',
+    });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  test('waits for the wake resource owner to close after cancellation', async () => {
+    let abortObserved = false;
+    let emitClose!: () => void;
+    const wake = vi.fn(
+      (
+        _macAddresses: readonly string[],
+        operationSignal?: AbortSignal,
+      ): Promise<void> =>
+        new Promise((_resolve, reject) => {
+          if (!operationSignal) {
+            reject(new Error('Wake operation did not receive an AbortSignal'));
+            return;
+          }
+          operationSignal.addEventListener(
+            'abort',
+            () => {
+              abortObserved = true;
+            },
+            { once: true },
+          );
+          emitClose = () => {
+            reject(
+              new WebOsError(
+                'CONNECTION_LOST',
+                'Wake-on-LAN operation was cancelled',
+              ),
+            );
+          };
+        }),
+    );
+    const adapter = new Lgtv2Adapter(
+      {
+        host: '192.0.2.10',
+        keyStore: new MemoryKeyStore(),
+        requestTimeoutMs: 2_000,
+        handshakeTimeoutMs: 500,
+        now: () => new Date('2026-09-03T10:00:00.000Z'),
+      },
+      { wake },
+    );
+    createdAdapters.push(adapter);
+    const controller = new AbortController();
+
+    const pending = adapter.wake(['02:00:00:00:00:01'], controller.signal);
+    let settled = false;
+    void pending.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    controller.abort();
+
+    for (let turn = 0; turn < 5; turn += 1) {
+      await Promise.resolve();
+    }
+    expect(abortObserved).toBe(true);
+    expect(settled).toBe(false);
+
+    emitClose();
+    await expect(pending).rejects.toMatchObject({ code: 'CONNECTION_LOST' });
+  });
+
+  test('does not create a wake resource when the signal is already aborted', async () => {
+    const wake = vi.fn(async () => undefined);
+    const adapter = new Lgtv2Adapter(
+      {
+        host: '192.0.2.10',
+        keyStore: new MemoryKeyStore(),
+        requestTimeoutMs: 2_000,
+        handshakeTimeoutMs: 500,
+        now: () => new Date('2026-09-03T10:00:00.000Z'),
+      },
+      { wake },
+    );
+    createdAdapters.push(adapter);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      adapter.wake(['02:00:00:00:00:01'], controller.signal),
+    ).rejects.toMatchObject({ code: 'CONNECTION_LOST' });
+    expect(wake).not.toHaveBeenCalled();
   });
 
   test.each([

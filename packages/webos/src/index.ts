@@ -6,3 +6,4 @@ export * from './lgtv2-adapter.js';
 export * from './lgtv2-types.js';
 export * from './probe.js';
 export * from './response-parsers.js';
+export * from './wake-on-lan.js';
