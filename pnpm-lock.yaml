@@ -33,7 +33,11 @@ importers:
         specifier: 4.1.5
         version: 4.1.5
 
-  packages/contracts: {}
+  packages/contracts:
+    dependencies:
+      zod:
+        specifier: 4.1.5
+        version: 4.1.5
 
   packages/webos:
     dependencies:

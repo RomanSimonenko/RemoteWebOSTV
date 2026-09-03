@@ -135,7 +135,7 @@ pnpm exec tsc --version
 
 Ожидается: `lgtv2@2.0.0` принадлежит только `@remote-webos-tv/webos`, TypeScript имеет версию 5.9.2.
 
-- [ ] **Шаг 5. Проверить и зафиксировать основу**
+- [x] **Шаг 5. Проверить и зафиксировать основу**
 
 ```bash
 pnpm typecheck
@@ -159,7 +159,7 @@ git commit -m "chore: bootstrap webos protocol validation workspace"
 - создать `packages/webos/src/errors.ts`, `adapter.ts`, `index.ts`;
 - создать `packages/webos/test/errors.test.ts`.
 
-- [ ] **Шаг 1. Написать падающие тесты контрактов**
+- [x] **Шаг 1. Написать падающие тесты контрактов**
 
 Проверить корректные `TvIdentity`, `TvCapabilities`, `TvSnapshot`, а также отклонение пустой модели, неизвестного транспорта и состояния, громкости вне 0–100. Безопасная сериализация не содержит IP, MAC или ключа.
 
@@ -193,7 +193,7 @@ pnpm --filter @remote-webos-tv/contracts test
 
 Ожидается: FAIL, схемы ещё не существуют.
 
-- [ ] **Шаг 2. Реализовать схемы и границу adapter**
+- [x] **Шаг 2. Реализовать схемы и границу adapter**
 
 ```ts
 export interface PairingRequest {
@@ -228,12 +228,13 @@ export type WebOsErrorCode =
   | 'NETWORK_UNREACHABLE' | 'PAIRING_REJECTED' | 'PAIRING_TIMEOUT'
   | 'AUTHORIZATION_FAILED' | 'POINTER_FORBIDDEN'
   | 'UNSUPPORTED_CAPABILITY' | 'INVALID_TV_RESPONSE'
-  | 'CONNECTION_LOST' | 'UNKNOWN';
+  | 'CONNECTION_LOST' | 'KEY_STORE_CORRUPT'
+  | 'KEY_STORE_WRITE_FAILED' | 'UNKNOWN';
 ```
 
 Внутри ошибка сохраняет `cause`, наружу отдаёт только разрешённый объект без адресов, ключей, payload и stack trace.
 
-- [ ] **Шаг 3. Проверить и зафиксировать контракты**
+- [x] **Шаг 3. Проверить и зафиксировать контракты**
 
 ```bash
 pnpm --filter @remote-webos-tv/contracts test
