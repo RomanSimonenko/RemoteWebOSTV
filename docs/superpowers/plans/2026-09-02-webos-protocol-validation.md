@@ -320,7 +320,7 @@ git commit -m "feat: persist tv client key with authenticated encryption"
 - создать `packages/webos/test/support/fixtures.ts`;
 - создать `packages/webos/test/mock-webos-tv.test.ts`.
 
-- [ ] **Шаг 1. Написать падающие тесты жизненного цикла**
+- [x] **Шаг 1. Написать падающие тесты жизненного цикла**
 
 Mock должен слушать loopback на порту ОС; хранить разобранные запросы без секретных кадров; поддерживать успешную, отклонённую и отложенную регистрацию; отвечать на запросы системы, ПО, громкости, приложений, входов и сети; выдавать pointer URL или `401`; разрывать соединение до/после выбранного ответа; закрывать сокеты при teardown.
 
@@ -330,7 +330,7 @@ pnpm --filter @remote-webos-tv/webos test -- mock-webos-tv.test.ts
 
 Ожидается: FAIL.
 
-- [ ] **Шаг 2. Реализовать минимальный mock**
+- [x] **Шаг 2. Реализовать минимальный mock**
 
 ```ts
 export type MockScenario =
@@ -344,7 +344,7 @@ export type MockScenario =
 
 При прямом импорте `ws` добавить точную dev-зависимость той же major-версии, что у `lgtv2`. Проверять JSON-конверт, сохранять ID и отклонять неожиданные URI.
 
-- [ ] **Шаг 3. Трижды проверить детерминизм и зафиксировать**
+- [x] **Шаг 3. Трижды проверить детерминизм и зафиксировать**
 
 ```bash
 pnpm --filter @remote-webos-tv/webos test -- mock-webos-tv.test.ts
