@@ -1,0 +1,20 @@
+{
+  "name": "@remote-webos-tv/webos",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@remote-webos-tv/contracts": "workspace:*",
+    "lgtv2": "2.0.0",
+    "zod": "4.1.5"
+  }
+}

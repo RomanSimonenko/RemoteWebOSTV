@@ -35,7 +35,7 @@
 - создать конфигурацию `packages/contracts` и `packages/webos`;
 - создать конфигурацию `apps/protocol-probe`.
 
-- [ ] **Шаг 1. Зафиксировать исходное состояние**
+- [x] **Шаг 1. Зафиксировать исходное состояние**
 
 ```bash
 git status --short
@@ -46,7 +46,7 @@ pnpm --version
 
 Ожидается: Node не ниже 22.12, pnpm доступен. При отсутствии обязательного инструмента остановиться и сообщить точную причину.
 
-- [ ] **Шаг 2. Создать корневую конфигурацию**
+- [x] **Шаг 2. Создать корневую конфигурацию**
 
 `package.json`:
 
@@ -54,7 +54,7 @@ pnpm --version
 {
   "name": "remote-webos-tv",
   "private": true,
-  "packageManager": "pnpm@10.15.0",
+  "packageManager": "pnpm@11.15.1",
   "engines": { "node": ">=22.12.0" },
   "scripts": {
     "build": "pnpm -r build",
@@ -75,6 +75,10 @@ pnpm --version
 packages:
   - apps/*
   - packages/*
+overrides:
+  postcss: 8.5.26
+allowBuilds:
+  esbuild: true
 ```
 
 `tsconfig.base.json`:
@@ -105,7 +109,7 @@ coverage/
 *.log
 ```
 
-- [ ] **Шаг 3. Создать package-манифесты**
+- [x] **Шаг 3. Создать package-манифесты**
 
 Все пакеты — ESM и имеют команды `build`, `test`, `typecheck`. В `packages/webos/package.json` зафиксировать:
 
@@ -121,7 +125,7 @@ coverage/
 
 Приложение probe зависит только от двух workspace-пакетов и Zod.
 
-- [ ] **Шаг 4. Установить и проверить зависимости**
+- [x] **Шаг 4. Установить и проверить зависимости**
 
 ```bash
 pnpm install --frozen-lockfile=false
