@@ -257,7 +257,7 @@ git commit -m "feat: define replaceable webos adapter contracts"
 - изменить `packages/webos/src/index.ts`;
 - создать `packages/webos/test/key-store.test.ts`.
 
-- [ ] **Шаг 1. Написать падающие тесты**
+- [x] **Шаг 1. Написать падающие тесты**
 
 На временном каталоге и синтетическом ключе проверить:
 
@@ -275,7 +275,7 @@ pnpm --filter @remote-webos-tv/webos test -- key-store.test.ts
 
 Ожидается: FAIL.
 
-- [ ] **Шаг 2. Реализовать хранилище**
+- [x] **Шаг 2. Реализовать хранилище**
 
 Использовать AES-256-GCM, случайный IV длиной 12 байт и версионированный формат:
 
@@ -297,7 +297,7 @@ export interface ClientKeyStore {
 
 Пустой ключ отклонять. Запись выполнять во временный соседний файл, затем `fsync` и атомарное переименование. Содержимое не журналировать.
 
-- [ ] **Шаг 3. Проверить и зафиксировать**
+- [x] **Шаг 3. Проверить и зафиксировать**
 
 ```bash
 pnpm --filter @remote-webos-tv/webos test -- key-store.test.ts
