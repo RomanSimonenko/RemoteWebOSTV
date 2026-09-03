@@ -12,7 +12,9 @@ class FakeWakeSocket extends EventEmitter implements WakeSocket {
   readonly packets: Buffer[] = [];
   closed = false;
   closeError: Error | undefined;
+  closeRequested = false;
   holdSend = false;
+  sendError: Error | undefined;
 
   bind(callback: () => void): void {
     callback();
@@ -30,7 +32,7 @@ class FakeWakeSocket extends EventEmitter implements WakeSocket {
   ): void {
     this.packets.push(Buffer.from(packet));
     if (!this.holdSend) {
-      callback();
+      callback(this.sendError);
     }
   }
 
@@ -38,6 +40,10 @@ class FakeWakeSocket extends EventEmitter implements WakeSocket {
     if (this.closeError) {
       throw this.closeError;
     }
+    this.closeRequested = true;
+  }
+
+  emitClose(): void {
     if (this.closed) {
       return;
     }
@@ -88,6 +94,8 @@ describe('sendWakeOnLan', () => {
     expect(socket.packets).toHaveLength(1);
     controller.abort();
 
+    expect(socket.closeRequested).toBe(true);
+    socket.emitClose();
     await expect(pending).rejects.toMatchObject({ code: 'CONNECTION_LOST' });
     expect(socket.closed).toBe(true);
   });
@@ -95,7 +103,7 @@ describe('sendWakeOnLan', () => {
   test('sends three valid magic packets and closes the socket', async () => {
     const socket = new FakeWakeSocket();
 
-    await sendWakeOnLan(
+    const pending = sendWakeOnLan(
       ['02:00:00:00:00:01'],
       new AbortController().signal,
       createDependencies(socket),
@@ -109,7 +117,41 @@ describe('sendWakeOnLan', () => {
     expect(socket.packets[0]?.subarray(6, 12).toString('hex')).toBe(
       '020000000001',
     );
+    expect(socket.closeRequested).toBe(true);
+    socket.emitClose();
+    await pending;
     expect(socket.closed).toBe(true);
+  });
+
+  test('late cancellation overrides success before deferred close', async () => {
+    const socket = new FakeWakeSocket();
+    const controller = new AbortController();
+    const pending = sendWakeOnLan(
+      ['02:00:00:00:00:01'],
+      controller.signal,
+      createDependencies(socket),
+    );
+    let settled = false;
+    void pending.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+
+    expect(socket.packets).toHaveLength(3);
+    expect(socket.closeRequested).toBe(true);
+    controller.abort();
+
+    for (let turn = 0; turn < 5; turn += 1) {
+      await Promise.resolve();
+    }
+    expect(settled).toBe(false);
+
+    socket.emitClose();
+    await expect(pending).rejects.toMatchObject({ code: 'CONNECTION_LOST' });
   });
 
   test('rejects when closing the UDP socket fails', async () => {
@@ -124,5 +166,31 @@ describe('sendWakeOnLan', () => {
         createDependencies(socket),
       ),
     ).rejects.toBe(closeError);
+  });
+
+  test('preserves an operational error when socket cleanup also fails', async () => {
+    const socket = new FakeWakeSocket();
+    const sendError = new Error('synthetic send failure');
+    const closeError = new Error('synthetic close failure');
+    socket.sendError = sendError;
+    socket.closeError = closeError;
+
+    let captured: unknown;
+    try {
+      await sendWakeOnLan(
+        ['02:00:00:00:00:01'],
+        new AbortController().signal,
+        createDependencies(socket),
+      );
+    } catch (error) {
+      captured = error;
+    }
+
+    expect(captured).toBeInstanceOf(AggregateError);
+    expect((captured as AggregateError).errors).toEqual([
+      sendError,
+      closeError,
+    ]);
+    expect((captured as Error).cause).toBe(sendError);
   });
 });

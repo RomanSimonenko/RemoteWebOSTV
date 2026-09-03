@@ -96,14 +96,24 @@ export async function sendWakeOnLan(
       dependencies.clearSchedule(timer);
       try {
         socket.close();
-      } catch (error) {
-        outcome = { status: 'error', error };
+      } catch (closeError) {
+        outcome = {
+          status: 'error',
+          error:
+            nextOutcome.status === 'error'
+              ? new AggregateError(
+                  [nextOutcome.error, closeError],
+                  'Wake-on-LAN operation and socket cleanup failed',
+                  { cause: nextOutcome.error },
+                )
+              : closeError,
+        };
         settle();
       }
     };
 
     const abort = () => {
-      if (!outcome) {
+      if (!outcome || outcome.status === 'success') {
         outcome = {
           status: 'error',
           error: new WebOsError(
