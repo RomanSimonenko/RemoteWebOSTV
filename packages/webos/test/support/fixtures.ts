@@ -11,6 +11,15 @@ export const mockUris = {
     'ssap://com.webos.service.networkinput/getPointerInputSocket',
 } as const;
 
+export const mockMutationUris = {
+  setVolume: 'ssap://audio/setVolume',
+  launchApp: 'ssap://com.webos.applicationManager/launch',
+  switchInput: 'ssap://tv/switchInput',
+  insertText: 'ssap://com.webos.service.ime/insertText',
+  notification: 'ssap://system.notifications/createToast',
+  powerOff: 'ssap://system/turnOff',
+} as const;
+
 export const mockResponses = {
   [mockUris.systemInfo]: {
     returnValue: true,
@@ -62,4 +71,3 @@ export const mockResponses = {
     wifiInfo: { macAddress: '02:00:00:00:00:02' },
   },
 } as const;
-

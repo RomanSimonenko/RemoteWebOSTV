@@ -3,7 +3,12 @@ import type { AddressInfo } from 'node:net';
 
 import WebSocket, { WebSocketServer } from 'ws';
 
-import { mockClientKey, mockResponses, mockUris } from './fixtures.js';
+import {
+  mockClientKey,
+  mockMutationUris,
+  mockResponses,
+  mockUris,
+} from './fixtures.js';
 
 export type MockScenario =
   | { readonly kind: 'success' }
@@ -309,7 +314,9 @@ export class MockWebOsTv {
     }
 
     if (!isMockResponseUri(uri)) {
-      return undefined;
+      return isMockMutationUri(uri)
+        ? { id, type: 'response', payload: { returnValue: true } }
+        : undefined;
     }
 
     return {
@@ -451,6 +458,14 @@ function decodeEnvelope(
 
 function isMockResponseUri(uri: string): uri is keyof typeof mockResponses {
   return Object.prototype.hasOwnProperty.call(mockResponses, uri);
+}
+
+function isMockMutationUri(
+  uri: string,
+): uri is (typeof mockMutationUris)[keyof typeof mockMutationUris] {
+  return Object.values(mockMutationUris).includes(
+    uri as (typeof mockMutationUris)[keyof typeof mockMutationUris],
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

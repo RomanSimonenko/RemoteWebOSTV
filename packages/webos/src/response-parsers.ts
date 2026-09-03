@@ -148,6 +148,12 @@ export function parseMacAddresses(payload: unknown): readonly string[] {
   });
 }
 
+export function parseMacAddress(value: unknown): string {
+  return parseTvResponse('MAC address', () =>
+    normalizeMacAddress(nonEmptyTextSchema.parse(value)),
+  );
+}
+
 export function parseTransport(url: string): TvTransport {
   return parseTvResponse('transport', () => {
     const parsed = new URL(url);

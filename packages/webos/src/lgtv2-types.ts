@@ -41,6 +41,7 @@ export interface Lgtv2Client {
   ): this;
   request<T = unknown>(uri: string, payload?: Record<string, unknown>): Promise<T>;
   getSocket(uri: string): Promise<Lgtv2SpecializedSocket>;
+  wake(mac: string | readonly string[]): Promise<void>;
   disconnect(): Promise<void>;
 }
 

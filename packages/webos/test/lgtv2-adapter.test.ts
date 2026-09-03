@@ -12,7 +12,7 @@ import type {
 } from '../src/lgtv2-types.js';
 import type { ClientKeyStore } from '../src/key-store.js';
 import { MockWebOsTv } from './support/mock-webos-tv.js';
-import { mockClientKey } from './support/fixtures.js';
+import { mockClientKey, mockMutationUris } from './support/fixtures.js';
 
 class MemoryKeyStore implements ClientKeyStore {
   current: string | undefined;
@@ -173,6 +173,54 @@ describe('Lgtv2Adapter', () => {
     ]);
   });
 
+  test('sends typed mutations through their exact SSAP and pointer boundaries', async () => {
+    const mock = await startMock({ kind: 'success' });
+    const { adapter } = createHarness(mock, new MemoryKeyStore());
+    const signal = new AbortController().signal;
+    await pair(adapter, signal);
+
+    await adapter.sendButton('FAST_FORWARD', signal);
+    await mock.waitForPointerFrameCount(1);
+    await adapter.setVolume(23, signal);
+    await adapter.launchApp('youtube.leanback.v4', signal);
+    await adapter.switchInput('HDMI_1', signal);
+    await adapter.insertText('synthetic text', signal);
+    await adapter.createNotification('synthetic notification', signal);
+    await adapter.powerOff(signal);
+
+    expect(mock.pointerFrames).toEqual([
+      'type:button\nname:FASTFORWARD\n\n',
+    ]);
+    expect(
+      mock.requests
+        .filter((request) =>
+          Object.values(mockMutationUris).includes(
+            request.uri as (typeof mockMutationUris)[keyof typeof mockMutationUris],
+          ),
+        )
+        .map(({ uri, payload }) => ({ uri, payload })),
+    ).toEqual([
+      { uri: mockMutationUris.setVolume, payload: { volume: 23 } },
+      {
+        uri: mockMutationUris.launchApp,
+        payload: { id: 'youtube.leanback.v4' },
+      },
+      {
+        uri: mockMutationUris.switchInput,
+        payload: { inputId: 'HDMI_1' },
+      },
+      {
+        uri: mockMutationUris.insertText,
+        payload: { text: 'synthetic text', replace: 0 },
+      },
+      {
+        uri: mockMutationUris.notification,
+        payload: { message: 'synthetic notification' },
+      },
+      { uri: mockMutationUris.powerOff, payload: undefined },
+    ]);
+  });
+
   test.each([
     [undefined, 'PAIRING_REJECTED'],
     ['existing-synthetic-key', 'AUTHORIZATION_FAILED'],
@@ -314,6 +362,7 @@ function createHangingClient(
     on: () => client,
     request: async () => new Promise<never>(() => undefined),
     getSocket: async () => new Promise<never>(() => undefined),
+    wake: async () => undefined,
     disconnect,
   };
   return client as Lgtv2Client;

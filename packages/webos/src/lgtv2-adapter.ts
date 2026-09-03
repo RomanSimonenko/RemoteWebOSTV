@@ -19,6 +19,7 @@ import type {
   PairingResult,
   WebOsAdapter,
 } from './adapter.js';
+import { toWebOsButton } from './buttons.js';
 import { WebOsError } from './errors.js';
 import type { ClientKeyStore } from './key-store.js';
 import type {
@@ -43,6 +44,12 @@ const uris = {
   inputs: 'ssap://tv/getExternalInputList',
   network: 'ssap://com.webos.service.connectionmanager/getinfo',
   pointer: 'ssap://com.webos.service.networkinput/getPointerInputSocket',
+  setVolume: 'ssap://audio/setVolume',
+  launchApp: 'ssap://com.webos.applicationManager/launch',
+  switchInput: 'ssap://tv/switchInput',
+  insertText: 'ssap://com.webos.service.ime/insertText',
+  notification: 'ssap://system.notifications/createToast',
+  powerOff: 'ssap://system/turnOff',
 } as const;
 
 type Lgtv2Operation =
@@ -52,6 +59,13 @@ type Lgtv2Operation =
   | 'inputs'
   | 'pointer'
   | 'button'
+  | 'set-volume'
+  | 'launch-app'
+  | 'switch-input'
+  | 'text'
+  | 'notification'
+  | 'power-off'
+  | 'wake'
   | 'disconnect';
 
 export interface Lgtv2AdapterOptions {
@@ -162,8 +176,74 @@ export class Lgtv2Adapter implements WebOsAdapter {
     }
     throwIfAborted(signal);
     this.#pointerSocket?.send('button', {
-      name: button.replaceAll('_', ''),
+      name: toWebOsButton(button),
     });
+  }
+
+  async setVolume(volume: number, signal: AbortSignal): Promise<void> {
+    if (!Number.isInteger(volume) || volume < 0 || volume > 100) {
+      throw new WebOsError('UNKNOWN', 'Volume must be an integer from 0 to 100');
+    }
+    const client = this.#requireClient();
+    await this.#execute(
+      'set-volume',
+      signal,
+      client.request(uris.setVolume, { volume }),
+    );
+  }
+
+  async launchApp(id: string, signal: AbortSignal): Promise<void> {
+    const client = this.#requireClient();
+    await this.#execute('launch-app', signal, client.request(uris.launchApp, { id }));
+  }
+
+  async switchInput(id: string, signal: AbortSignal): Promise<void> {
+    const client = this.#requireClient();
+    await this.#execute(
+      'switch-input',
+      signal,
+      client.request(uris.switchInput, { inputId: id }),
+    );
+  }
+
+  async insertText(text: string, signal: AbortSignal): Promise<void> {
+    const client = this.#requireClient();
+    await this.#execute(
+      'text',
+      signal,
+      client.request(uris.insertText, { text, replace: 0 }),
+    );
+  }
+
+  async createNotification(
+    message: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const client = this.#requireClient();
+    await this.#execute(
+      'notification',
+      signal,
+      client.request(uris.notification, { message }),
+    );
+  }
+
+  async powerOff(signal: AbortSignal): Promise<void> {
+    const client = this.#requireClient();
+    await this.#execute('power-off', signal, client.request(uris.powerOff));
+  }
+
+  async wake(
+    macAddresses: readonly string[],
+    signal: AbortSignal,
+  ): Promise<void> {
+    const client = this.#client;
+    if (!client) {
+      throw new WebOsError(
+        'CONNECTION_LOST',
+        'Wake-on-LAN requires an initialized webOS client',
+      );
+    }
+    await this.#execute('wake', signal, client.wake(macAddresses));
   }
 
   async disconnect(): Promise<void> {
