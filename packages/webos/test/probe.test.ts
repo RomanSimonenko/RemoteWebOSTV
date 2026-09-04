@@ -42,10 +42,12 @@ const pairingResult: PairingResult = {
 
 class FakeProbeAdapter implements ProbeAdapter {
   readonly calls: string[] = [];
+  readonly pairingRequests: PairingRequest[] = [];
   readonly failures = new Map<ProbeOperation, WebOsError>();
   result: PairingResult = pairingResult;
 
-  async pair(_request: PairingRequest): Promise<PairingResult> {
+  async pair(request: PairingRequest): Promise<PairingResult> {
+    this.pairingRequests.push(request);
     this.record('pair');
     return this.result;
   }
@@ -189,6 +191,8 @@ describe('runProbe', () => {
       macAddressCount: 1,
     });
     expect(result.checks.every((check) => check.durationMs === 7)).toBe(true);
+    expect(adapter.pairingRequests).toHaveLength(2);
+    expect(adapter.pairingRequests[1]).not.toHaveProperty('clientKey');
   });
 
   test('runs mutating operations only when explicitly listed', async () => {

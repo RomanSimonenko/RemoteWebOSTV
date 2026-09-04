@@ -9,7 +9,7 @@ import type {
 export const HELP_TEXT = `RemoteWebOSTV protocol probe
 
 Использование:
-  protocol-probe pair --host <host> --data-dir <directory>
+  protocol-probe pair --host <host> --data-dir <directory> [--reset-client-key]
   protocol-probe check --host <host> --data-dir <directory>
   protocol-probe command --host <host> --data-dir <directory> --operation <name>
   protocol-probe report --data-dir <directory>
@@ -27,6 +27,7 @@ export const HELP_TEXT = `RemoteWebOSTV protocol probe
 Внимание: command запускает операции, которые изменяют состояние телевизора.
 power-off и wake требуют явного --confirm-device-state-change.
 Адрес ТВ, MAC и ключ сопряжения не выводятся и не попадают в отчёт.
+--reset-client-key разрешён только для явного повторного сопряжения pair.
 `;
 
 export class CliArgumentError extends Error {
@@ -42,6 +43,7 @@ export type CliArguments =
       readonly command: 'pair' | 'check';
       readonly host: string;
       readonly dataDir: string;
+      readonly resetClientKey?: true;
     }
   | {
       readonly command: 'command';
@@ -86,6 +88,7 @@ export function parseCliArguments(argv: readonly string[]): CliArguments {
         message: { type: 'string' },
         mac: { type: 'string' },
         'confirm-device-state-change': { type: 'boolean' },
+        'reset-client-key': { type: 'boolean' },
       },
     });
   } catch (cause) {
@@ -101,6 +104,9 @@ export function parseCliArguments(argv: readonly string[]): CliArguments {
 
   const command = parsed.positionals[0];
   const dataDir = requiredText(parsed.values['data-dir'], 'data-dir');
+  if (parsed.values['reset-client-key'] && command !== 'pair') {
+    throw new CliArgumentError('--reset-client-key разрешён только для pair.');
+  }
   if (command === 'report') {
     return { command, dataDir };
   }
@@ -109,7 +115,15 @@ export function parseCliArguments(argv: readonly string[]): CliArguments {
   }
 
   const host = requiredText(parsed.values.host, 'host');
-  if (command === 'pair' || command === 'check') {
+  if (command === 'pair') {
+    return {
+      command,
+      host,
+      dataDir,
+      ...(parsed.values['reset-client-key'] ? { resetClientKey: true } : {}),
+    };
+  }
+  if (command === 'check') {
     return { command, host, dataDir };
   }
 

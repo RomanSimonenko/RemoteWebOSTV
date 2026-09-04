@@ -133,6 +133,9 @@ export async function runProtocolProbeCli(
   let exitCode = 1;
 
   try {
+    if (command.command === 'pair' && command.resetClientKey) {
+      await keyStore.clear();
+    }
     dependencies.stdout.write(
       `[redacted-host]: запуск команды ${command.command}.\n`,
     );

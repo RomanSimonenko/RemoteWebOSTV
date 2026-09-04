@@ -69,6 +69,47 @@ describe('EncryptedFileKeyStore', () => {
     await expect(store.load()).resolves.toBeUndefined();
   });
 
+  test('clears only the encrypted client-key record and is idempotent', async () => {
+    const directory = await createDirectory();
+    const store = new EncryptedFileKeyStore({ directory });
+    await store.save(syntheticClientKey);
+
+    await store.clear();
+    await store.clear();
+
+    expect((await readdir(directory)).sort()).toEqual(['master.key']);
+    await expect(store.load()).resolves.toBeUndefined();
+    const masterKey = await open(join(directory, 'master.key'), 'r');
+    const metadata = await masterKey.stat();
+    await masterKey.close();
+    expect(metadata.mode & 0o777).toBe(0o600);
+  });
+
+  test('preserves the encrypted client-key record when deletion fails', async () => {
+    const directory = await createDirectory();
+    const encryptedPath = join(directory, 'client-key.enc');
+    const initialStore = new EncryptedFileKeyStore({ directory });
+    await initialStore.save(syntheticClientKey);
+    const fileSystem: KeyStoreFileSystem = {
+      chmod,
+      mkdir,
+      open,
+      readFile,
+      rename,
+      unlink: async () => {
+        throw Object.assign(new Error('synthetic permission failure'), {
+          code: 'EACCES',
+        });
+      },
+    };
+    const store = new EncryptedFileKeyStore({ directory, fileSystem });
+
+    await expect(store.clear()).rejects.toMatchObject({
+      code: 'KEY_STORE_WRITE_FAILED',
+    });
+    await expect(readFile(encryptedPath, 'utf8')).resolves.toBeTruthy();
+  });
+
   test('reports malformed ciphertext without deleting or replacing it', async () => {
     const directory = await createDirectory();
     const encryptedPath = join(directory, 'client-key.enc');

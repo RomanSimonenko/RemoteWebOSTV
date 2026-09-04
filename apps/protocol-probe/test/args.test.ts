@@ -41,6 +41,43 @@ describe('parseCliArguments', () => {
     ).toEqual({ command: 'report', dataDir: '.local/protocol-probe' });
   });
 
+  test('allows client-key reset only as an explicit pair option', () => {
+    expect(
+      parseCliArguments([
+        'pair',
+        '--host',
+        syntheticHost,
+        '--data-dir',
+        '.local/protocol-probe',
+        '--reset-client-key',
+      ]),
+    ).toEqual({
+      command: 'pair',
+      host: syntheticHost,
+      dataDir: '.local/protocol-probe',
+      resetClientKey: true,
+    });
+
+    expect(() =>
+      parseCliArguments([
+        'check',
+        '--host',
+        syntheticHost,
+        '--data-dir',
+        '.local/protocol-probe',
+        '--reset-client-key',
+      ]),
+    ).toThrowError(/reset-client-key.*pair/i);
+    expect(() =>
+      parseCliArguments([
+        'report',
+        '--data-dir',
+        '.local/protocol-probe',
+        '--reset-client-key',
+      ]),
+    ).toThrowError(/reset-client-key.*pair/i);
+  });
+
   test('parses operation-specific command arguments', () => {
     expect(
       parseCliArguments([

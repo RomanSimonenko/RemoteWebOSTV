@@ -55,6 +55,7 @@ function createDependencies(result: ProbeResult = success): {
   readonly writeReport: ReturnType<typeof vi.fn>;
   readonly disconnect: ReturnType<typeof vi.fn<() => Promise<void>>>;
   readonly signalListeners: Map<string, () => void>;
+  readonly clearKey: ReturnType<typeof vi.fn<() => Promise<void>>>;
 } {
   const stdout: string[] = [];
   const stderr: string[] = [];
@@ -62,7 +63,8 @@ function createDependencies(result: ProbeResult = success): {
   const registeredSignalListeners = new Map<string, () => void>();
   const disconnect = vi.fn(async () => undefined);
   const adapter = { disconnect } as unknown as ProbeAdapter;
-  const keyStore = {} as ClientKeyStore;
+  const clearKey = vi.fn(async () => undefined);
+  const keyStore = { clear: clearKey } as unknown as ClientKeyStore;
   const runProbe = vi.fn(async (_options: RunProbeOptions) => result);
   const writeReport = vi.fn(async (_directory, report: CompatibilityReport) => report);
   const dependencies: MainDependencies = {
@@ -100,6 +102,7 @@ function createDependencies(result: ProbeResult = success): {
     writeReport,
     disconnect,
     signalListeners,
+    clearKey,
   };
 }
 
@@ -160,6 +163,45 @@ describe('runProtocolProbeCli', () => {
     expect(output).not.toContain('synthetic-probe-client-key');
     expect(output).not.toContain('02:00:00:00:00:01');
     expect(harness.disconnect).toHaveBeenCalledOnce();
+  });
+
+  test('clears the encrypted client-key record before explicitly requested re-pairing', async () => {
+    const harness = createDependencies();
+    const callOrder: string[] = [];
+    harness.clearKey.mockImplementation(async () => {
+      callOrder.push('clear');
+    });
+    harness.runProbe.mockImplementation(async () => {
+      callOrder.push('probe');
+      return success;
+    });
+
+    const exitCode = await runProtocolProbeCli(
+      [...pairArgv, '--reset-client-key'],
+      harness.dependencies,
+    );
+
+    expect(exitCode).toBe(0);
+    expect(callOrder).toEqual(['clear', 'probe']);
+    expect(harness.clearKey).toHaveBeenCalledOnce();
+  });
+
+  test('does not start pairing when explicit client-key reset fails', async () => {
+    const harness = createDependencies();
+    harness.clearKey.mockRejectedValue(
+      new Error('synthetic key-store deletion failure'),
+    );
+
+    const exitCode = await runProtocolProbeCli(
+      [...pairArgv, '--reset-client-key'],
+      harness.dependencies,
+    );
+
+    expect(exitCode).toBe(1);
+    expect(harness.runProbe).not.toHaveBeenCalled();
+    expect(harness.stderr.join('')).not.toContain(
+      'synthetic key-store deletion failure',
+    );
   });
 
   test('returns exit 1 when a protocol check fails', async () => {

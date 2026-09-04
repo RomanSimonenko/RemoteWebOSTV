@@ -134,11 +134,10 @@ export async function runProbe(options: RunProbeOptions): Promise<ProbeResult> {
             online = true;
             break;
           case 'reconnect': {
-            const previousPairing = requirePairing(pairing);
+            requirePairing(pairing);
             await options.adapter.disconnect();
             pairing = await options.adapter.pair({
               host: options.host,
-              clientKey: previousPairing.clientKey,
               signal: options.signal,
             });
             online = true;
