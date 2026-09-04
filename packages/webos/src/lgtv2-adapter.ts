@@ -53,6 +53,8 @@ const uris = {
   powerOff: 'ssap://system/turnOff',
 } as const;
 
+const webSocketOpenState = 1;
+
 type Lgtv2Operation =
   | 'pair'
   | 'snapshot'
@@ -159,12 +161,22 @@ export class Lgtv2Adapter implements WebOsAdapter {
     signal: AbortSignal,
   ): Promise<Lgtv2SpecializedSocket> {
     const client = this.#requireClient();
-    this.#pointerSocket = await this.#execute(
+    const pointerSocket = await this.#execute(
       'pointer',
       signal,
       () => client.getSocket(uris.pointer),
     );
-    return this.#pointerSocket;
+    if (
+      pointerSocket.ws &&
+      pointerSocket.ws.readyState !== webSocketOpenState
+    ) {
+      throw new WebOsError(
+        'CONNECTION_LOST',
+        'Pointer socket is no longer open',
+      );
+    }
+    this.#pointerSocket = pointerSocket;
+    return pointerSocket;
   }
 
   async listApps(signal: AbortSignal): Promise<readonly TvApp[]> {
@@ -562,7 +574,11 @@ export function mapLgtv2Error(
     code = 'UNSUPPORTED_CAPABILITY';
   } else if (/timeout/i.test(error.message)) {
     code = operation === 'pair' ? 'PAIRING_TIMEOUT' : 'CONNECTION_LOST';
-  } else if (/not connected|connection closed|socket hang up/i.test(error.message)) {
+  } else if (
+    /not connected|not open|readyState|connection closed|socket hang up/i.test(
+      error.message,
+    )
+  ) {
     code = 'CONNECTION_LOST';
   }
 

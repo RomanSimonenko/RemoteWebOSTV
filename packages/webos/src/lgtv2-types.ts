@@ -20,6 +20,8 @@ export interface Lgtv2ClientOptions {
 }
 
 export interface Lgtv2SpecializedSocket {
+  /** Runtime-owned WebSocket exposed by lgtv2@2.0.0's wrapper. */
+  readonly ws?: { readonly readyState: number };
   send(type: string, payload?: Record<string, string | number>): void;
   close(): void;
 }

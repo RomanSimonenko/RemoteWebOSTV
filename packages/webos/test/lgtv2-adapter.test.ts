@@ -502,6 +502,30 @@ describe('Lgtv2Adapter', () => {
     expect(secondSend).toHaveBeenCalledWith('button', { name: 'HOME' });
   });
 
+  test('returns connection loss when lgtv2 still caches a closed pointer wrapper', async () => {
+    const send = vi.fn();
+    const transport = { readyState: 1 };
+    const socket = {
+      ws: transport,
+      send,
+      close: () => {
+        transport.readyState = 3;
+      },
+    } as Lgtv2SpecializedSocket & { readonly ws: { readonly readyState: number } };
+    const getSocket = vi.fn(async () => socket);
+    const { adapter } = createUnitAdapter({ getSocket });
+    await pair(adapter);
+
+    await adapter.openPointerSocket(new AbortController().signal);
+    socket.close();
+
+    await expect(
+      adapter.sendButton('HOME', new AbortController().signal),
+    ).rejects.toMatchObject({ code: 'CONNECTION_LOST' });
+    expect(getSocket).toHaveBeenCalledTimes(2);
+    expect(send).not.toHaveBeenCalled();
+  });
+
   test.each([
     ['pointer', 'pointer'],
     ['apps', 'apps'],
