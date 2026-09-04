@@ -94,17 +94,17 @@ describe('compatibility report', () => {
   });
 
   test.each([
-    'unexpected device 192.0.2.10',
-    'unexpected device fe80::1',
-    'unexpected device 02:00:00:00:00:01',
-    'unexpected device 02-00-00-00-00-01',
-    'unexpected device 020000000001',
-    'unexpected path /var/lib/remote-webos-tv/secret',
-    'unexpected path C:\\Users\\Synthetic\\secret',
-    'unexpected path C:/Users/Synthetic/secret',
-    'unexpected path \\\\synthetic-server\\share\\secret',
-    'unexpected terminal control \u001b[31m',
-  ])('rejects sensitive value in an allowed note: %s', async (note) => {
+    { label: 'IPv4 address', note: 'unexpected device 192.0.2.10' },
+    { label: 'IPv6 address', note: 'unexpected device fe80::1' },
+    { label: 'colon MAC address', note: 'unexpected device 02:00:00:00:00:01' },
+    { label: 'hyphen MAC address', note: 'unexpected device 02-00-00-00-00-01' },
+    { label: 'compact MAC address', note: 'unexpected device 020000000001' },
+    { label: 'POSIX path', note: 'unexpected path /var/lib/remote-webos-tv/secret' },
+    { label: 'Windows backslash path', note: 'unexpected path C:\\Users\\Synthetic\\secret' },
+    { label: 'Windows slash path', note: 'unexpected path C:/Users/Synthetic/secret' },
+    { label: 'UNC path', note: 'unexpected path \\\\synthetic-server\\share\\secret' },
+    { label: 'terminal control', note: 'unexpected terminal control \u001b[31m' },
+  ])('rejects sensitive value in an allowed note: $label', async ({ note }) => {
     const directory = await createDirectory();
     const candidate = {
       ...report,
@@ -119,6 +119,33 @@ describe('compatibility report', () => {
     await expect(
       writeCompatibilityReport(directory, candidate),
     ).rejects.toBeInstanceOf(ReportValidationError);
+  });
+
+  test.each([
+    { label: 'IPv4 address with trailing punctuation', note: '192.0.2.10.' },
+    { label: 'IPv4 endpoint with port', note: '192.0.2.10:3000' },
+    { label: 'IPv4 endpoint with port and punctuation', note: '192.0.2.10:3000,' },
+    { label: 'bracketed IPv6 endpoint with port', note: '[fe80::1]:3000' },
+    { label: 'IPv6 address with trailing punctuation', note: 'fe80::1.' },
+    { label: 'POSIX path after equals', note: 'path=/var/lib/secret' },
+    { label: 'POSIX path after colon', note: 'path:/var/lib/secret' },
+    { label: 'Windows path after equals', note: 'path=C:\\Users\\Synthetic\\secret' },
+    { label: 'file URI absolute path', note: 'file:///Users/Synthetic/secret' },
+    { label: 'UNC path after equals', note: 'path=\\\\synthetic-server\\share' },
+    { label: 'UNC path after colon', note: 'path:\\\\synthetic-server\\share' },
+  ])('rejects redaction bypass in an allowed note: $label', async ({ note }) => {
+    const directory = await createDirectory();
+    const candidate = {
+      ...report,
+      checks: [{ ...report.checks[0], note }],
+    };
+
+    await expect(
+      writeCompatibilityReport(directory, candidate),
+    ).rejects.toThrowError(
+      'Compatibility report contains a forbidden sensitive value',
+    );
+    expect(await readdir(directory)).toEqual([]);
   });
 
   test('renders Markdown only from a validated report without sensitive data', async () => {

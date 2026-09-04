@@ -281,10 +281,11 @@ function assertNoSensitiveValues(candidate: unknown): void {
     /\b[0-9a-f]{2}(?:(?::[0-9a-f]{2}){5}|(?:-[0-9a-f]{2}){5})\b/i,
     /\b[0-9a-f]{12}\b/i,
     /[\u0000-\u001f\u007f-\u009f]/,
-    /(?:^|[\s"'(])\/(?![\/\s])/,
-    /(?:^|[\s"'(])\/\/[^/\s]+\//,
+    /(?:^|[=:\s"'(])\/(?![\/\s])/,
+    /(?:^|[=:\s"'(])\/\/[^/\s]+\//,
     /[A-Za-z]:[\\/]/,
-    /(?:^|[\s"'(])\\\\[^\\/\s]+[\\/]/,
+    /(?:^|[=:\s"'(])\\\\[^\\/\s]+[\\/]/,
+    /\bfile:\/\/\/[^\s]+/i,
   ];
 
   const pending = [candidate];
@@ -312,12 +313,24 @@ function assertNoSensitiveValues(candidate: unknown): void {
 }
 
 function containsIpAddress(value: string): boolean {
-  const candidates = value.match(/[0-9a-f:.%]+/gi) ?? [];
-  return candidates.some((candidate) => {
-    const zoneIndex = candidate.indexOf('%');
-    const address = zoneIndex === -1 ? candidate : candidate.slice(0, zoneIndex);
-    return isIP(address) !== 0;
-  });
+  const candidates = [
+    ...(value.match(/(?:\d{1,3}\.){3}\d{1,3}/g) ?? []),
+    ...(value.match(/\[[0-9a-f:.%]+\]|[0-9a-f:.%]+/gi) ?? []),
+  ];
+  return candidates.some(
+    (candidate) => isIP(normalizeIpAddressCandidate(candidate)) !== 0,
+  );
+}
+
+function normalizeIpAddressCandidate(candidate: string): string {
+  let address = candidate
+    .replace(/^\[|\]$/g, '')
+    .replace(/[),.;!?]+$/g, '');
+  if (/^(?:\d{1,3}\.){3}\d{1,3}:\d{1,5}$/.test(address)) {
+    address = address.slice(0, address.lastIndexOf(':'));
+  }
+  const zoneIndex = address.indexOf('%');
+  return zoneIndex === -1 ? address : address.slice(0, zoneIndex);
 }
 
 function escapeMarkdown(value: string): string {
