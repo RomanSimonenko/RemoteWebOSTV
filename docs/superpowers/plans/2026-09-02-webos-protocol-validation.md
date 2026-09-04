@@ -476,7 +476,7 @@ git commit -m "feat: add safe webos capability probe"
 - создать `apps/protocol-probe/src/args.ts`, `report.ts`, `main.ts`;
 - создать соответствующие тесты в `apps/protocol-probe/test/`.
 
-- [ ] **Шаг 1. Написать падающие тесты CLI**
+- [x] **Шаг 1. Написать падающие тесты CLI**
 
 ```text
 protocol-probe pair --host <host> --data-dir <directory>
@@ -487,11 +487,11 @@ protocol-probe report --data-dir <directory>
 
 Доказать обязательность аргументов; `[redacted-host]` вместо адреса; отсутствие MAC/ключа; exit code 2 для аргументов, 1 для протокольной ошибки, 0 для полного успеха; обязательный `--confirm-device-state-change` для power-off/wake; allowlist полей отчёта.
 
-- [ ] **Шаг 2. Реализовать CLI и корректную остановку**
+- [x] **Шаг 2. Реализовать CLI и корректную остановку**
 
 Host и data-dir принимать явно. Ключ загружать только из `EncryptedFileKeyStore`. Pairing ограничить 60 секундами. `SIGINT`/`SIGTERM` отменяют работу, закрывают сокеты и возвращают ненулевой код.
 
-- [ ] **Шаг 3. Реализовать атомарный отчёт**
+- [x] **Шаг 3. Реализовать атомарный отчёт**
 
 ```ts
 export interface CompatibilityReport {
@@ -511,7 +511,7 @@ export interface CompatibilityReport {
 
 Локальный JSON хранить в `.local/protocol-probe/report.json`, Markdown строить только из валидированного JSON. В Git копировать лишь вручную проверенную обезличенную версию.
 
-- [ ] **Шаг 4. Проверить и зафиксировать CLI**
+- [x] **Шаг 4. Проверить и зафиксировать CLI**
 
 ```bash
 pnpm --filter @remote-webos-tv/protocol-probe test
