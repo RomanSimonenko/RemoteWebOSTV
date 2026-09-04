@@ -156,7 +156,7 @@ describe('compatibility report', () => {
 
     expect(markdown).toContain('# Совместимость RemoteWebOSTV');
     expect(markdown).toContain('43UP76906LE');
-    expect(markdown).toContain('| pair | pass | 17 |');
+    expect(markdown).toContain('| pair | pass | — | 17 |');
     expect(await readFile(join(directory, 'report.md'), 'utf8')).toBe(markdown);
     expect(markdown).not.toMatch(/client.?key/i);
     expect(markdown).not.toMatch(/(?:[0-9a-f]{2}:){5}[0-9a-f]{2}/i);
@@ -164,6 +164,28 @@ describe('compatibility report', () => {
     expect(() =>
       renderCompatibilityMarkdown({ ...report, host: '192.0.2.10' }),
     ).toThrowError(ReportValidationError);
+  });
+
+  test('escapes HTML and remote-resource Markdown in every untrusted identity and note value', () => {
+    const markdown = renderCompatibilityMarkdown({
+      ...report,
+      tv: {
+        ...report.tv,
+        model: 'TV & <img src=x>',
+      },
+      checks: [
+        {
+          ...report.checks[0],
+          note: 'untrusted | ![pixel](//collector.invalid)',
+        },
+      ],
+    });
+
+    expect(markdown).toContain('TV &amp; &lt;img src=x&gt;');
+    expect(markdown).not.toContain('<img');
+    expect(markdown).not.toContain('![pixel]');
+    expect(markdown).not.toContain('](//collector.invalid)');
+    expect(markdown).toContain('untrusted \\| \\!\\[pixel\\]\\(//collector\\.invalid\\)');
   });
 
   test('merges latest checks and keeps prior evidence absent from a command result', () => {
@@ -202,5 +224,72 @@ describe('compatibility report', () => {
     ]);
     expect(merged.decision).toBe('pending');
     expect(JSON.stringify(merged)).not.toContain('macAddressCount');
+  });
+
+  test.each([
+    ['model', { model: 'different-model' }],
+    ['platform', { platformVersion: 'different-platform' }],
+    ['firmware', { firmwareVersion: 'different-firmware' }],
+  ])('rejects a %s identity change instead of relabeling prior evidence', (_label, identityChange) => {
+    const probeResult: ProbeResult = {
+      checks: [{ operation: 'pair', status: 'pass', durationMs: 8 }],
+      identity: { ...report.tv, ...identityChange },
+      capabilities: {
+        ssap: true,
+        pointer: true,
+        powerOff: true,
+        wakeOnLan: true,
+        apps: true,
+        inputs: true,
+        textInput: true,
+        notifications: true,
+      },
+      transport: 'wss:3001',
+      macAddressCount: 1,
+    };
+
+    expect(() =>
+      mergeProbeResult(report, probeResult, new Date('2026-09-03T11:00:00.000Z')),
+    ).toThrowError(/different TV identity.*fresh data directory/i);
+  });
+
+  test('accepts the same complete identity and marks standalone wake association unverified', () => {
+    const sameIdentity = mergeProbeResult(
+      report,
+      {
+        checks: [{ operation: 'identity', status: 'pass', durationMs: 3 }],
+        identity: { ...report.tv },
+        capabilities: {
+          ssap: true,
+          pointer: true,
+          powerOff: true,
+          wakeOnLan: true,
+          apps: true,
+          inputs: true,
+          textInput: true,
+          notifications: true,
+        },
+        transport: 'wss:3001',
+        macAddressCount: 1,
+      },
+      new Date('2026-09-03T11:00:00.000Z'),
+    );
+    expect(sameIdentity.tv).toEqual(report.tv);
+
+    const standaloneWake = mergeProbeResult(
+      report,
+      {
+        checks: [{ operation: 'wake', status: 'pass', durationMs: 4 }],
+        macAddressCount: 0,
+      },
+      new Date('2026-09-03T11:00:00.000Z'),
+    );
+    expect(standaloneWake.checks.find((check) => check.operation === 'wake')).toMatchObject({
+      status: 'pass',
+      tvAssociation: 'unverified',
+    });
+    expect(renderCompatibilityMarkdown(standaloneWake)).toContain(
+      '| wake | pass | unverified |',
+    );
   });
 });

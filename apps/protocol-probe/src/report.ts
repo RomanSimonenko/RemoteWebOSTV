@@ -54,6 +54,7 @@ const probeCheckSchema = z
     durationMs: z.number().finite().nonnegative(),
     code: webOsErrorCodeSchema.optional(),
     note: z.string().trim().min(1).optional(),
+    tvAssociation: z.enum(['verified', 'unverified']).optional(),
   })
   .strict();
 const tvSchema = z
@@ -167,6 +168,15 @@ export function mergeProbeResult(
   generatedAt: Date,
 ): CompatibilityReport {
   const existing = previous ? parseCompatibilityReport(previous) : undefined;
+  if (
+    existing &&
+    probe.identity &&
+    !identitiesEqual(existing.tv, probe.identity)
+  ) {
+    throw new ReportValidationError(
+      'Probe returned a different TV identity; use a fresh data directory',
+    );
+  }
   const identity = probe.identity ?? existing?.tv;
   if (!identity) {
     throw new ReportValidationError(
@@ -174,7 +184,13 @@ export function mergeProbeResult(
     );
   }
 
-  const checks = mergeChecks(existing?.checks ?? [], probe.checks);
+  const checks = mergeChecks(
+    existing?.checks ?? [],
+    probe.checks.map((check) => ({
+      ...check,
+      tvAssociation: probe.identity ? 'verified' : 'unverified',
+    })),
+  );
   return parseCompatibilityReport({
     schemaVersion: 1,
     generatedAt: generatedAt.toISOString(),
@@ -194,7 +210,7 @@ export function renderCompatibilityMarkdown(candidate: unknown): string {
     '# Совместимость RemoteWebOSTV',
     '',
     `- Сформирован: ${escapeMarkdown(report.generatedAt)}`,
-    `- Библиотека: ${report.library.name} ${report.library.version}`,
+    `- Библиотека: ${escapeMarkdown(report.library.name)} ${escapeMarkdown(report.library.version)}`,
     `- Модель: ${escapeMarkdown(report.tv.model)}`,
     ...(report.tv.platformVersion
       ? [`- webOS: ${escapeMarkdown(report.tv.platformVersion)}`]
@@ -202,15 +218,21 @@ export function renderCompatibilityMarkdown(candidate: unknown): string {
     ...(report.tv.firmwareVersion
       ? [`- Прошивка: ${escapeMarkdown(report.tv.firmwareVersion)}`]
       : []),
-    ...(report.transport ? [`- Транспорт: ${report.transport}`] : []),
-    `- Решение: ${report.decision}`,
+    ...(report.transport
+      ? [`- Транспорт: ${escapeMarkdown(report.transport)}`]
+      : []),
+    `- Решение: ${escapeMarkdown(report.decision)}`,
     '',
-    '| Проверка | Статус | мс | Код | Примечание |',
-    '| --- | --- | ---: | --- | --- |',
+    '| Проверка | Статус | Связь с ТВ | мс | Код | Примечание |',
+    '| --- | --- | --- | ---: | --- | --- |',
     ...report.checks.map(
       (check) =>
-        `| ${check.operation} | ${check.status} | ${check.durationMs} | ${
-          check.code ?? '—'
+        `| ${escapeMarkdown(check.operation)} | ${escapeMarkdown(check.status)} | ${
+          check.tvAssociation
+            ? escapeMarkdown(check.tvAssociation)
+            : '—'
+        } | ${escapeMarkdown(String(check.durationMs))} | ${
+          check.code ? escapeMarkdown(check.code) : '—'
         } | ${check.note ? escapeMarkdown(check.note) : '—'} |`,
     ),
     '',
@@ -229,11 +251,11 @@ export async function writeCompatibilityMarkdown(
 
 function mergeChecks(
   existing: CompatibilityReport['checks'],
-  incoming: readonly ProbeCheck[],
-): readonly (CompatibilityReport['checks'][number] | ProbeCheck)[] {
+  incoming: readonly CompatibilityReport['checks'][number][],
+): readonly CompatibilityReport['checks'][number][] {
   const merged = new Map<
     ProbeCheck['operation'],
-    CompatibilityReport['checks'][number] | ProbeCheck
+    CompatibilityReport['checks'][number]
   >(existing.map((check) => [check.operation, check]));
   for (const check of incoming) {
     merged.set(check.operation, check);
@@ -334,5 +356,21 @@ function normalizeIpAddressCandidate(candidate: string): string {
 }
 
 function escapeMarkdown(value: string): string {
-  return value.replaceAll('|', '\\|').replaceAll('\n', ' ');
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('\n', ' ')
+    .replace(/([\\`*_[\]{}()#+.!|])/g, '\\$1');
+}
+
+function identitiesEqual(
+  left: CompatibilityReport['tv'],
+  right: NonNullable<ProbeResult['identity']>,
+): boolean {
+  return (
+    left.model === right.model &&
+    left.platformVersion === right.platformVersion &&
+    left.firmwareVersion === right.firmwareVersion
+  );
 }
