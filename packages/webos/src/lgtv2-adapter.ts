@@ -85,6 +85,10 @@ interface Lgtv2AdapterDependencies {
   ) => Promise<void>;
 }
 
+type MutableCapabilities = {
+  -readonly [Capability in keyof TvCapabilities]: TvCapabilities[Capability];
+};
+
 const defaultDependencies: Lgtv2AdapterDependencies = {
   createClient: createLgtv2Client,
   wake: sendWakeOnLan,
@@ -96,7 +100,7 @@ export class Lgtv2Adapter implements WebOsAdapter {
   #client: Lgtv2Client | undefined;
   #pointerSocket: Lgtv2SpecializedSocket | undefined;
   #identity: TvIdentity | undefined;
-  #capabilities: TvCapabilities | undefined;
+  #capabilities: MutableCapabilities | undefined;
   #transport: TvTransport | undefined;
   #pairingPromise: Promise<PairingResult> | undefined;
   #cancelPairing: (() => void) | undefined;
@@ -148,12 +152,19 @@ export class Lgtv2Adapter implements WebOsAdapter {
   }
 
   async openPointerSocket(signal: AbortSignal): Promise<void> {
+    await this.#getPointerSocket(signal);
+  }
+
+  async #getPointerSocket(
+    signal: AbortSignal,
+  ): Promise<Lgtv2SpecializedSocket> {
     const client = this.#requireClient();
     this.#pointerSocket = await this.#execute(
       'pointer',
       signal,
       () => client.getSocket(uris.pointer),
     );
+    return this.#pointerSocket;
   }
 
   async listApps(signal: AbortSignal): Promise<readonly TvApp[]> {
@@ -177,13 +188,14 @@ export class Lgtv2Adapter implements WebOsAdapter {
   }
 
   async sendButton(button: TvButton, signal: AbortSignal): Promise<void> {
-    if (!this.#pointerSocket) {
-      await this.openPointerSocket(signal);
-    }
-    throwIfAborted(signal);
-    this.#pointerSocket?.send('button', {
-      name: toWebOsButton(button),
-    });
+    const pointerSocket = await this.#getPointerSocket(signal);
+    await this.#execute(
+      'button',
+      signal,
+      async () => {
+        pointerSocket.send('button', { name: toWebOsButton(button) });
+      },
+    );
   }
 
   async setVolume(volume: number, signal: AbortSignal): Promise<void> {
@@ -200,8 +212,10 @@ export class Lgtv2Adapter implements WebOsAdapter {
 
   async launchApp(id: string, signal: AbortSignal): Promise<void> {
     const client = this.#requireClient();
-    await this.#execute('launch-app', signal, () =>
-      client.request(uris.launchApp, { id }),
+    await this.#execute(
+      'launch-app',
+      signal,
+      () => client.request(uris.launchApp, { id }),
     );
   }
 
@@ -237,7 +251,11 @@ export class Lgtv2Adapter implements WebOsAdapter {
 
   async powerOff(signal: AbortSignal): Promise<void> {
     const client = this.#requireClient();
-    await this.#execute('power-off', signal, () => client.request(uris.powerOff));
+    await this.#execute(
+      'power-off',
+      signal,
+      () => client.request(uris.powerOff),
+    );
   }
 
   async wake(
@@ -320,7 +338,7 @@ export class Lgtv2Adapter implements WebOsAdapter {
           },
           (cleanupCause) => {
             settled = true;
-            reject(mapLgtv2Error(cleanupCause, 'disconnect', initialKey !== undefined));
+            reject(withCleanupFailure(error, cleanupCause));
           },
         );
       };
@@ -466,7 +484,16 @@ export class Lgtv2Adapter implements WebOsAdapter {
         ? pending
         : withAbort(pending, signal));
     } catch (cause) {
-      throw mapLgtv2Error(cause, operation, true);
+      const error = mapLgtv2Error(cause, operation, true);
+      const capability = capabilityForOperation(operation);
+      if (
+        capability &&
+        this.#capabilities &&
+        isUnsupportedCapabilityError(error)
+      ) {
+        this.#capabilities[capability] = false;
+      }
+      throw error;
     }
   }
 
@@ -529,6 +556,10 @@ export function mapLgtv2Error(
     code = 'POINTER_FORBIDDEN';
   } else if (status === 404) {
     code = 'UNSUPPORTED_CAPABILITY';
+  } else if (
+    (status === 401 || status === 403) && capabilityForOperation(operation)
+  ) {
+    code = 'UNSUPPORTED_CAPABILITY';
   } else if (/timeout/i.test(error.message)) {
     code = operation === 'pair' ? 'PAIRING_TIMEOUT' : 'CONNECTION_LOST';
   } else if (/not connected|connection closed|socket hang up/i.test(error.message)) {
@@ -538,7 +569,7 @@ export function mapLgtv2Error(
   return new WebOsError(code, `lgtv2 ${operation} operation failed`, { cause });
 }
 
-function createCapabilities(wakeOnLan: boolean): TvCapabilities {
+function createCapabilities(wakeOnLan: boolean): MutableCapabilities {
   return tvCapabilitiesSchema.parse({
     ssap: true,
     pointer: true,
@@ -598,13 +629,68 @@ function asErrorDetails(cause: unknown): {
     return { message: '' };
   }
   const candidate = cause as Record<string, unknown>;
+  const payload =
+    typeof candidate.payload === 'object' && candidate.payload !== null
+      ? (candidate.payload as Record<string, unknown>)
+      : undefined;
+  const errorText = candidate.errorText ?? payload?.errorText;
   return {
     ...(candidate.code === undefined ? {} : { code: candidate.code }),
-    ...(candidate.errorCode === undefined
+    ...(candidate.errorCode === undefined && payload?.errorCode === undefined
       ? {}
-      : { errorCode: candidate.errorCode }),
-    message: typeof candidate.message === 'string' ? candidate.message : '',
+      : { errorCode: candidate.errorCode ?? payload?.errorCode }),
+    message:
+      typeof candidate.message === 'string' && candidate.message.length > 0
+        ? candidate.message
+        : typeof errorText === 'string'
+          ? errorText
+          : '',
   };
+}
+
+function capabilityForOperation(
+  operation: Lgtv2Operation,
+): keyof TvCapabilities | undefined {
+  switch (operation) {
+    case 'pointer':
+    case 'button':
+      return 'pointer';
+    case 'apps':
+    case 'launch-app':
+      return 'apps';
+    case 'inputs':
+    case 'switch-input':
+      return 'inputs';
+    case 'text':
+      return 'textInput';
+    case 'notification':
+      return 'notifications';
+    case 'power-off':
+      return 'powerOff';
+    case 'wake':
+      return 'wakeOnLan';
+    default:
+      return undefined;
+  }
+}
+
+function isUnsupportedCapabilityError(error: WebOsError): boolean {
+  return (
+    error.code === 'POINTER_FORBIDDEN' ||
+    error.code === 'UNSUPPORTED_CAPABILITY'
+  );
+}
+
+function withCleanupFailure(
+  primary: WebOsError,
+  cleanupCause: unknown,
+): WebOsError {
+  const aggregate = new AggregateError(
+    [primary, cleanupCause],
+    'Pairing operation and client cleanup failed',
+    { cause: primary },
+  );
+  return new WebOsError(primary.code, primary.message, { cause: aggregate });
 }
 
 function isNetworkErrorCode(code: unknown): boolean {

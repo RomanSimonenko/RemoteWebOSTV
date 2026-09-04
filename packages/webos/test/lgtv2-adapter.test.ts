@@ -1,3 +1,5 @@
+import { EventEmitter } from 'node:events';
+
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import {
@@ -9,11 +11,17 @@ import {
 import type {
   Lgtv2Client,
   Lgtv2ClientOptions,
+  Lgtv2SpecializedSocket,
 } from '../src/lgtv2-types.js';
 import { WebOsError } from '../src/errors.js';
 import type { ClientKeyStore } from '../src/key-store.js';
 import { MockWebOsTv } from './support/mock-webos-tv.js';
-import { mockClientKey, mockMutationUris } from './support/fixtures.js';
+import {
+  mockClientKey,
+  mockMutationUris,
+  mockResponses,
+  mockUris,
+} from './support/fixtures.js';
 
 class MemoryKeyStore implements ClientKeyStore {
   current: string | undefined;
@@ -446,6 +454,131 @@ describe('Lgtv2Adapter', () => {
     ).toMatchObject({ code: 'PAIRING_TIMEOUT' });
   });
 
+  test.each([
+    ['pointer', 403, 'POINTER_FORBIDDEN'],
+    ['apps', 404, 'UNSUPPORTED_CAPABILITY'],
+  ] as const)(
+    'maps nested lgtv2 %s payload status %s without relying on message text',
+    (operation, status, expectedCode) => {
+      const error = Object.assign(new Error('request failed without status'), {
+        code: 'ESSAP',
+        payload: {
+          returnValue: false,
+          errorCode: status,
+          errorText: 'synthetic endpoint failure',
+        },
+      });
+
+      expect(mapLgtv2Error(error, operation, true)).toMatchObject({
+        code: expectedCode,
+      });
+    },
+  );
+
+  test('obtains the current pointer wrapper for a command after the prior socket closes', async () => {
+    const firstSend = vi.fn();
+    const secondSend = vi.fn();
+    const firstSocket: Lgtv2SpecializedSocket = {
+      send: firstSend,
+      close: vi.fn(),
+    };
+    const secondSocket: Lgtv2SpecializedSocket = {
+      send: secondSend,
+      close: vi.fn(),
+    };
+    const getSocket = vi
+      .fn<() => Promise<Lgtv2SpecializedSocket>>()
+      .mockResolvedValueOnce(firstSocket)
+      .mockResolvedValueOnce(secondSocket);
+    const { adapter } = createUnitAdapter({ getSocket });
+    await pair(adapter);
+
+    await adapter.openPointerSocket(new AbortController().signal);
+    firstSocket.close();
+    await adapter.sendButton('HOME', new AbortController().signal);
+
+    expect(getSocket).toHaveBeenCalledTimes(2);
+    expect(firstSend).not.toHaveBeenCalled();
+    expect(secondSend).toHaveBeenCalledWith('button', { name: 'HOME' });
+  });
+
+  test.each([
+    ['pointer', 'pointer'],
+    ['apps', 'apps'],
+  ] as const)(
+    'downgrades the shared %s capability after an observed forbidden endpoint',
+    async (operation, capability) => {
+      const endpointError = Object.assign(new Error('permission denied'), {
+        code: 'ESSAP',
+        payload: {
+          returnValue: false,
+          errorCode: 403,
+          errorText: 'synthetic endpoint failure',
+        },
+      });
+      const { adapter } = createUnitAdapter({
+        ...(operation === 'pointer'
+          ? { getSocket: vi.fn(async () => Promise.reject(endpointError)) }
+          : {
+              request: vi.fn(async (uri: string) => {
+                if (uri === mockUris.apps) {
+                  throw endpointError;
+                }
+                return responseForPairing(uri);
+              }),
+            }),
+      });
+      const pairing = await pair(adapter);
+
+      if (operation === 'pointer') {
+        await expect(
+          adapter.openPointerSocket(new AbortController().signal),
+        ).rejects.toMatchObject({ code: 'POINTER_FORBIDDEN' });
+      } else {
+        await expect(
+          adapter.listApps(new AbortController().signal),
+        ).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+      }
+
+      expect(pairing.capabilities[capability]).toBe(false);
+      await expect(
+        adapter.readSnapshot(new AbortController().signal),
+      ).resolves.toMatchObject({
+        capabilities: { [capability]: false },
+      });
+    },
+  );
+
+  test('preserves the primary pairing timeout when disconnect cleanup also fails', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const cleanupFailure = new Error('synthetic disconnect failure');
+    const hangingClient = createHangingClient(async () =>
+      Promise.reject(cleanupFailure),
+    );
+    const adapter = new Lgtv2Adapter(
+      {
+        host: 'tv.invalid',
+        keyStore: new MemoryKeyStore(),
+        requestTimeoutMs: 5_000,
+        handshakeTimeoutMs: 500,
+        now: () => new Date('2026-09-03T10:00:00.000Z'),
+      },
+      { createClient: () => hangingClient },
+    );
+    createdAdapters.push(adapter);
+
+    const pending = pair(adapter).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const captured = await pending;
+
+    expect(captured).toMatchObject({ code: 'PAIRING_TIMEOUT' });
+    expect((captured as Error).cause).toBeInstanceOf(AggregateError);
+    expect(((captured as Error).cause as AggregateError).errors).toEqual([
+      expect.objectContaining({ code: 'PAIRING_TIMEOUT' }),
+      cleanupFailure,
+    ]);
+  });
+
   test('disconnect is idempotent', async () => {
     const mock = await startMock({ kind: 'success' });
     const { adapter } = createHarness(mock, new MemoryKeyStore());
@@ -472,4 +605,69 @@ function createHangingClient(
     disconnect,
   };
   return client as Lgtv2Client;
+}
+
+function createUnitAdapter(
+  overrides: {
+    readonly getSocket?: () => Promise<Lgtv2SpecializedSocket>;
+    readonly request?: (uri: string) => Promise<unknown>;
+    readonly disconnect?: () => Promise<void>;
+  } = {},
+): { readonly adapter: Lgtv2Adapter; readonly client: Lgtv2Client } {
+  let client!: Lgtv2Client;
+  const adapter = new Lgtv2Adapter(
+    {
+      host: 'tv.invalid',
+      keyStore: new MemoryKeyStore(),
+      requestTimeoutMs: 2_000,
+      handshakeTimeoutMs: 500,
+      now: () => new Date('2026-09-03T10:00:00.000Z'),
+    },
+    {
+      createClient(options) {
+        const emitter = new EventEmitter();
+        client = Object.assign(emitter, {
+          connected: true,
+          urls: ['wss://tv.invalid:3001', 'ws://tv.invalid:3000'],
+          request: async (uri: string) => responseForPairing(uri),
+          getSocket: async () => ({ send: vi.fn(), close: vi.fn() }),
+          wake: async () => undefined,
+          disconnect: async () => undefined,
+          ...overrides,
+        }) as Lgtv2Client;
+        queueMicrotask(() => {
+          options.saveKey(mockClientKey, (error) => {
+            if (error) {
+              emitter.emit('error', error);
+              return;
+            }
+            emitter.emit('connecting', 'wss://tv.invalid:3001');
+            emitter.emit('connect');
+          });
+        });
+        return client;
+      },
+    },
+  );
+  createdAdapters.push(adapter);
+  return { adapter, client };
+}
+
+function responseForPairing(uri: string): unknown {
+  if (uri === mockUris.systemInfo) {
+    return mockResponses[mockUris.systemInfo];
+  }
+  if (uri === mockUris.softwareInfo) {
+    return mockResponses[mockUris.softwareInfo];
+  }
+  if (uri === mockUris.network) {
+    return mockResponses[mockUris.network];
+  }
+  if (uri === mockUris.volume) {
+    return mockResponses[mockUris.volume];
+  }
+  if (uri === mockUris.apps) {
+    return mockResponses[mockUris.apps];
+  }
+  throw new Error(`Unexpected synthetic SSAP URI: ${uri}`);
 }

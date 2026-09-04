@@ -27,6 +27,8 @@ export const tvIdentitySchema = z.object({
 
 export type TvIdentity = Readonly<z.infer<typeof tvIdentitySchema>>;
 
+// Availability starts from the adapter's supported profile and is downgraded
+// when the active TV rejects a capability-owned endpoint as unsupported.
 export const tvCapabilitiesSchema = z.object({
   ssap: z.boolean(),
   pointer: z.boolean(),
