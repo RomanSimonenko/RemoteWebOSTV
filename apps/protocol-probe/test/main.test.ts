@@ -33,6 +33,20 @@ const success: ProbeResult = {
   macAddressCount: 1,
 };
 
+function createDeferred<Value>(): {
+  readonly promise: Promise<Value>;
+  readonly resolve: (value: Value | PromiseLike<Value>) => void;
+  readonly reject: (reason?: unknown) => void;
+} {
+  let resolve!: (value: Value | PromiseLike<Value>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<Value>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 function createDependencies(result: ProbeResult = success): {
   readonly dependencies: MainDependencies;
   readonly stdout: string[];
@@ -45,6 +59,7 @@ function createDependencies(result: ProbeResult = success): {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const signalListeners = new Map<string, () => void>();
+  const registeredSignalListeners = new Map<string, () => void>();
   const disconnect = vi.fn(async () => undefined);
   const adapter = { disconnect } as unknown as ProbeAdapter;
   const keyStore = {} as ClientKeyStore;
@@ -62,11 +77,17 @@ function createDependencies(result: ProbeResult = success): {
     stderr: { write: (text) => stderr.push(text) },
     signals: {
       once(signal, listener) {
-        signalListeners.set(signal, listener);
+        registeredSignalListeners.set(signal, listener);
+        signalListeners.set(signal, () => {
+          signalListeners.delete(signal);
+          registeredSignalListeners.delete(signal);
+          listener();
+        });
       },
       off(signal, listener) {
-        if (signalListeners.get(signal) === listener) {
+        if (registeredSignalListeners.get(signal) === listener) {
           signalListeners.delete(signal);
+          registeredSignalListeners.delete(signal);
         }
       },
     },
@@ -259,33 +280,50 @@ describe('runProtocolProbeCli', () => {
     expect(harness.stdout.join('')).not.toContain('02:00:00:00:00:01');
   });
 
-  test('aborts on SIGINT, returns exit 1 and removes signal handlers', async () => {
-    const harness = createDependencies();
-    const runProbe = vi.fn(async (options: RunProbeOptions): Promise<ProbeResult> => {
-      harness.signalListeners.get('SIGINT')?.();
-      expect(options.signal.aborted).toBe(true);
-      return {
-        checks: [
-          {
-            operation: 'pair',
-            status: 'fail',
-            durationMs: 1,
-            code: 'CONNECTION_LOST',
-          },
-        ],
-        macAddressCount: 0,
-      };
-    });
+  test.each(['SIGINT', 'SIGTERM'] as const)(
+    'keeps the remaining handler installed while %s cleanup is pending',
+    async (signal) => {
+      const harness = createDependencies();
+      const cleanupStarted = createDeferred<void>();
+      const allowCleanupToFinish = createDeferred<void>();
+      const disconnect = vi.fn(async () => {
+        cleanupStarted.resolve();
+        await allowCleanupToFinish.promise;
+      });
+      const runProbe = vi.fn(
+        async (options: RunProbeOptions): Promise<ProbeResult> => {
+          harness.signalListeners.get(signal)?.();
+          expect(options.signal.aborted).toBe(true);
+          return {
+            checks: [
+              {
+                operation: 'pair',
+                status: 'fail',
+                durationMs: 1,
+                code: 'CONNECTION_LOST',
+              },
+            ],
+            macAddressCount: 0,
+          };
+        },
+      );
 
-    const exitCode = await runProtocolProbeCli(pairArgv, {
-      ...harness.dependencies,
-      runProbe,
-    });
+      const cli = runProtocolProbeCli(pairArgv, {
+        ...harness.dependencies,
+        createAdapter: () => ({ disconnect }) as unknown as ProbeAdapter,
+        runProbe,
+      });
 
-    expect(exitCode).toBe(1);
-    expect(harness.signalListeners.size).toBe(0);
-    expect(harness.disconnect).toHaveBeenCalledOnce();
-  });
+      await cleanupStarted.promise;
+      const remainingSignal = signal === 'SIGINT' ? 'SIGTERM' : 'SIGINT';
+      expect(harness.signalListeners.has(signal)).toBe(false);
+      expect(harness.signalListeners.has(remainingSignal)).toBe(true);
+
+      allowCleanupToFinish.resolve();
+      await expect(cli).resolves.toBe(1);
+      expect(harness.signalListeners.size).toBe(0);
+    },
+  );
 
   test('generates Markdown from the stored JSON report', async () => {
     const harness = createDependencies();

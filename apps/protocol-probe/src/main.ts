@@ -159,14 +159,14 @@ export async function runProtocolProbeCli(
     writeSafeFailure(cause, dependencies.stderr);
     exitCode = 1;
   } finally {
-    dependencies.signals.off('SIGINT', interrupt);
-    dependencies.signals.off('SIGTERM', interrupt);
     try {
       await adapter.disconnect();
     } catch {
       dependencies.stderr.write('Не удалось корректно закрыть соединение с ТВ.\n');
       exitCode = 1;
     }
+    dependencies.signals.off('SIGINT', interrupt);
+    dependencies.signals.off('SIGTERM', interrupt);
   }
   return exitCode;
 }
