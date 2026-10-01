@@ -1,0 +1,17 @@
+{
+  "name": "@remote-webos-tv/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prestart": "pnpm --filter '@remote-webos-tv/api^...' build",
+    "start": "node dist/src/index.js"
+  },
+  "dependencies": {
+    "@remote-webos-tv/contracts": "workspace:*",
+    "fastify": "5.12.5"
+  }
+}
