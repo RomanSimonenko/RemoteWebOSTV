@@ -57,7 +57,9 @@ function migrationVersion(sqlite: Database.Database, latestVersion: number): num
   }
   if (version >= 1) {
     const savedOwnerSql = sqlite.prepare('SELECT sql FROM sqlite_schema WHERE type = ? AND name = ?').pluck().get('table', 'owner');
-    if (savedOwnerSql !== ownerTableSql) throw new Error('Owner table schema does not match migration history');
+    // SQLite appends ADD COLUMN definitions before the closing parenthesis, preserving the v1 constraint prefix.
+    const extendsOwnerTable = version > 1 && typeof savedOwnerSql === 'string' && savedOwnerSql.startsWith(ownerTableSql.slice(0, -1));
+    if (savedOwnerSql !== ownerTableSql && !extendsOwnerTable) throw new Error('Owner table schema does not match migration history');
     try {
       sqlite.prepare('SELECT id, username, password_hash FROM owner LIMIT 0');
       sqlite.prepare('SELECT id, token_hash, expires_at FROM setup_token LIMIT 0');
@@ -117,6 +119,7 @@ export async function openDatabase({ dataDir, now = Date.now, migrations = schem
         migration.up(sqlite);
         sqlite.prepare('INSERT INTO migration_version (version, applied_at) VALUES (?, ?)').run(migration.version, now());
       }
+      if (currentVersion < migrations.length) migrationVersion(sqlite, migrations.length);
     }).immediate();
 
     return { sqlite, close: () => sqlite.close() };

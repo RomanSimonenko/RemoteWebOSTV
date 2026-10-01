@@ -152,6 +152,55 @@ test('rejects a version-one owner table without the single-owner constraint', as
   await expect(openDatabase({ dataDir })).rejects.toThrow(/owner.*schema|schema.*owner/i);
 });
 
+test('reopens a later owner-column migration while preserving the single-owner constraint', async () => {
+  const dataDir = await dataDirectory();
+  const first = await openDatabase({ dataDir });
+  first.sqlite.prepare('INSERT INTO owner (id, username, password_hash) VALUES (?, ?, ?)').run(1, 'owner', 'synthetic-hash');
+  first.close();
+  const migrations = [...schemaMigrations, {
+    version: 2,
+    up(sqlite: Database.Database) {
+      sqlite.exec('ALTER TABLE owner ADD COLUMN display_name TEXT');
+    },
+  }];
+
+  const upgraded = await openDatabase({ dataDir, migrations });
+  upgraded.close();
+
+  const reopened = await openDatabase({ dataDir, migrations });
+  try {
+    expect(reopened.sqlite.prepare('SELECT id, username, display_name FROM owner').all()).toEqual([
+      { id: 1, username: 'owner', display_name: null },
+    ]);
+    expect(() => reopened.sqlite.prepare('INSERT INTO owner (id, username, password_hash) VALUES (?, ?, ?)').run(2, 'second', 'synthetic-hash')).toThrow();
+  } finally {
+    reopened.close();
+  }
+});
+
+test('rejects a later owner migration that removes the single-owner constraint', async () => {
+  const dataDir = await dataDirectory();
+  const original = await openDatabase({ dataDir });
+  original.close();
+  const migrations = [...schemaMigrations, {
+    version: 2,
+    up(sqlite: Database.Database) {
+      sqlite.exec(`
+        DROP TABLE owner;
+        CREATE TABLE owner (id INTEGER PRIMARY KEY, username TEXT NOT NULL, password_hash TEXT NOT NULL);
+      `);
+    },
+  }];
+  await expect(openDatabase({ dataDir, migrations })).rejects.toThrow(/owner table schema/i);
+  const reopened = await openDatabase({ dataDir });
+  try {
+    expect(reopened.sqlite.prepare('SELECT version FROM migration_version').all()).toEqual([{ version: 1 }]);
+    expect(() => reopened.sqlite.prepare('INSERT INTO owner (id, username, password_hash) VALUES (?, ?, ?)').run(2, 'second', 'synthetic-hash')).toThrow();
+  } finally {
+    reopened.close();
+  }
+});
+
 test('keeps an active rollback journal private', async () => {
   const dataDir = await dataDirectory();
   const database = await openDatabase({ dataDir });
