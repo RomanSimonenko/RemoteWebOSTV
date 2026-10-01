@@ -5,6 +5,12 @@ export interface Migration {
   readonly up: (sqlite: Database.Database) => void;
 }
 
+export const ownerTableSql = `CREATE TABLE owner (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          username TEXT NOT NULL,
+          password_hash TEXT NOT NULL
+        )`;
+
 export const schemaMigrations: readonly Migration[] = [
   {
     version: 1,
@@ -14,11 +20,7 @@ export const schemaMigrations: readonly Migration[] = [
           version INTEGER PRIMARY KEY CHECK (version > 0),
           applied_at INTEGER NOT NULL
         );
-        CREATE TABLE owner (
-          id INTEGER PRIMARY KEY CHECK (id = 1),
-          username TEXT NOT NULL,
-          password_hash TEXT NOT NULL
-        );
+        ${ownerTableSql};
         CREATE TABLE setup_token (
           id INTEGER PRIMARY KEY CHECK (id = 1),
           token_hash TEXT NOT NULL,

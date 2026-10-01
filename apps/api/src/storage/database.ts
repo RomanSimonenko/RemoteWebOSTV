@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import Database from 'better-sqlite3';
 
-import { schemaMigrations, type Migration } from './migrations.js';
+import { ownerTableSql, schemaMigrations, type Migration } from './migrations.js';
 
 export interface AppDatabase {
   readonly sqlite: Database.Database;
@@ -56,6 +56,8 @@ function migrationVersion(sqlite: Database.Database, latestVersion: number): num
     throw new Error('Incomplete database schema');
   }
   if (version >= 1) {
+    const savedOwnerSql = sqlite.prepare('SELECT sql FROM sqlite_schema WHERE type = ? AND name = ?').pluck().get('table', 'owner');
+    if (savedOwnerSql !== ownerTableSql) throw new Error('Owner table schema does not match migration history');
     try {
       sqlite.prepare('SELECT id, username, password_hash FROM owner LIMIT 0');
       sqlite.prepare('SELECT id, token_hash, expires_at FROM setup_token LIMIT 0');
@@ -97,6 +99,7 @@ export async function openDatabase({ dataDir, now = Date.now, migrations = schem
   }
 
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
+  if (!(await lstat(dataDir)).isDirectory()) throw new Error('Data directory path must be a directory');
   await chmod(dataDir, 0o700);
   const path = join(dataDir, 'app.sqlite');
   await secureDatabaseFile(path);

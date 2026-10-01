@@ -1,5 +1,5 @@
 import { statSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -136,6 +136,22 @@ test('rejects a schema whose recorded version hides missing columns', async () =
   await expect(openDatabase({ dataDir })).rejects.toThrow(/schema|migration/i);
 });
 
+test('rejects a version-one owner table without the single-owner constraint', async () => {
+  const dataDir = await dataDirectory();
+  const database = await openDatabase({ dataDir });
+  database.sqlite.exec(`
+    DROP TABLE owner;
+    CREATE TABLE owner (
+      id INTEGER PRIMARY KEY,
+      username TEXT NOT NULL,
+      password_hash TEXT NOT NULL
+    );
+  `);
+  database.close();
+
+  await expect(openDatabase({ dataDir })).rejects.toThrow(/owner.*schema|schema.*owner/i);
+});
+
 test('keeps an active rollback journal private', async () => {
   const dataDir = await dataDirectory();
   const database = await openDatabase({ dataDir });
@@ -156,6 +172,18 @@ test('rejects a non-directory data path without creating a database', async () =
   await writeFile(dataDir, 'occupied');
   await expect(openDatabase({ dataDir })).rejects.toThrow();
   expect(await readFile(dataDir, 'utf8')).toBe('occupied');
+});
+
+test('rejects a data directory symlink without changing its target', async () => {
+  const dataDir = await dataDirectory();
+  const outside = join(dirname(dataDir), 'outside');
+  await mkdir(outside);
+  await chmod(outside, 0o755);
+  await symlink(outside, dataDir);
+
+  await expect(openDatabase({ dataDir })).rejects.toThrow(/data directory/i);
+  expect((await stat(outside)).mode & 0o777).toBe(0o755);
+  expect(await readdir(outside)).toEqual([]);
 });
 
 test('refuses an upgrade when backup cannot be created and preserves existing data', async () => {
