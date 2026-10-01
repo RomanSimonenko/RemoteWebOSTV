@@ -12,6 +12,10 @@
   },
   "dependencies": {
     "@remote-webos-tv/contracts": "workspace:*",
+    "better-sqlite3": "12.11.1",
     "fastify": "5.12.5"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "9.6.0"
   }
 }
