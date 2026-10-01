@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 
 import { apiErrorSchema, setupStatusSchema } from '@remote-webos-tv/contracts';
 import { buildApp } from '../src/app.js';
@@ -83,6 +83,40 @@ describe('API boundary', () => {
       expect(missing.statusCode).toBe(404);
       expect(missing.headers['cache-control']).toBe('no-store');
       expect(apiErrorSchema.safeParse(missing.json()).success).toBe(true);
+    } finally {
+      await app.close();
+    }
+  });
+
+  test('keeps a safe error response when the diagnostic sink fails', async () => {
+    const fallback = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const app = buildApp({
+      config,
+      getSetupState: async () => { throw new Error('private-provider-error'); },
+      reportError: () => { throw new Error('private-report-error'); },
+    });
+    try {
+      const response = await app.inject('/api/setup/status');
+      expect(response.statusCode).toBe(500);
+      expect(response.headers['cache-control']).toBe('no-store');
+      expect(apiErrorSchema.parse(response.json())).toEqual({
+        code: 'INTERNAL_ERROR', message: 'Internal server error', requestId: response.headers['x-request-id'],
+      });
+      expect(response.body).not.toMatch(/private-provider-error|private-report-error/);
+      expect(fallback).toHaveBeenCalledExactlyOnceWith('API diagnostic sink failed');
+    } finally {
+      await app.close();
+      fallback.mockRestore();
+    }
+  });
+
+  test('sets no-store on the API root 404 with a query string', async () => {
+    const app = buildApp({ config, getSetupState: async () => 'unclaimed' });
+    try {
+      const response = await app.inject('/api?x=1');
+      expect(response.statusCode).toBe(404);
+      expect(response.headers['cache-control']).toBe('no-store');
+      expect(apiErrorSchema.parse(response.json()).code).toBe('NOT_FOUND');
     } finally {
       await app.close();
     }

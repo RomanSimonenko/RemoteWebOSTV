@@ -44,7 +44,8 @@ export function buildApp({ config, getSetupState, reportError = (report) => { co
   });
 
   app.addHook('onSend', async (request, reply, payload) => {
-    if (request.url === '/api' || request.url.startsWith('/api/')) {
+    const pathname = request.url.split('?', 1)[0];
+    if (pathname === '/api' || pathname?.startsWith('/api/')) {
       reply.header('cache-control', 'no-store');
     }
     return payload;
@@ -58,7 +59,13 @@ export function buildApp({ config, getSetupState, reportError = (report) => { co
     const status = storageUnavailable ? 503 : tooLarge ? 413 : reportedStatus >= 400 && reportedStatus < 500 ? reportedStatus : 500;
     const code = storageUnavailable ? 'STORAGE_UNAVAILABLE' : tooLarge ? 'PAYLOAD_TOO_LARGE' : status < 500 ? 'BAD_REQUEST' : 'INTERNAL_ERROR';
     const message = storageUnavailable ? 'Storage unavailable' : tooLarge ? 'Payload too large' : status < 500 ? 'Bad request' : 'Internal server error';
-    if (status >= 500) reportError({ requestId: request.id, status, causeTypes: safeCauseTypes(error) });
+    if (status >= 500) {
+      try {
+        reportError({ requestId: request.id, status, causeTypes: safeCauseTypes(error) });
+      } catch {
+        console.error('API diagnostic sink failed');
+      }
+    }
     reply.code(status).send({ code, message, requestId: request.id });
   });
 
