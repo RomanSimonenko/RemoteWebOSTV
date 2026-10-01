@@ -1,0 +1,21 @@
+{
+  "name": "@remote-webos-tv/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prestart": "pnpm --filter '@remote-webos-tv/api^...' build",
+    "start": "node dist/src/index.js"
+  },
+  "dependencies": {
+    "@remote-webos-tv/contracts": "workspace:*",
+    "better-sqlite3": "12.11.1",
+    "fastify": "5.12.5"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "9.6.0"
+  }
+}

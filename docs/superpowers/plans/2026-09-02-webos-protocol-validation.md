@@ -35,7 +35,7 @@
 - создать конфигурацию `packages/contracts` и `packages/webos`;
 - создать конфигурацию `apps/protocol-probe`.
 
-- [ ] **Шаг 1. Зафиксировать исходное состояние**
+- [x] **Шаг 1. Зафиксировать исходное состояние**
 
 ```bash
 git status --short
@@ -46,7 +46,7 @@ pnpm --version
 
 Ожидается: Node не ниже 22.12, pnpm доступен. При отсутствии обязательного инструмента остановиться и сообщить точную причину.
 
-- [ ] **Шаг 2. Создать корневую конфигурацию**
+- [x] **Шаг 2. Создать корневую конфигурацию**
 
 `package.json`:
 
@@ -54,7 +54,7 @@ pnpm --version
 {
   "name": "remote-webos-tv",
   "private": true,
-  "packageManager": "pnpm@10.15.0",
+  "packageManager": "pnpm@11.15.1",
   "engines": { "node": ">=22.12.0" },
   "scripts": {
     "build": "pnpm -r build",
@@ -75,6 +75,10 @@ pnpm --version
 packages:
   - apps/*
   - packages/*
+overrides:
+  postcss: 8.5.26
+allowBuilds:
+  esbuild: true
 ```
 
 `tsconfig.base.json`:
@@ -105,7 +109,7 @@ coverage/
 *.log
 ```
 
-- [ ] **Шаг 3. Создать package-манифесты**
+- [x] **Шаг 3. Создать package-манифесты**
 
 Все пакеты — ESM и имеют команды `build`, `test`, `typecheck`. В `packages/webos/package.json` зафиксировать:
 
@@ -121,7 +125,7 @@ coverage/
 
 Приложение probe зависит только от двух workspace-пакетов и Zod.
 
-- [ ] **Шаг 4. Установить и проверить зависимости**
+- [x] **Шаг 4. Установить и проверить зависимости**
 
 ```bash
 pnpm install --frozen-lockfile=false
@@ -131,7 +135,7 @@ pnpm exec tsc --version
 
 Ожидается: `lgtv2@2.0.0` принадлежит только `@remote-webos-tv/webos`, TypeScript имеет версию 5.9.2.
 
-- [ ] **Шаг 5. Проверить и зафиксировать основу**
+- [x] **Шаг 5. Проверить и зафиксировать основу**
 
 ```bash
 pnpm typecheck
@@ -155,7 +159,7 @@ git commit -m "chore: bootstrap webos protocol validation workspace"
 - создать `packages/webos/src/errors.ts`, `adapter.ts`, `index.ts`;
 - создать `packages/webos/test/errors.test.ts`.
 
-- [ ] **Шаг 1. Написать падающие тесты контрактов**
+- [x] **Шаг 1. Написать падающие тесты контрактов**
 
 Проверить корректные `TvIdentity`, `TvCapabilities`, `TvSnapshot`, а также отклонение пустой модели, неизвестного транспорта и состояния, громкости вне 0–100. Безопасная сериализация не содержит IP, MAC или ключа.
 
@@ -189,7 +193,7 @@ pnpm --filter @remote-webos-tv/contracts test
 
 Ожидается: FAIL, схемы ещё не существуют.
 
-- [ ] **Шаг 2. Реализовать схемы и границу adapter**
+- [x] **Шаг 2. Реализовать схемы и границу adapter**
 
 ```ts
 export interface PairingRequest {
@@ -224,12 +228,13 @@ export type WebOsErrorCode =
   | 'NETWORK_UNREACHABLE' | 'PAIRING_REJECTED' | 'PAIRING_TIMEOUT'
   | 'AUTHORIZATION_FAILED' | 'POINTER_FORBIDDEN'
   | 'UNSUPPORTED_CAPABILITY' | 'INVALID_TV_RESPONSE'
-  | 'CONNECTION_LOST' | 'UNKNOWN';
+  | 'CONNECTION_LOST' | 'KEY_STORE_CORRUPT'
+  | 'KEY_STORE_WRITE_FAILED' | 'UNKNOWN';
 ```
 
 Внутри ошибка сохраняет `cause`, наружу отдаёт только разрешённый объект без адресов, ключей, payload и stack trace.
 
-- [ ] **Шаг 3. Проверить и зафиксировать контракты**
+- [x] **Шаг 3. Проверить и зафиксировать контракты**
 
 ```bash
 pnpm --filter @remote-webos-tv/contracts test
@@ -252,7 +257,7 @@ git commit -m "feat: define replaceable webos adapter contracts"
 - изменить `packages/webos/src/index.ts`;
 - создать `packages/webos/test/key-store.test.ts`.
 
-- [ ] **Шаг 1. Написать падающие тесты**
+- [x] **Шаг 1. Написать падающие тесты**
 
 На временном каталоге и синтетическом ключе проверить:
 
@@ -270,7 +275,7 @@ pnpm --filter @remote-webos-tv/webos test -- key-store.test.ts
 
 Ожидается: FAIL.
 
-- [ ] **Шаг 2. Реализовать хранилище**
+- [x] **Шаг 2. Реализовать хранилище**
 
 Использовать AES-256-GCM, случайный IV длиной 12 байт и версионированный формат:
 
@@ -292,7 +297,7 @@ export interface ClientKeyStore {
 
 Пустой ключ отклонять. Запись выполнять во временный соседний файл, затем `fsync` и атомарное переименование. Содержимое не журналировать.
 
-- [ ] **Шаг 3. Проверить и зафиксировать**
+- [x] **Шаг 3. Проверить и зафиксировать**
 
 ```bash
 pnpm --filter @remote-webos-tv/webos test -- key-store.test.ts
@@ -315,7 +320,7 @@ git commit -m "feat: persist tv client key with authenticated encryption"
 - создать `packages/webos/test/support/fixtures.ts`;
 - создать `packages/webos/test/mock-webos-tv.test.ts`.
 
-- [ ] **Шаг 1. Написать падающие тесты жизненного цикла**
+- [x] **Шаг 1. Написать падающие тесты жизненного цикла**
 
 Mock должен слушать loopback на порту ОС; хранить разобранные запросы без секретных кадров; поддерживать успешную, отклонённую и отложенную регистрацию; отвечать на запросы системы, ПО, громкости, приложений, входов и сети; выдавать pointer URL или `401`; разрывать соединение до/после выбранного ответа; закрывать сокеты при teardown.
 
@@ -325,7 +330,7 @@ pnpm --filter @remote-webos-tv/webos test -- mock-webos-tv.test.ts
 
 Ожидается: FAIL.
 
-- [ ] **Шаг 2. Реализовать минимальный mock**
+- [x] **Шаг 2. Реализовать минимальный mock**
 
 ```ts
 export type MockScenario =
@@ -339,7 +344,7 @@ export type MockScenario =
 
 При прямом импорте `ws` добавить точную dev-зависимость той же major-версии, что у `lgtv2`. Проверять JSON-конверт, сохранять ID и отклонять неожиданные URI.
 
-- [ ] **Шаг 3. Трижды проверить детерминизм и зафиксировать**
+- [x] **Шаг 3. Трижды проверить детерминизм и зафиксировать**
 
 ```bash
 pnpm --filter @remote-webos-tv/webos test -- mock-webos-tv.test.ts
@@ -362,7 +367,7 @@ git commit -m "test: add deterministic webos tv protocol double"
 - изменить `packages/webos/src/index.ts`;
 - создать `packages/webos/test/response-parsers.test.ts` и `lgtv2-adapter.test.ts`.
 
-- [ ] **Шаг 1. Проверить фактический контракт зависимости**
+- [x] **Шаг 1. Проверить фактический контракт зависимости**
 
 ```bash
 node -p "require('./node_modules/lgtv2/package.json').version"
@@ -372,7 +377,7 @@ sed -n '1,240p' node_modules/lgtv2/README.md
 
 Ожидается: ровно `2.0.0`; типы содержат `host`, `clientKey`, `saveKey`, `reconnect`, `request`, `getSocket`, `disconnect`, MAC learning, транспорт и Wake-on-LAN. Если контракт другой, сначала исправить план.
 
-- [ ] **Шаг 2. Написать падающие тесты parser**
+- [x] **Шаг 2. Написать падающие тесты parser**
 
 На фактических обезличенных формах ответов проверить identity, volume/mute, списки приложений/входов, корректные и неверные MAC, транспорт и `INVALID_TV_RESPONSE` без исходного payload.
 
@@ -382,15 +387,15 @@ pnpm --filter @remote-webos-tv/webos test -- response-parsers.test.ts
 
 Ожидается: FAIL.
 
-- [ ] **Шаг 3. Реализовать parser через Zod**
+- [x] **Шаг 3. Реализовать parser через Zod**
 
 Неизвестные поля ТВ разрешать, но каждое выходное значение adapter валидировать строго и переводить в типы `@remote-webos-tv/contracts`.
 
-- [ ] **Шаг 4. Написать падающие тесты adapter**
+- [x] **Шаг 4. Написать падающие тесты adapter**
 
 Проверить WSS-first/WS-fallback; ключ только после `registered`; передачу ключа в `ClientKeyStore.save`; reconnect без второго подтверждения; cleanup при timeout/cancel; точное преобразование ошибок; snapshot/apps/inputs; отсутствие host/MAC/key/raw frame/path в публичных ошибках; идемпотентный `disconnect()`.
 
-- [ ] **Шаг 5. Реализовать adapter**
+- [x] **Шаг 5. Реализовать adapter**
 
 ```ts
 export interface Lgtv2AdapterOptions {
@@ -404,7 +409,7 @@ export interface Lgtv2AdapterOptions {
 
 Создавать `lgtv2` только здесь. Настроить `wss:3001` → `ws:3000`, `verifyCert: 'lg'`, `reconnect: 0`, явные timeouts и собственное хранилище. Не использовать стандартные key/MAC-файлы библиотеки.
 
-- [ ] **Шаг 6. Проверить и зафиксировать**
+- [x] **Шаг 6. Проверить и зафиксировать**
 
 ```bash
 pnpm --filter @remote-webos-tv/webos test -- response-parsers.test.ts lgtv2-adapter.test.ts
@@ -428,11 +433,11 @@ git commit -m "feat: wrap lgtv2 behind webos adapter"
 - изменить `packages/webos/src/index.ts`;
 - создать `packages/webos/test/buttons.test.ts`, `probe.test.ts`.
 
-- [ ] **Шаг 1. Написать падающие тесты кнопок**
+- [x] **Шаг 1. Написать падающие тесты кнопок**
 
 Потребовать исчерпывающее преобразование навигационных, системных, цифровых, цветных, media-, volume- и channel-кнопок. Произвольные строки отклоняются. Остальные действия оформляются отдельными типизированными методами.
 
-- [ ] **Шаг 2. Определить операции probe**
+- [x] **Шаг 2. Определить операции probe**
 
 ```ts
 export type SafeProbeOperation =
@@ -446,11 +451,11 @@ export type MutatingProbeOperation =
 
 Каждая проверка имеет статус `pass`, `fail`, `unsupported` или `not-run`, длительность, безопасный код и примечание.
 
-- [ ] **Шаг 3. Написать падающие тесты оркестрации**
+- [x] **Шаг 3. Написать падающие тесты оркестрации**
 
 Проверить только safe-операции по умолчанию; явный запуск mutating; сохранение ошибки необязательной возможности; `not-run` после провала pairing; cleanup при отмене; запрет online-операций после power-off; wake только с валидным MAC.
 
-- [ ] **Шаг 4. Реализовать, проверить и зафиксировать**
+- [x] **Шаг 4. Реализовать, проверить и зафиксировать**
 
 ```bash
 pnpm --filter @remote-webos-tv/webos test -- buttons.test.ts probe.test.ts
@@ -471,7 +476,7 @@ git commit -m "feat: add safe webos capability probe"
 - создать `apps/protocol-probe/src/args.ts`, `report.ts`, `main.ts`;
 - создать соответствующие тесты в `apps/protocol-probe/test/`.
 
-- [ ] **Шаг 1. Написать падающие тесты CLI**
+- [x] **Шаг 1. Написать падающие тесты CLI**
 
 ```text
 protocol-probe pair --host <host> --data-dir <directory>
@@ -482,11 +487,11 @@ protocol-probe report --data-dir <directory>
 
 Доказать обязательность аргументов; `[redacted-host]` вместо адреса; отсутствие MAC/ключа; exit code 2 для аргументов, 1 для протокольной ошибки, 0 для полного успеха; обязательный `--confirm-device-state-change` для power-off/wake; allowlist полей отчёта.
 
-- [ ] **Шаг 2. Реализовать CLI и корректную остановку**
+- [x] **Шаг 2. Реализовать CLI и корректную остановку**
 
 Host и data-dir принимать явно. Ключ загружать только из `EncryptedFileKeyStore`. Pairing ограничить 60 секундами. `SIGINT`/`SIGTERM` отменяют работу, закрывают сокеты и возвращают ненулевой код.
 
-- [ ] **Шаг 3. Реализовать атомарный отчёт**
+- [x] **Шаг 3. Реализовать атомарный отчёт**
 
 ```ts
 export interface CompatibilityReport {
@@ -506,7 +511,7 @@ export interface CompatibilityReport {
 
 Локальный JSON хранить в `.local/protocol-probe/report.json`, Markdown строить только из валидированного JSON. В Git копировать лишь вручную проверенную обезличенную версию.
 
-- [ ] **Шаг 4. Проверить и зафиксировать CLI**
+- [x] **Шаг 4. Проверить и зафиксировать CLI**
 
 ```bash
 pnpm --filter @remote-webos-tv/protocol-probe test
@@ -532,7 +537,7 @@ git commit -m "feat: add redacted webos compatibility probe cli"
 
 Проверить, что ТВ включён, доступен из среды probe, разрешает LG Connect Apps/Mobile TV On/Wake-on-LAN, а физический пульт доступен. Реальный IP/MAC не записывать в документацию, скриншоты и Git.
 
-- [ ] **Шаг 2. Выполнить pairing и получить identity**
+- [x] **Шаг 2. Выполнить pairing и получить identity**
 
 ```bash
 pnpm --filter @remote-webos-tv/protocol-probe start -- pair --host 192.0.2.10 --data-dir .local/protocol-probe
@@ -540,23 +545,23 @@ pnpm --filter @remote-webos-tv/protocol-probe start -- pair --host 192.0.2.10 --
 
 Адрес-пример заменить только при локальном запуске. В течение 60 секунд подтвердить запрос на ТВ. Вывод должен показать `registered`, транспорт, model/platform/firmware и статусы без host, MAC и ключа.
 
-- [ ] **Шаг 3. Проверить ключ после перезапуска приложения**
+- [x] **Шаг 3. Проверить ключ после перезапуска приложения**
 
 Полностью остановить процесс и выполнить `check` с тем же data-dir. Ожидается подключение без повторного запроса на телевизоре.
 
-- [ ] **Шаг 4. Проверить ключ после выключения и включения ТВ**
+- [x] **Шаг 4. Проверить ключ после выключения и включения ТВ**
 
 Обычным пультом выключить и включить телевизор, дождаться сети и повторить `check`. Ожидается подключение без нового подтверждения.
 
-- [ ] **Шаг 5. Выполнить безопасные проверки**
+- [x] **Шаг 5. Выполнить безопасные проверки**
 
 Проверить identity, snapshot, pointer, apps, inputs и наличие изученного MAC. Pointer `401` фиксировать как `POINTER_FORBIDDEN`, а не как полный провал pairing.
 
-- [ ] **Шаг 6. С разрешения пользователя проверить команды**
+- [x] **Шаг 6. С разрешения пользователя проверить команды**
 
 Отдельно проверить button, notification, power-off и wake. Для последних двух CLI требует `--confirm-device-state-change`. Параметры не зашивать в код.
 
-- [ ] **Шаг 7. Создать и проверить локальный отчёт**
+- [x] **Шаг 7. Создать и проверить локальный отчёт**
 
 ```bash
 pnpm --filter @remote-webos-tv/protocol-probe start -- report --data-dir .local/protocol-probe
@@ -565,7 +570,7 @@ rg -n "client-key|192\\.|10\\.|172\\.|([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}" .local
 
 Ожидается: секретов и LAN-адресов нет. Перед копированием отчёт читается целиком.
 
-- [ ] **Шаг 8. Принять решение**
+- [x] **Шаг 8. Принять решение**
 
 - `use-lgtv2`: проходят pairing, persisted reconnect, state, apps/inputs, pointer и хотя бы одна кнопка; остальные ограничения выражаются capabilities.
 - `fork-lgtv2`: SSAP работает, но узкий дефект manifest/transport/cancellation/pointer блокирует обязательную функцию.
@@ -573,11 +578,11 @@ rg -n "client-key|192\\.|10\\.|172\\.|([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}" .local
 
 При провале сохранённого reconnect или cleanup запрещено выбирать `use-lgtv2`.
 
-- [ ] **Шаг 9. Опубликовать обезличенные доказательства**
+- [x] **Шаг 9. Опубликовать обезличенные доказательства**
 
 В compatibility-документ записать фактические model/platform/firmware, версию библиотеки, транспорт, таблицу операций, результат обоих restart-сценариев, решение, дату и ограничения. Затем обновить раздел 6.1 ТЗ и дорожную карту.
 
-- [ ] **Шаг 10. Зафиксировать проверенный отчёт**
+- [x] **Шаг 10. Зафиксировать проверенный отчёт**
 
 ```bash
 git add docs/compatibility docs/superpowers/specs docs/superpowers/plans
@@ -588,7 +593,7 @@ git commit -m "docs: record lg webos protocol compatibility decision"
 
 ## Задача 9. Завершить этап и открыть следующий план
 
-- [ ] **Шаг 1. Выполнить свежую полную проверку**
+- [x] **Шаг 1. Выполнить свежую полную проверку**
 
 ```bash
 pnpm typecheck
@@ -611,9 +616,16 @@ rg -n "from ['\"]lgtv2['\"]|require\(['\"]lgtv2['\"]\)" . --glob '!node_modules/
 
 Проверить закрытие сокетов и временных файлов при success, failure, timeout, signal и cancel; внутренние причины и безопасные внешние ошибки; отсутствие mutating-действий по умолчанию; соответствие отчёта свежему физическому прогону.
 
-- [ ] **Шаг 4. Написать детальный план этапа 1**
+- [x] **Шаг 4. Написать детальный план этапа 1**
 
 Следующий план создаётся только после аппаратного решения. В нём фиксируется выбранная реализация adapter, а реальные ограничения стенда превращаются в capability/error-тесты. До согласования не начинать Backend API, auth, SQLite или Web UI.
+
+2026-10-01: аппаратное решение `use-lgtv2` записано в compatibility-документ;
+новый план — `2026-10-01-app-foundation.md`. Свежие tests (150), typecheck и
+build прошли. WS fallback на физическом ТВ не проверен; настройка LG Connect
+Apps/Mobile TV On не осматривалась отдельно, но pairing и пробуждение проверены
+фактически. Незаполненные пункты остаются явными и не скрываются решением о
+переходе к основе приложения.
 
 ## Условия завершения этапа
 
