@@ -1,14 +1,23 @@
 import { randomUUID } from 'node:crypto';
+import type { Writable } from 'node:stream';
 
-import Fastify from 'fastify';
+import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
+import fastifyStatic from '@fastify/static';
 import { setupStatusSchema, type SetupState } from '@remote-webos-tv/contracts';
 
 import type { AppConfig } from './config.js';
+import { registerAuthRoutes, type AuthRoutesDependencies } from './auth/routes.js';
+import { installAuthRateLimit } from './security/rate-limit.js';
+import { safeCauseTypes, safeLoggerOptions } from './security/logging.js';
+import { httpPolicy } from './security/http-policy.js';
 
 export interface AppDependencies {
   readonly config: AppConfig;
   readonly getSetupState: () => Promise<SetupState>;
+  readonly webRoot?: string;
+  readonly auth?: Omit<AuthRoutesDependencies, 'config'>;
   readonly reportError?: (report: { readonly requestId: string; readonly status: number; readonly causeTypes: readonly string[] }) => void;
+  readonly logStream?: Writable;
 }
 
 class StorageUnavailableError extends Error {
@@ -18,25 +27,24 @@ class StorageUnavailableError extends Error {
   }
 }
 
-function safeCauseTypes(error: unknown): string[] {
-  const types: string[] = [];
-  const seen = new Set<unknown>();
-  let current = error;
-  while (current instanceof Error && !seen.has(current) && types.length < 5) {
-    seen.add(current);
-    types.push(['Error', 'TypeError', 'SyntaxError', 'StorageUnavailableError', 'ZodError'].includes(current.name) ? current.name : 'OtherError');
-    current = current.cause;
-  }
-  return types;
+function routingError(error: Error & { code?: string }, request: FastifyRequest, reply: FastifyReply): void {
+  // Router failures run before ordinary hooks and must not echo the raw URL.
+  const badRequest = error.code === 'FST_ERR_BAD_URL' || error.code === 'FST_ERR_MAX_PARAM_LENGTH';
+  reply.header('x-request-id', request.id).header('cache-control', 'no-store')
+    .code(badRequest ? 400 : 500).send({
+      code: badRequest ? 'BAD_REQUEST' : 'INTERNAL_ERROR',
+      message: badRequest ? 'Bad request' : 'Internal server error', requestId: request.id,
+    });
 }
 
-export function buildApp({ config, getSetupState, reportError = (report) => { console.error(JSON.stringify(report)); } }: AppDependencies) {
+export function buildApp({ config, getSetupState, webRoot, auth, reportError, logStream }: AppDependencies) {
   const app = Fastify({
-    logger: false,
+    logger: safeLoggerOptions(logStream),
     bodyLimit: 16 * 1024,
     requestIdHeader: false,
     genReqId: () => randomUUID(),
     trustProxy: config.trustedProxy.length ? [...config.trustedProxy] : false,
+    frameworkErrors: routingError,
   });
 
   app.addHook('onRequest', async (request, reply) => {
@@ -44,8 +52,7 @@ export function buildApp({ config, getSetupState, reportError = (report) => { co
   });
 
   app.addHook('onSend', async (request, reply, payload) => {
-    const pathname = request.url.split('?', 1)[0];
-    if (pathname === '/api' || pathname?.startsWith('/api/')) {
+    if (httpPolicy(request).api) {
       reply.header('cache-control', 'no-store');
     }
     return payload;
@@ -57,11 +64,13 @@ export function buildApp({ config, getSetupState, reportError = (report) => { co
     const reportedStatus = 'statusCode' in failure && typeof failure.statusCode === 'number' ? failure.statusCode : 500;
     const storageUnavailable = error instanceof StorageUnavailableError;
     const status = storageUnavailable ? 503 : tooLarge ? 413 : reportedStatus >= 400 && reportedStatus < 500 ? reportedStatus : 500;
-    const code = storageUnavailable ? 'STORAGE_UNAVAILABLE' : tooLarge ? 'PAYLOAD_TOO_LARGE' : status < 500 ? 'BAD_REQUEST' : 'INTERNAL_ERROR';
-    const message = storageUnavailable ? 'Storage unavailable' : tooLarge ? 'Payload too large' : status < 500 ? 'Bad request' : 'Internal server error';
+    const code = storageUnavailable ? 'STORAGE_UNAVAILABLE' : tooLarge ? 'PAYLOAD_TOO_LARGE' : status === 429 ? 'RATE_LIMITED' : status < 500 ? 'BAD_REQUEST' : 'INTERNAL_ERROR';
+    const message = storageUnavailable ? 'Storage unavailable' : tooLarge ? 'Payload too large' : status === 429 ? 'Too many requests' : status < 500 ? 'Bad request' : 'Internal server error';
     if (status >= 500) {
+      const report = { requestId: request.id, status, causeTypes: safeCauseTypes(error) };
+      app.log.error({ code, ...report }, 'API request failed');
       try {
-        reportError({ requestId: request.id, status, causeTypes: safeCauseTypes(error) });
+        reportError?.(report);
       } catch {
         console.error('API diagnostic sink failed');
       }
@@ -69,7 +78,14 @@ export function buildApp({ config, getSetupState, reportError = (report) => { co
     reply.code(status).send({ code, message, requestId: request.id });
   });
 
+  if (webRoot) {
+    app.register(fastifyStatic, { root: webRoot, wildcard: false });
+  }
+
   app.setNotFoundHandler((request, reply) => {
+    if (webRoot && httpPolicy(request).spaNavigation) {
+      return reply.code(200).type('text/html').sendFile('index.html');
+    }
     reply.code(404).send({ code: 'NOT_FOUND', message: 'Not found', requestId: request.id });
   });
 
@@ -83,6 +99,11 @@ export function buildApp({ config, getSetupState, reportError = (report) => { co
     }
     return { status: 'ok' };
   });
+
+  if (auth) {
+    installAuthRateLimit(app);
+    registerAuthRoutes(app, { config, ...auth });
+  }
 
   return app;
 }

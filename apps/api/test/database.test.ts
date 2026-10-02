@@ -80,7 +80,7 @@ test('rolls back a failed upgrade and retains a private SQLite recovery backup o
         throw new Error('injected migration failure');
       },
     }],
-  })).rejects.toThrow('injected migration failure');
+  })).rejects.toMatchObject({ code: 'STORAGE_MIGRATION_FAILED', cause: { message: 'injected migration failure' } });
   expect(failedConnection?.open).toBe(false);
 
   const names = await readdir(join(dataDir, 'backups'));

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 
 import { ownerTableSql, schemaMigrations, type Migration } from './migrations.js';
+import { StorageStartupError, type StorageErrorCode } from './errors.js';
 
 export interface AppDatabase {
   readonly sqlite: Database.Database;
@@ -28,7 +29,7 @@ async function secureDatabaseFile(path: string): Promise<void> {
   } catch (error) {
     if (!isAlreadyExists(error)) throw error;
     const existing = await lstat(path);
-    if (!existing.isFile()) throw new Error('Database path must be a regular file');
+    if (!existing.isFile()) throw new StorageStartupError('STORAGE_DATABASE_PATH_INVALID');
   }
   await chmod(path, 0o600);
 }
@@ -37,35 +38,35 @@ function migrationVersion(sqlite: Database.Database, latestVersion: number): num
   const tables = sqlite.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[];
   const names = new Set(tables.map(({ name }) => name));
   if (!names.has('migration_version')) {
-    if (names.size !== 0) throw new Error('Unrecognized database schema');
+    if (names.size !== 0) throw new StorageStartupError('STORAGE_SCHEMA_INVALID');
     return 0;
   }
 
   const rows = sqlite.prepare('SELECT version, applied_at FROM migration_version ORDER BY version').all() as { version: unknown; applied_at: unknown }[];
-  if (rows.length === 0) throw new Error('Invalid migration history');
+  if (rows.length === 0) throw new StorageStartupError('STORAGE_SCHEMA_INVALID');
   if (rows.some((row) => typeof row.version === 'number' && row.version > latestVersion)) {
-    throw new Error('Database schema version is newer than this application');
+    throw new StorageStartupError('STORAGE_SCHEMA_NEWER');
   }
   rows.forEach((row, index) => {
     if (!Number.isSafeInteger(row.version) || row.version !== index + 1 || !Number.isSafeInteger(row.applied_at)) {
-      throw new Error('Invalid migration history');
+      throw new StorageStartupError('STORAGE_SCHEMA_INVALID');
     }
   });
   const version = rows.length;
   if (version >= 1 && !['owner', 'setup_token', 'sessions'].every((name) => names.has(name))) {
-    throw new Error('Incomplete database schema');
+    throw new StorageStartupError('STORAGE_SCHEMA_INVALID');
   }
   if (version >= 1) {
     const savedOwnerSql = sqlite.prepare('SELECT sql FROM sqlite_schema WHERE type = ? AND name = ?').pluck().get('table', 'owner');
     // SQLite appends ADD COLUMN definitions before the closing parenthesis, preserving the v1 constraint prefix.
     const extendsOwnerTable = version > 1 && typeof savedOwnerSql === 'string' && savedOwnerSql.startsWith(ownerTableSql.slice(0, -1));
-    if (savedOwnerSql !== ownerTableSql && !extendsOwnerTable) throw new Error('Owner table schema does not match migration history');
+    if (savedOwnerSql !== ownerTableSql && !extendsOwnerTable) throw new StorageStartupError('STORAGE_OWNER_SCHEMA_INVALID');
     try {
       sqlite.prepare('SELECT id, username, password_hash FROM owner LIMIT 0');
       sqlite.prepare('SELECT id, token_hash, expires_at FROM setup_token LIMIT 0');
       sqlite.prepare('SELECT token_hash, owner_id, created_at, expires_at, csrf_hash FROM sessions LIMIT 0');
     } catch (cause) {
-      throw new Error('Incomplete database schema', { cause });
+      throw new StorageStartupError('STORAGE_SCHEMA_INVALID', cause);
     }
   }
   return version;
@@ -94,41 +95,50 @@ async function backupBeforeUpgrade(sqlite: Database.Database, dataDir: string, v
 
 export async function openDatabase({ dataDir, now = Date.now, migrations = schemaMigrations }: OpenDatabaseOptions): Promise<AppDatabase> {
   if (migrations.length < schemaMigrations.length || schemaMigrations.some((migration, index) => migrations[index] !== migration)) {
-    throw new Error('Application migrations cannot be omitted or replaced');
+    throw new StorageStartupError('STORAGE_MIGRATIONS_INVALID');
   }
   for (let index = 0; index < migrations.length; index++) {
-    if (migrations[index]?.version !== index + 1) throw new Error('Migration definitions must be sequential');
+    if (migrations[index]?.version !== index + 1) throw new StorageStartupError('STORAGE_MIGRATIONS_INVALID');
   }
 
-  await mkdir(dataDir, { recursive: true, mode: 0o700 });
-  if (!(await lstat(dataDir)).isDirectory()) throw new Error('Data directory path must be a directory');
-  await chmod(dataDir, 0o700);
-  const path = join(dataDir, 'app.sqlite');
-  await secureDatabaseFile(path);
-  const sqlite = new Database(path);
+  let sqlite: Database.Database | undefined;
+  let stage: StorageErrorCode = 'STORAGE_OPEN_FAILED';
   try {
+    await mkdir(dataDir, { recursive: true, mode: 0o700 });
+    if (!(await lstat(dataDir)).isDirectory()) throw new StorageStartupError('STORAGE_DATA_DIRECTORY_INVALID');
+    await chmod(dataDir, 0o700);
+    const path = join(dataDir, 'app.sqlite');
+    await secureDatabaseFile(path);
+    sqlite = new Database(path);
+    const connection = sqlite;
+    stage = 'STORAGE_SCHEMA_INVALID';
     sqlite.pragma('foreign_keys = ON');
     const initialVersion = migrationVersion(sqlite, migrations.length);
     if (initialVersion > 0 && initialVersion < migrations.length) {
+      stage = 'STORAGE_BACKUP_FAILED';
       await backupBeforeUpgrade(sqlite, dataDir, initialVersion);
     }
 
+    stage = 'STORAGE_MIGRATION_FAILED';
     sqlite.transaction(() => {
-      const currentVersion = migrationVersion(sqlite, migrations.length);
+      const currentVersion = migrationVersion(connection, migrations.length);
       for (const migration of migrations.slice(currentVersion)) {
-        migration.up(sqlite);
-        sqlite.prepare('INSERT INTO migration_version (version, applied_at) VALUES (?, ?)').run(migration.version, now());
+        migration.up(connection);
+        connection.prepare('INSERT INTO migration_version (version, applied_at) VALUES (?, ?)').run(migration.version, now());
       }
-      if (currentVersion < migrations.length) migrationVersion(sqlite, migrations.length);
+      if (currentVersion < migrations.length) migrationVersion(connection, migrations.length);
     }).immediate();
 
-    return { sqlite, close: () => sqlite.close() };
+    return { sqlite, close() {
+      try { connection.close(); } catch (cause) { throw new StorageStartupError('STORAGE_CLOSE_FAILED', cause); }
+    } };
   } catch (error) {
+    const failure = error instanceof StorageStartupError ? error : new StorageStartupError(stage, error);
     try {
-      sqlite.close();
+      sqlite?.close();
     } catch (closeError) {
-      throw new AggregateError([error, closeError], 'Database startup and cleanup both failed');
+      throw new AggregateError([failure, new StorageStartupError('STORAGE_CLOSE_FAILED', closeError)], 'Database startup and cleanup both failed');
     }
-    throw error;
+    throw failure;
   }
 }
