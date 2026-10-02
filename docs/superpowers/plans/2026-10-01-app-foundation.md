@@ -49,10 +49,10 @@ Clock имеет `now(): Date`; random имеет `bytes(length): Buffer`. В т
 
 **Interfaces:** `GET /api/setup/status` → `{state:'unclaimed'|'claimed'}`; общий error → `{code,message,requestId}`. Будущие auth routes подключаются только через `buildApp`.
 
-- [ ] Написать тесты: дополнительные поля отклоняются; отсутствующий publicOrigin/некорректный port запрещает старт; запрос с чужим Origin не получает разрешающий CORS; proxy-заголовки без configured trust игнорируются.
-- [ ] Запустить узкие тесты, подтвердить ожидаемое падение отсутствующих компонентов.
-- [ ] Создать API workspace; использовать Fastify requestId, безопасный error handler и body limit 16 KiB. Для всех API responses установить Cache-Control: no-store. Health endpoint не зависит от состояния ТВ.
-- [ ] Запустить package tests/typecheck и HTTP inject smoke test; закоммитить `feat: bootstrap validated application api`.
+- [x] Написать тесты: дополнительные поля отклоняются; отсутствующий publicOrigin/некорректный port запрещает старт; запрос с чужим Origin не получает разрешающий CORS; proxy-заголовки без configured trust игнорируются.
+- [x] Запустить узкие тесты, подтвердить ожидаемое падение отсутствующих компонентов.
+- [x] Создать API workspace; использовать Fastify requestId, безопасный error handler и body limit 16 KiB. Для всех API responses установить Cache-Control: no-store. Health endpoint не зависит от состояния ТВ.
+- [x] Запустить package tests/typecheck и HTTP inject smoke test; закоммитить `feat: bootstrap validated application api`.
 
 ### Задача 2. SQLite и восстановимые миграции
 
@@ -60,10 +60,10 @@ Clock имеет `now(): Date`; random имеет `bytes(length): Buffer`. В т
 
 **Interfaces:** `AppDatabase` владеет соединением; `AuthRepository` следующей задачи использует его транзакции. Таблицы: migration_version, owner (единственная запись id=1), setup_token (одна активная запись), sessions (token_hash, owner_id, created_at, expires_at, csrf_hash).
 
-- [ ] Написать тесты новой базы, повторного открытия, rollback при injected migration failure, сохранения восстановительной копии и запрета второго owner. Ошибка миграции должна завершать старт, не скрываться.
-- [ ] Запустить тесты и подтвердить RED.
-- [ ] Реализовать миграции в транзакции; backup существующей базы делать SQLite backup API перед изменением версии. Не выполнять частичные schema upgrades. Файлы базы/копий owner-only, каталог 0700; запуск с невалидной схемой запрещён.
-- [ ] Проверить tests/typecheck и restart test; коммит `feat: add transactional application storage`.
+- [x] Написать тесты новой базы, повторного открытия, rollback при injected migration failure, сохранения восстановительной копии и запрета второго owner. Ошибка миграции должна завершать старт, не скрываться.
+- [x] Запустить тесты и подтвердить RED.
+- [x] Реализовать миграции в транзакции; backup существующей базы делать SQLite backup API перед изменением версии. Не выполнять частичные schema upgrades. Файлы базы/копий owner-only, каталог 0700; запуск с невалидной схемой запрещён.
+- [x] Проверить tests/typecheck и restart test; коммит `feat: add transactional application storage`.
 
 ### Задача 3. Пароли и установочный токен
 
@@ -71,10 +71,10 @@ Clock имеет `now(): Date`; random имеет `bytes(length): Buffer`. В т
 
 **Interfaces:** `issueSetupToken(): Promise<string>`; `claimOwner({token,username,password}): Promise<void>`. Repository хранит только SHA-256 токена, username и versioned password hash. Username 1–64 символа; пароль 12–128 символов, без silent trimming. Токен 32 random bytes, base64url, TTL 15 минут; новый заменяет старый, при claimed выпуск запрещён.
 
-- [ ] Написать тесты expired/replaced/missing token; два concurrent claim создают одного owner; ошибка транзакции не расходует токен; CLI не выпускает токен после claim.
-- [ ] Написать тесты scrypt round-trip, неверного пароля, malformed/oversized hash и уникального salt. Использовать scrypt N=32768,r=8,p=1, salt 16 bytes, key 64 bytes, maxmem 64 MiB; формат versioned, параметры проверяются до вычисления.
-- [ ] Подтвердить RED, реализовать async scrypt и service; токен выводит только explicit CLI stdout, ни logger, ни API выпуска его не предоставляют.
-- [ ] Запустить tests/typecheck, проверить базу на отсутствие plaintext secrets; коммит `feat: implement one time owner setup`.
+- [x] Написать тесты expired/replaced/missing token; два concurrent claim создают одного owner; ошибка транзакции не расходует токен; CLI не выпускает токен после claim.
+- [x] Написать тесты scrypt round-trip, неверного пароля, malformed/oversized hash и уникального salt. Использовать scrypt N=32768,r=8,p=1, salt 16 bytes, key 64 bytes, maxmem 64 MiB; формат versioned, параметры проверяются до вычисления.
+- [x] Подтвердить RED, реализовать async scrypt и service; токен выводит только explicit CLI stdout, ни logger, ни API выпуска его не предоставляют.
+- [x] Запустить tests/typecheck, проверить базу на отсутствие plaintext secrets; коммит `feat: implement one time owner setup`.
 
 ### Задача 4. Сессии, CSRF и auth API
 
