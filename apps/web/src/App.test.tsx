@@ -100,3 +100,28 @@ test('pending setup announces progress in a live status region', async () => {
   finish(response(201));
   expect(await screen.findByRole('heading', { name: 'Вход' })).toBeTruthy();
 });
+
+test('setup validates Unicode code points and submits the full supplementary-character username', async () => {
+  const fetch = vi.fn().mockResolvedValueOnce(response(200, { state: 'unclaimed' }))
+    .mockResolvedValueOnce(response(201));
+  vi.stubGlobal('fetch', fetch);
+  render(<App />);
+  await screen.findByRole('heading', { name: 'Первичная настройка' });
+  fireEvent.change(screen.getByLabelText('Установочный токен'), { target: { value: 't'.repeat(43) } });
+  const username = screen.getByLabelText('Имя владельца') as HTMLInputElement;
+  const password = screen.getByLabelText('Пароль') as HTMLInputElement;
+  const form = screen.getByRole('button', { name: 'Создать владельца' }).closest('form')!;
+  // Native limits count UTF-16 units and would prevent entering the accepted username.
+  expect.soft(username.hasAttribute('maxlength')).toBe(false);
+  expect.soft(password.hasAttribute('minlength')).toBe(false);
+  expect.soft(password.hasAttribute('maxlength')).toBe(false);
+  fireEvent.change(username, { target: { value: '😀'.repeat(64) } });
+  fireEvent.change(password, { target: { value: '😀'.repeat(6) } });
+  fireEvent.submit(form);
+  expect.soft(fetch).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('alert').textContent).toContain('12');
+  fireEvent.change(password, { target: { value: '😀'.repeat(12) } });
+  fireEvent.submit(form);
+  expect(await screen.findByRole('heading', { name: 'Вход' })).toBeTruthy();
+  expect(JSON.parse(fetch.mock.calls[1]?.[1]?.body)).toEqual({ token: 't'.repeat(43), username: '😀'.repeat(64), password: '😀'.repeat(12) });
+});
