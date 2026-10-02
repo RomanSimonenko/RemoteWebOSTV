@@ -30,7 +30,9 @@ export async function createApiRuntime(config: AppConfig, options: {
     app.addHook('onClose', async () => { database.close(); });
     return app;
   } catch (error) {
-    database.close();
+    try { database.close(); } catch (closeError) {
+      throw new AggregateError([error, closeError], 'API initialization and cleanup both failed');
+    }
     throw error;
   }
 }

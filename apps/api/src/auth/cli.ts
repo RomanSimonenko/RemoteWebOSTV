@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { openDatabase } from '../storage/database.js';
 import { createOwnerRepository } from './repository.js';
 import { createOwnerSetupService, OwnerSetupError } from './service.js';
+import { formatStartupError } from '../startup-errors.js';
 
 export interface SetupTokenCliOptions {
   readonly args: readonly string[];
@@ -28,15 +29,19 @@ export async function runSetupTokenCli({ args, env, stdout, stderr }: SetupToken
     try {
       const service = createOwnerSetupService({ repository: createOwnerRepository(database.sqlite) });
       token = await service.issueSetupToken();
-    } finally {
-      database.close();
+    } catch (error) {
+      try { database.close(); } catch (closeError) {
+        throw new AggregateError([error, closeError], 'Setup token command and cleanup both failed');
+      }
+      throw error;
     }
+    database.close();
     stdout(token);
     return 0;
   } catch (error) {
     stderr(error instanceof OwnerSetupError && error.code === 'SETUP_UNAVAILABLE'
       ? 'Owner is already configured; setup token was not issued'
-      : 'Setup token command failed');
+      : formatStartupError(error, 'Setup token command failed'));
     return 1;
   }
 }
