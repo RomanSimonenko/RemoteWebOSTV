@@ -84,10 +84,10 @@ Clock имеет `now(): Date`; random имеет `bytes(length): Buffer`. В т
 
 **Interfaces:** `POST /api/setup` → 201 (без автоматического login), `POST /api/auth/login` → 200 с cookie, `GET /api/auth/session` → `{username,csrfToken}`, `POST /api/auth/logout` → 204; unauthenticated session → 401. Login принимает username/password; setup принимает token/username/password. Сессия — 32 random bytes, TTL 24 часа без sliding extension; в SQLite только hash. Cookie name `remote_webos_session`. CSRF token — HMAC-SHA256 от domain-separated `csrf:v1:` и raw session cookie с отдельным persistent 32-byte auth master key (owner-only, вне SQLite); hash сохраняется при создании session. GET session воспроизводит token без изменения базы; сравнение constant-time. Клиент держит token только в памяти. Auth master key не переиспользует ключ шифрования ТВ и не создаётся заново, если потерян при существующих sessions: запуск выдаёт явную storage error.
 
-- [ ] Написать inject tests claim/login/restart/session/logout; отсутствие session → 401; отсутствие/неверный CSRF на logout → 403; logout отзывает session, а повторный logout с уже отозванной cookie → 401.
-- [ ] Проверить Origin на setup/login и всех изменяющих запросах: точное совпадение publicOrigin, отсутствующий/чужой → 403. Logout дополнительно требует `X-CSRF-Token`. GET не меняет состояние.
-- [ ] Подтвердить RED и реализовать routes/service. Login errors одинаковы для отсутствующего username и неверного пароля; новый login создаёт новый token, пользовательский token не принимается.
-- [ ] Tests/typecheck; коммит `feat: add authenticated server sessions and csrf`.
+- [x] Написать inject tests claim/login/restart/session/logout; отсутствие session → 401; отсутствие/неверный CSRF на logout → 403; logout отзывает session, а повторный logout с уже отозванной cookie → 401.
+- [x] Проверить Origin на setup/login и всех изменяющих запросах: точное совпадение publicOrigin, отсутствующий/чужой → 403. Logout дополнительно требует `X-CSRF-Token`. GET не меняет состояние.
+- [x] Подтвердить RED и реализовать routes/service. Login errors одинаковы для отсутствующего username и неверного пароля; новый login создаёт новый token, пользовательский token не принимается.
+- [x] Tests/typecheck; коммит `feat: add authenticated server sessions and csrf`.
 
 ### Задача 5. Rate limit и безопасная диагностика
 
@@ -95,10 +95,10 @@ Clock имеет `now(): Date`; random имеет `bytes(length): Buffer`. В т
 
 **Interfaces:** Встроенный Fastify logger использует единую redaction policy; rate limiter применяется до expensive hashing и setup mutation.
 
-- [ ] Написать тесты: setup/login не более 5 попыток за 60 секунд на source IP; шестой запрос → 429 с Retry-After; другая source IP независима; trusted proxy chain обрабатывается только согласно AppConfig. Clock управляется тестом.
-- [ ] Написать capture-log tests для password/token/cookie/authorization/CSRF, internal paths и nested error causes; API выдаёт safe code/message/requestId, журнал сохраняет безопасный owner code и причинную классификацию.
-- [ ] Подтвердить RED; подключить поддерживаемый Fastify rate-limit plugin, ограничить память tracking, очистку поручить plugin. Не писать собственный универсальный лимитер.
-- [ ] Package tests/typecheck; коммит `feat: protect auth attempts and redact diagnostics`.
+- [x] Написать тесты: setup/login не более 5 попыток за 60 секунд на source IP; шестой запрос → 429 с Retry-After; другая source IP независима; trusted proxy chain обрабатывается только согласно AppConfig. Clock управляется тестом.
+- [x] Написать capture-log tests для password/token/cookie/authorization/CSRF, internal paths и nested error causes; API выдаёт safe code/message/requestId, журнал сохраняет безопасный owner code и причинную классификацию.
+- [x] Подтвердить RED; подключить поддерживаемый Fastify rate-limit plugin, ограничить память tracking, очистку поручить plugin. Не писать собственный универсальный лимитер.
+- [x] Package tests/typecheck; коммит `feat: protect auth attempts and redact diagnostics`.
 
 ### Задача 6. Браузерные setup/login
 
@@ -106,21 +106,25 @@ Clock имеет `now(): Date`; random имеет `bytes(length): Buffer`. В т
 
 **Interfaces:** Client использует contracts Задачи 4 и `credentials:'same-origin'`; API base `/api`. В production Fastify раздаёт compiled web assets того же origin; dev Vite proxy → локальный API. CSRF хранится в памяти, cookies браузер обрабатывает сам.
 
-- [ ] Написать component tests unclaimed→setup, claimed→login, authenticated→home, session expiry→login. Формы не помещают секреты в URL, storage или console; password inputs имеют подходящий autocomplete.
-- [ ] Подтвердить RED; реализовать простые русскоязычные формы и авторизованный экран «Телевизор ещё не настроен». Не добавлять неработающие кнопки пульта. Loading/error отображаются доступным текстом, формы защищены от повторного submit.
-- [ ] Добавить static serving с SPA fallback только для GET HTML навигации, `/api/*` никогда не возвращает index.html.
-- [ ] Tests/typecheck/build; коммит `feat: add browser owner setup and login`.
+- [x] Написать component tests unclaimed→setup, claimed→login, authenticated→home, session expiry→login. Формы не помещают секреты в URL, storage или console; password inputs имеют подходящий autocomplete.
+- [x] Подтвердить RED; реализовать простые русскоязычные формы и авторизованный экран «Телевизор ещё не настроен». Не добавлять неработающие кнопки пульта. Loading/error отображаются доступным текстом, формы защищены от повторного submit.
+- [x] Добавить static serving с SPA fallback только для GET HTML навигации, `/api/*` никогда не возвращает index.html.
+- [x] Tests/typecheck/build; коммит `feat: add browser owner setup and login`.
 
 ### Задача 7. Интеграция, shutdown и приёмка
+
+Итоговая приёмка 2026-10-03: задачи 1–7 выполнены; общий review и повторный review исправлений приняты. На `aee0c26` свежие `pnpm test` (246 тестов), `pnpm typecheck`, `pnpm build`, Chromium E2E (1 сценарий) и проверка diff прошли. HTTP-политики используют идентичность маршрута, включая кодированные aliases; причины известных отказов хранилища безопасно различимы в API и CLI.
+
+Ограничения: HTTPS-прокси не проверялся в реальном развёртывании; защита от отката часов сохраняет обнаруженное истечение сессии, но не может вывести полностью ненаблюдённое истечение из wall-clock времени. Команды ТВ через веб-интерфейс и полный MVP остаются следующими этапами.
 
 **Files:** создать `apps/web/test/e2e/auth.spec.ts`, `playwright.config.ts`, API lifecycle tests; обновить README.
 
 **Interfaces:** CLI setup-token и HTTP process используют один dataDir; shutdown SIGINT/SIGTERM закрывает HTTP и SQLite, не теряя завершённых транзакций.
 
-- [ ] Написать headless browser test: CLI token→setup→login→home→reload→logout; второй claim запрещён; чужой Origin/CSRF отклоняются; секреты отсутствуют в localStorage/sessionStorage.
-- [ ] Написать детерминированный shutdown test и restart test существующей установки/сессии; закрытая база не используется после shutdown.
-- [ ] Реализовать cleanup и документацию конфигурации, локального запуска, token CLI, HTTPS/proxy settings и срока сессии. Описать, что команды ТВ появляются на следующем этапе.
-- [ ] Запустить `pnpm typecheck`, `pnpm test`, `pnpm build` и Playwright; review всего diff, checkpoint commit `test: verify application authentication lifecycle`.
+- [x] Написать headless browser test: CLI token→setup→login→home→reload→logout; второй claim запрещён; чужой Origin/CSRF отклоняются; секреты отсутствуют в localStorage/sessionStorage.
+- [x] Написать детерминированный shutdown test и restart test существующей установки/сессии; закрытая база не используется после shutdown.
+- [x] Реализовать cleanup и документацию конфигурации, локального запуска, token CLI, HTTPS/proxy settings и срока сессии. Описать, что команды ТВ появляются на следующем этапе.
+- [x] Запустить `pnpm typecheck`, `pnpm test`, `pnpm build` и Playwright; review всего diff, checkpoint commit `test: verify application authentication lifecycle`.
 
 ## Граница завершения и самопроверка плана
 
