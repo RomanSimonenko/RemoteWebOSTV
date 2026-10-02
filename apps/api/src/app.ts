@@ -1,16 +1,20 @@
 import { randomUUID } from 'node:crypto';
+import type { Writable } from 'node:stream';
 
 import Fastify from 'fastify';
 import { setupStatusSchema, type SetupState } from '@remote-webos-tv/contracts';
 
 import type { AppConfig } from './config.js';
 import { registerAuthRoutes, type AuthRoutesDependencies } from './auth/routes.js';
+import { installAuthRateLimit } from './security/rate-limit.js';
+import { safeCauseTypes, safeLoggerOptions } from './security/logging.js';
 
 export interface AppDependencies {
   readonly config: AppConfig;
   readonly getSetupState: () => Promise<SetupState>;
   readonly auth?: Omit<AuthRoutesDependencies, 'config'>;
   readonly reportError?: (report: { readonly requestId: string; readonly status: number; readonly causeTypes: readonly string[] }) => void;
+  readonly logStream?: Writable;
 }
 
 class StorageUnavailableError extends Error {
@@ -20,21 +24,9 @@ class StorageUnavailableError extends Error {
   }
 }
 
-function safeCauseTypes(error: unknown): string[] {
-  const types: string[] = [];
-  const seen = new Set<unknown>();
-  let current = error;
-  while (current instanceof Error && !seen.has(current) && types.length < 5) {
-    seen.add(current);
-    types.push(['Error', 'TypeError', 'SyntaxError', 'StorageUnavailableError', 'ZodError'].includes(current.name) ? current.name : 'OtherError');
-    current = current.cause;
-  }
-  return types;
-}
-
-export function buildApp({ config, getSetupState, auth, reportError = (report) => { console.error(JSON.stringify(report)); } }: AppDependencies) {
+export function buildApp({ config, getSetupState, auth, reportError, logStream }: AppDependencies) {
   const app = Fastify({
-    logger: false,
+    logger: safeLoggerOptions(logStream),
     bodyLimit: 16 * 1024,
     requestIdHeader: false,
     genReqId: () => randomUUID(),
@@ -59,11 +51,13 @@ export function buildApp({ config, getSetupState, auth, reportError = (report) =
     const reportedStatus = 'statusCode' in failure && typeof failure.statusCode === 'number' ? failure.statusCode : 500;
     const storageUnavailable = error instanceof StorageUnavailableError;
     const status = storageUnavailable ? 503 : tooLarge ? 413 : reportedStatus >= 400 && reportedStatus < 500 ? reportedStatus : 500;
-    const code = storageUnavailable ? 'STORAGE_UNAVAILABLE' : tooLarge ? 'PAYLOAD_TOO_LARGE' : status < 500 ? 'BAD_REQUEST' : 'INTERNAL_ERROR';
-    const message = storageUnavailable ? 'Storage unavailable' : tooLarge ? 'Payload too large' : status < 500 ? 'Bad request' : 'Internal server error';
+    const code = storageUnavailable ? 'STORAGE_UNAVAILABLE' : tooLarge ? 'PAYLOAD_TOO_LARGE' : status === 429 ? 'RATE_LIMITED' : status < 500 ? 'BAD_REQUEST' : 'INTERNAL_ERROR';
+    const message = storageUnavailable ? 'Storage unavailable' : tooLarge ? 'Payload too large' : status === 429 ? 'Too many requests' : status < 500 ? 'Bad request' : 'Internal server error';
     if (status >= 500) {
+      const report = { requestId: request.id, status, causeTypes: safeCauseTypes(error) };
+      app.log.error({ code, ...report }, 'API request failed');
       try {
-        reportError({ requestId: request.id, status, causeTypes: safeCauseTypes(error) });
+        reportError?.(report);
       } catch {
         console.error('API diagnostic sink failed');
       }
@@ -86,7 +80,10 @@ export function buildApp({ config, getSetupState, auth, reportError = (report) =
     return { status: 'ok' };
   });
 
-  if (auth) registerAuthRoutes(app, { config, ...auth });
+  if (auth) {
+    installAuthRateLimit(app);
+    registerAuthRoutes(app, { config, ...auth });
+  }
 
   return app;
 }
