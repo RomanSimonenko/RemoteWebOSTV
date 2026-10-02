@@ -8,7 +8,8 @@
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prestart": "pnpm --filter '@remote-webos-tv/api^...' build",
-    "start": "node dist/src/index.js"
+    "start": "node dist/src/index.js",
+    "setup-token": "node dist/src/auth/cli.js setup-token"
   },
   "dependencies": {
     "@remote-webos-tv/contracts": "workspace:*",

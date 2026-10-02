@@ -1,13 +1,9 @@
-import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
+import { createApiRuntime } from './runtime.js';
 
 async function main(): Promise<void> {
   const config = loadConfig(process.env);
-  const app = buildApp({
-    config,
-    // The owner store is introduced with auth; until then this bootstrap has no owner.
-    getSetupState: async () => 'unclaimed',
-  });
+  const app = await createApiRuntime(config);
 
   let closing = false;
   const shutdown = () => {
