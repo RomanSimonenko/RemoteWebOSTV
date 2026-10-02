@@ -6,7 +6,7 @@ import { createOwnerRepository } from './auth/repository.js';
 import { createOwnerSetupService } from './auth/service.js';
 import { createAuthSessionService, loadAuthMasterKey } from './auth/sessions.js';
 import { openDatabase } from './storage/database.js';
-import { safeListenTextResolver } from './security/logging.js';
+import { safeCauseTypes, safeListenTextResolver } from './security/logging.js';
 
 export async function createApiRuntime(config: AppConfig, options: {
   readonly now?: () => number;
@@ -45,9 +45,9 @@ export async function serveApi(app: FastifyInstance, config: AppConfig, signals:
     if (closing) return;
     closing = true;
     removeSignals();
-    void app.close().catch(() => {
-      console.error('API shutdown failed');
+    void app.close().catch((error: unknown) => {
       process.exitCode = 1;
+      app.log.error({ code: 'API_SHUTDOWN_FAILED', causeTypes: safeCauseTypes(error) }, 'API shutdown failed');
     });
   };
   signals.once('SIGINT', shutdown);

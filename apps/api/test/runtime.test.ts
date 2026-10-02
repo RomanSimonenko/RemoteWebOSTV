@@ -3,9 +3,11 @@ import { EventEmitter } from 'node:events';
 import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Writable } from 'node:stream';
 
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 
+import { buildApp } from '../src/app.js';
 import type { AppConfig } from '../src/config.js';
 import { createApiRuntime, serveApi } from '../src/runtime.js';
 import { createOwnerRepository } from '../src/auth/repository.js';
@@ -98,5 +100,36 @@ test.each(['SIGINT', 'SIGTERM'] as const)('%s closes HTTP and SQLite while prese
   } finally {
     await app.close();
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('failed signal shutdown reports safe cause types and sets a failing exit code', async () => {
+  const output: string[] = [];
+  const logStream = new Writable({ write(chunk, _encoding, done) { output.push(String(chunk)); done(); } });
+  const config: AppConfig = {
+    dataDir: '/synthetic/private-data', host: '127.0.0.1', port: 0,
+    publicOrigin: 'http://127.0.0.1', secureCookies: false, trustedProxy: [],
+  };
+  const app = buildApp({ config, getSetupState: async () => 'unclaimed', logStream });
+  const signals = new EventEmitter();
+  const exitCodeBefore = process.exitCode;
+  const failure = new TypeError('private-path /synthetic/private-data', { cause: new Error('secret-value') });
+  const close = vi.spyOn(app, 'close').mockRejectedValueOnce(failure);
+  try {
+    await serveApi(app, config, signals);
+    signals.emit('SIGTERM');
+    await Promise.resolve();
+    expect(signals.listenerCount('SIGINT')).toBe(0);
+    expect(signals.listenerCount('SIGTERM')).toBe(0);
+    expect(process.exitCode).toBe(1);
+    const diagnostic = output.join('');
+    expect(diagnostic).toContain('API_SHUTDOWN_FAILED');
+    expect(diagnostic).toContain('TypeError');
+    expect(diagnostic).toContain('"Error"');
+    expect(diagnostic).not.toMatch(/private-path|private-data|secret-value/);
+  } finally {
+    close.mockRestore();
+    process.exitCode = exitCodeBefore;
+    await app.close();
   }
 });
