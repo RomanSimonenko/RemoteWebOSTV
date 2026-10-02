@@ -1,5 +1,9 @@
 import type { Writable } from 'node:stream';
 
+export function safeListenTextResolver(): string {
+  return 'API listening';
+}
+
 export function safeCauseTypes(error: unknown): string[] {
   const types: string[] = [];
   const seen = new Set<unknown>();

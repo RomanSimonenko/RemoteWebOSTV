@@ -1,6 +1,7 @@
 import { loadConfig } from './config.js';
 import { createApiRuntime } from './runtime.js';
 import { formatStartupError } from './startup-errors.js';
+import { safeListenTextResolver } from './security/logging.js';
 
 async function main(): Promise<void> {
   const config = loadConfig(process.env);
@@ -19,7 +20,7 @@ async function main(): Promise<void> {
   process.once('SIGTERM', shutdown);
 
   try {
-    await app.listen({ host: config.host, port: config.port });
+    await app.listen({ host: config.host, port: config.port, listenTextResolver: safeListenTextResolver });
   } catch (error) {
     await app.close();
     throw error;

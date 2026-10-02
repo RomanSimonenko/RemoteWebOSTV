@@ -4,6 +4,7 @@ import { expect, test } from 'vitest';
 
 import { buildApp } from '../src/app.js';
 import type { AppConfig } from '../src/config.js';
+import { safeListenTextResolver } from '../src/security/logging.js';
 
 const config: AppConfig = {
   dataDir: '/synthetic/private-database', host: '127.0.0.1', port: 8080,
@@ -36,5 +37,17 @@ test('request and nested error logs expose only safe diagnostics', async () => {
     expect(output).toContain('TypeError');
     expect(output).toContain(String(response.headers['x-request-id']));
     expect(output).not.toMatch(/query-secret|authorization-secret|cookie-secret|csrf-secret|body-password-secret|body-token-secret|private-database|nested-password-secret|\/api\/log-failure\?/);
+  } finally { await app.close(); }
+});
+
+test('startup log does not expose the listening address', async () => {
+  const chunks: string[] = [];
+  const logStream = new Writable({ write(chunk, _encoding, done) { chunks.push(String(chunk)); done(); } });
+  const app = buildApp({ config, getSetupState: async () => 'unclaimed', logStream });
+  try {
+    await app.listen({ host: '127.0.0.1', port: 0, listenTextResolver: safeListenTextResolver });
+    const output = chunks.join('');
+    expect(output).toContain('API listening');
+    expect(output).not.toMatch(/127\.0\.0\.1|http:\/\//);
   } finally { await app.close(); }
 });
