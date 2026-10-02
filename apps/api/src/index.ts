@@ -1,5 +1,6 @@
 import { loadConfig } from './config.js';
 import { createApiRuntime } from './runtime.js';
+import { formatStartupError } from './startup-errors.js';
 
 async function main(): Promise<void> {
   const config = loadConfig(process.env);
@@ -28,9 +29,6 @@ async function main(): Promise<void> {
 try {
   await main();
 } catch (error) {
-  const message = error instanceof Error && error.message.startsWith('REMOTE_WEBOS_')
-    ? error.message
-    : 'API startup failed';
-  console.error(message);
+  console.error(formatStartupError(error));
   process.exitCode = 1;
 }

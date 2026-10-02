@@ -19,7 +19,14 @@ function exactBytes(source: (length: number) => Uint8Array, length: number): Buf
   return value;
 }
 
-export async function loadAuthMasterKey(dataDir: string, hasSessions: () => boolean, entropy: (length: number) => Uint8Array = nodeRandomBytes): Promise<Buffer> {
+export class AuthMasterKeyStorageError extends Error {
+  constructor(cause: unknown) {
+    super('Auth storage unavailable', { cause });
+    this.name = 'AuthMasterKeyStorageError';
+  }
+}
+
+async function readOrCreateAuthMasterKey(dataDir: string, hasSessions: () => boolean, entropy: (length: number) => Uint8Array): Promise<Buffer> {
   const path = join(dataDir, 'auth-master.key');
   let file;
   try {
@@ -50,6 +57,14 @@ export async function loadAuthMasterKey(dataDir: string, hasSessions: () => bool
   }
 }
 
+export async function loadAuthMasterKey(dataDir: string, hasSessions: () => boolean, entropy: (length: number) => Uint8Array = nodeRandomBytes): Promise<Buffer> {
+  try {
+    return await readOrCreateAuthMasterKey(dataDir, hasSessions, entropy);
+  } catch (cause) {
+    throw new AuthMasterKeyStorageError(cause);
+  }
+}
+
 export interface AuthSessionService {
   login(username: string, password: string): Promise<{ readonly username: string; readonly token: string } | undefined>;
   authenticate(token: string | undefined): { readonly username: string; readonly csrfToken: string } | undefined;
@@ -57,21 +72,21 @@ export interface AuthSessionService {
   revoke(token: string): void;
 }
 
-export function createAuthSessionService(input: {
+export async function createAuthSessionService(input: {
   readonly repository: OwnerRepository;
   readonly masterKey: Buffer;
   readonly now?: () => number;
   readonly randomBytes?: (length: number) => Uint8Array;
-}): AuthSessionService {
+}): Promise<AuthSessionService> {
   const { repository, masterKey, now = Date.now, randomBytes = nodeRandomBytes } = input;
   if (masterKey.length !== 32) throw new Error('Auth master key storage is invalid');
   // The absent-user path still performs the same asynchronous password derivation.
-  const dummyHash = hashPassword('dummy password for absent owner', () => Buffer.alloc(16));
+  const dummyHash = await hashPassword('dummy password for absent owner', () => Buffer.alloc(16));
   const csrfFor = (token: string) => createHmac('sha256', masterKey).update('csrf:v1:').update(token).digest('base64url');
   return {
     async login(username, password) {
       const owner = repository.getOwnerCredentials(username);
-      const accepted = await verifyPassword(password, owner?.passwordHash ?? await dummyHash);
+      const accepted = await verifyPassword(password, owner?.passwordHash ?? dummyHash);
       if (!owner || !accepted) return undefined;
       const token = exactBytes(randomBytes, 32).toString('base64url');
       const issuedAt = now();

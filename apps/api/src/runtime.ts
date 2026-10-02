@@ -13,12 +13,13 @@ export async function createApiRuntime(config: AppConfig, options: {
   try {
     const repository = createOwnerRepository(database.sqlite);
     const masterKey = await loadAuthMasterKey(config.dataDir, () => repository.hasSessions(), options.randomBytes);
+    const sessions = await createAuthSessionService({ repository, masterKey, ...options });
     const app = buildApp({
       config,
       getSetupState: async () => repository.getSetupState(),
       auth: {
         setup: createOwnerSetupService({ repository, ...options }),
-        sessions: createAuthSessionService({ repository, masterKey, ...options }),
+        sessions,
       },
     });
     app.addHook('onClose', async () => { database.close(); });
