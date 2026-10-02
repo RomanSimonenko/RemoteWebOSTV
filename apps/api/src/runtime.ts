@@ -1,9 +1,12 @@
 import { buildApp } from './app.js';
 import type { AppConfig } from './config.js';
+import type { FastifyInstance } from 'fastify';
+import type { EventEmitter } from 'node:events';
 import { createOwnerRepository } from './auth/repository.js';
 import { createOwnerSetupService } from './auth/service.js';
 import { createAuthSessionService, loadAuthMasterKey } from './auth/sessions.js';
 import { openDatabase } from './storage/database.js';
+import { safeListenTextResolver } from './security/logging.js';
 
 export async function createApiRuntime(config: AppConfig, options: {
   readonly now?: () => number;
@@ -28,6 +31,37 @@ export async function createApiRuntime(config: AppConfig, options: {
     return app;
   } catch (error) {
     database.close();
+    throw error;
+  }
+}
+
+export async function serveApi(app: FastifyInstance, config: AppConfig, signals: Pick<EventEmitter, 'once' | 'removeListener'> = process): Promise<string> {
+  let closing = false;
+  const removeSignals = () => {
+    signals.removeListener('SIGINT', shutdown);
+    signals.removeListener('SIGTERM', shutdown);
+  };
+  const shutdown = () => {
+    if (closing) return;
+    closing = true;
+    removeSignals();
+    void app.close().catch(() => {
+      console.error('API shutdown failed');
+      process.exitCode = 1;
+    });
+  };
+  signals.once('SIGINT', shutdown);
+  signals.once('SIGTERM', shutdown);
+  try {
+    return await app.listen({ host: config.host, port: config.port, listenTextResolver: safeListenTextResolver });
+  } catch (error) {
+    closing = true;
+    removeSignals();
+    try {
+      await app.close();
+    } catch (closeError) {
+      throw new AggregateError([error, closeError], 'API startup and cleanup both failed');
+    }
     throw error;
   }
 }

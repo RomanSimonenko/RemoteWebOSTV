@@ -1,32 +1,14 @@
 import { loadConfig } from './config.js';
 import { fileURLToPath } from 'node:url';
-import { createApiRuntime } from './runtime.js';
+import { createApiRuntime, serveApi } from './runtime.js';
 import { formatStartupError } from './startup-errors.js';
-import { safeListenTextResolver } from './security/logging.js';
 
 async function main(): Promise<void> {
   const config = loadConfig(process.env);
   const webRoot = fileURLToPath(new URL('../../../web/dist/', import.meta.url));
   const app = await createApiRuntime(config, { webRoot });
 
-  let closing = false;
-  const shutdown = () => {
-    if (closing) return;
-    closing = true;
-    void app.close().catch(() => {
-      console.error('API shutdown failed');
-      process.exitCode = 1;
-    });
-  };
-  process.once('SIGINT', shutdown);
-  process.once('SIGTERM', shutdown);
-
-  try {
-    await app.listen({ host: config.host, port: config.port, listenTextResolver: safeListenTextResolver });
-  } catch (error) {
-    await app.close();
-    throw error;
-  }
+  await serveApi(app, config);
 }
 
 try {
