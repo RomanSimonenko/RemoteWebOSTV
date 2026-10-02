@@ -119,6 +119,10 @@ test('session expiry is fixed and missing auth master key with stored sessions f
     expect((await app.inject({ url: '/api/auth/session', headers: { cookie } })).statusCode).toBe(200);
     now += 12 * 60 * 60 * 1000;
     expect((await app.inject({ url: '/api/auth/session', headers: { cookie } })).statusCode).toBe(401);
+    now -= 1000;
+    expect((await app.inject({ url: '/api/auth/session', headers: { cookie } })).statusCode).toBe(401);
+    // Keep a new, valid record for the missing-key startup case below.
+    expect((await app.inject({ method: 'POST', url: '/api/auth/login', headers: { origin }, payload: { username: 'alice', password } })).statusCode).toBe(200);
   } finally { await app.close(); }
   const keyPath = join(config.dataDir, 'auth-master.key');
   expect((await stat(keyPath)).mode & 0o777).toBe(0o600);

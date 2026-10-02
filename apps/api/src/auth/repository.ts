@@ -23,7 +23,7 @@ export function createOwnerRepository(sqlite: Database.Database): OwnerRepositor
   const selectOwner = sqlite.prepare('SELECT username, password_hash FROM owner WHERE id = 1 AND username = ?');
   const selectAnySession = sqlite.prepare('SELECT 1 FROM sessions LIMIT 1');
   const insertSession = sqlite.prepare('INSERT INTO sessions (token_hash, owner_id, created_at, expires_at, csrf_hash) VALUES (?, 1, ?, ?, ?)');
-  const selectSession = sqlite.prepare('SELECT owner.username, sessions.csrf_hash FROM sessions JOIN owner ON sessions.owner_id = owner.id WHERE sessions.token_hash = ? AND sessions.expires_at > ?');
+  const selectSession = sqlite.prepare('SELECT owner.username, sessions.csrf_hash, sessions.created_at, sessions.expires_at FROM sessions JOIN owner ON sessions.owner_id = owner.id WHERE sessions.token_hash = ?');
   const deleteSession = sqlite.prepare('DELETE FROM sessions WHERE token_hash = ?');
 
   return {
@@ -55,8 +55,16 @@ export function createOwnerRepository(sqlite: Database.Database): OwnerRepositor
       insertSession.run(tokenHash, now, expiresAt, csrfHash);
     },
     findSession(tokenHash, now) {
-      const row = selectSession.get(tokenHash, now) as { username: string; csrf_hash: string } | undefined;
-      return row ? { username: row.username, csrfHash: row.csrf_hash } : undefined;
+      const row = selectSession.get(tokenHash) as { username: string; csrf_hash: string; created_at: number; expires_at: number } | undefined;
+      if (!row) return undefined;
+      if (row.expires_at <= now) {
+        // Persist observed expiry so clock rollback or restart cannot revive it.
+        // Authentication reads may maintain expired records, never valid ones.
+        deleteSession.run(tokenHash);
+        return undefined;
+      }
+      if (row.created_at > now) return undefined;
+      return { username: row.username, csrfHash: row.csrf_hash };
     },
     revokeSession(tokenHash) { deleteSession.run(tokenHash); },
   };
