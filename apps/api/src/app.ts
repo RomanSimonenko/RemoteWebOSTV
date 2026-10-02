@@ -4,10 +4,12 @@ import Fastify from 'fastify';
 import { setupStatusSchema, type SetupState } from '@remote-webos-tv/contracts';
 
 import type { AppConfig } from './config.js';
+import { registerAuthRoutes, type AuthRoutesDependencies } from './auth/routes.js';
 
 export interface AppDependencies {
   readonly config: AppConfig;
   readonly getSetupState: () => Promise<SetupState>;
+  readonly auth?: Omit<AuthRoutesDependencies, 'config'>;
   readonly reportError?: (report: { readonly requestId: string; readonly status: number; readonly causeTypes: readonly string[] }) => void;
 }
 
@@ -30,7 +32,7 @@ function safeCauseTypes(error: unknown): string[] {
   return types;
 }
 
-export function buildApp({ config, getSetupState, reportError = (report) => { console.error(JSON.stringify(report)); } }: AppDependencies) {
+export function buildApp({ config, getSetupState, auth, reportError = (report) => { console.error(JSON.stringify(report)); } }: AppDependencies) {
   const app = Fastify({
     logger: false,
     bodyLimit: 16 * 1024,
@@ -83,6 +85,8 @@ export function buildApp({ config, getSetupState, reportError = (report) => { co
     }
     return { status: 'ok' };
   });
+
+  if (auth) registerAuthRoutes(app, { config, ...auth });
 
   return app;
 }
