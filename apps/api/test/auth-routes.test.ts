@@ -132,6 +132,44 @@ test('HTTPS refuses an insecure cookie override', async () => {
   await expect(createApiRuntime({ ...config, secureCookies: false })).rejects.toThrow(/secure.*cookie|cookie.*secure/i);
 });
 
+test('encoded API aliases inherit Origin, session, CSRF and cache policies from their matched routes', async () => {
+  const { config, token } = await fixture();
+  const app = await createApiRuntime(config);
+  app.get('/api/private', async () => ({ state: 'private' }));
+  app.post('/api/private', async () => ({ applied: true }));
+  try {
+    for (const url of ['/%61pi/setup', '/api/auth/%6cogin']) {
+      const denied = await app.inject({ method: 'POST', url, payload: { token, username: 'alice', password } });
+      expect(denied.statusCode).toBe(403);
+      expect(denied.headers['cache-control']).toBe('no-store');
+    }
+    for (const method of ['GET', 'POST'] as const) {
+      const denied = await app.inject({ method, url: '/%61pi/private', headers: { origin } });
+      expect(denied.statusCode).toBe(401);
+      expect(denied.headers['cache-control']).toBe('no-store');
+    }
+    expect((await app.inject({ method: 'POST', url: '/%61pi/setup', headers: { origin }, payload: { token, username: 'alice', password } })).statusCode).toBe(201);
+    const login = await app.inject({ method: 'POST', url: '/%61pi/auth/login', headers: { origin }, payload: { username: 'alice', password } });
+    expect(login.statusCode).toBe(200);
+    expect(login.headers['cache-control']).toBe('no-store');
+    const cookie = String(login.headers['set-cookie']).split(';', 1)[0]!;
+    const session = await app.inject({ url: '/%61pi/auth/session', headers: { cookie } });
+    expect(session.statusCode).toBe(200);
+    expect(session.headers['cache-control']).toBe('no-store');
+    const csrf = session.json().csrfToken as string;
+    for (const url of ['/%61pi/private', '/%61pi/auth/logout']) {
+      for (const headers of [{ cookie, origin }, { cookie, origin: 'https://foreign.example.test', 'x-csrf-token': csrf }]) {
+        const denied = await app.inject({ method: 'POST', url, headers });
+        expect(denied.statusCode).toBe(403);
+        expect(denied.headers['cache-control']).toBe('no-store');
+      }
+    }
+    expect((await app.inject({ method: 'POST', url: '/%61pi/private', headers: { cookie, origin, 'x-csrf-token': csrf } })).json()).toEqual({ applied: true });
+    expect((await app.inject({ method: 'POST', url: '/%61pi/auth/logout', headers: { cookie, origin, 'x-csrf-token': csrf } })).statusCode).toBe(204);
+    expect((await app.inject({ url: '/%61pi/auth/session', headers: { cookie } })).statusCode).toBe(401);
+  } finally { await app.close(); }
+});
+
 test('future API routes inherit session, Origin and CSRF guards', async () => {
   const { config, token } = await fixture();
   const app = await createApiRuntime(config);

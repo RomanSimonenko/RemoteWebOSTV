@@ -4,6 +4,7 @@ import { loginRequestSchema, setupRequestSchema } from '@remote-webos-tv/contrac
 import type { AppConfig } from '../config.js';
 import { OwnerSetupError, type OwnerSetupService } from './service.js';
 import type { AuthSessionService } from './sessions.js';
+import { httpPolicy } from '../security/http-policy.js';
 
 export interface AuthRoutesDependencies {
   readonly config: AppConfig;
@@ -27,15 +28,15 @@ export function registerAuthRoutes(app: FastifyInstance, { config, setup, sessio
   }
   const error = (request: FastifyRequest, code: string, message: string) => ({ code, message, requestId: request.id });
   app.addHook('onRequest', async (request, reply) => {
-    const path = request.url.split('?', 1)[0];
-    if (!path || (path !== '/api' && !path.startsWith('/api/'))) return;
+    const policy = httpPolicy(request);
+    if (!policy.api) return;
     if (request.is404) return;
     const mutating = !['GET', 'HEAD', 'OPTIONS'].includes(request.method);
     if (mutating && request.headers.origin !== config.publicOrigin) {
       reply.code(403).send(error(request, 'FORBIDDEN', 'Forbidden'));
       return;
     }
-    if (path === '/api/health' || path === '/api/setup/status' || path === '/api/setup' || path === '/api/auth/login') return;
+    if (!policy.requiresSession) return;
     const cookie = sessionCookie(request);
     if (!sessions.authenticate(cookie)) {
       reply.code(401).send(error(request, 'UNAUTHORIZED', 'Unauthorized'));

@@ -1,5 +1,6 @@
 import rateLimit from '@fastify/rate-limit';
 import type { FastifyInstance } from 'fastify';
+import { httpPolicy } from './http-policy.js';
 
 export function installAuthRateLimit(app: FastifyInstance): void {
   app.register(rateLimit, {
@@ -11,8 +12,7 @@ export function installAuthRateLimit(app: FastifyInstance): void {
     errorResponseBuilder: () => ({ statusCode: 429, code: 'RATE_LIMITED' }),
   });
   app.addHook('onRequest', async (request, reply) => {
-    const path = request.url.split('?', 1)[0];
-    if (request.method === 'POST' && (path === '/api/setup' || path === '/api/auth/login')) {
+    if (httpPolicy(request).authAttempt) {
       await app.rateLimit().call(app, request, reply);
     }
   });

@@ -58,12 +58,22 @@ test('unknown API paths stay JSON 404 with production authentication enabled', a
     for (const options of [
       { method: 'GET' as const, url: '/api/missing', headers: { accept: 'text/html' } },
       { method: 'POST' as const, url: '/api/missing', headers: { accept: 'text/html' } },
+      { method: 'GET' as const, url: '/%61pi/missing', headers: { accept: 'text/html' } },
+      { method: 'POST' as const, url: '/%61pi/missing', headers: { accept: 'text/html' } },
+      { method: 'GET' as const, url: '/%61pi?query=1', headers: { accept: 'text/html' } },
     ]) {
       const missing = await app.inject(options);
       expect(missing.statusCode).toBe(404);
       expect(missing.headers['content-type']).toMatch(/application\/json/);
       expect(missing.headers['cache-control']).toBe('no-store');
       expect(apiErrorSchema.parse(missing.json()).code).toBe('NOT_FOUND');
+    }
+    for (const url of ['/%61pi/%zz', '/api/%', '/%zz']) {
+      const malformed = await app.inject({ url, headers: { accept: 'text/html' } });
+      expect(malformed.statusCode).toBe(400);
+      expect(malformed.headers['cache-control']).toBe('no-store');
+      expect(apiErrorSchema.parse(malformed.json()).code).toBe('BAD_REQUEST');
+      expect(malformed.body).not.toContain(url);
     }
   } finally { await app.close(); }
 });

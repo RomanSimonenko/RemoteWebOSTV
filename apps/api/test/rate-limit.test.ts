@@ -22,6 +22,23 @@ function appFor(trustedProxy: readonly string[] = []) {
 
 afterEach(() => vi.useRealTimers());
 
+test.each(['/api/setup', '/api/auth/login'])('encoded aliases of %s share the canonical attempt limit', async (path) => {
+  const app = appFor();
+  try {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const response = await app.inject({ method: 'POST', url: attempt % 2 ? path : path.replace('/api/', '/%61pi/'), headers: { origin }, payload: {} });
+      expect(response.statusCode).toBe(400);
+      expect(response.headers['cache-control']).toBe('no-store');
+    }
+    for (const url of [path, path.replace('/api/', '/%61pi/')]) {
+      const blocked = await app.inject({ method: 'POST', url, headers: { origin }, payload: {} });
+      expect(blocked.statusCode).toBe(429);
+      expect(blocked.headers['retry-after']).toBeDefined();
+      expect(blocked.headers['cache-control']).toBe('no-store');
+    }
+  } finally { await app.close(); }
+});
+
 test('setup and login share five attempts per source IP for sixty seconds', async () => {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));

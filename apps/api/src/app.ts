@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Writable } from 'node:stream';
 
-import Fastify from 'fastify';
+import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { setupStatusSchema, type SetupState } from '@remote-webos-tv/contracts';
 
@@ -9,6 +9,7 @@ import type { AppConfig } from './config.js';
 import { registerAuthRoutes, type AuthRoutesDependencies } from './auth/routes.js';
 import { installAuthRateLimit } from './security/rate-limit.js';
 import { safeCauseTypes, safeLoggerOptions } from './security/logging.js';
+import { httpPolicy } from './security/http-policy.js';
 
 export interface AppDependencies {
   readonly config: AppConfig;
@@ -26,6 +27,16 @@ class StorageUnavailableError extends Error {
   }
 }
 
+function routingError(error: Error & { code?: string }, request: FastifyRequest, reply: FastifyReply): void {
+  // Router failures run before ordinary hooks and must not echo the raw URL.
+  const badRequest = error.code === 'FST_ERR_BAD_URL' || error.code === 'FST_ERR_MAX_PARAM_LENGTH';
+  reply.header('x-request-id', request.id).header('cache-control', 'no-store')
+    .code(badRequest ? 400 : 500).send({
+      code: badRequest ? 'BAD_REQUEST' : 'INTERNAL_ERROR',
+      message: badRequest ? 'Bad request' : 'Internal server error', requestId: request.id,
+    });
+}
+
 export function buildApp({ config, getSetupState, webRoot, auth, reportError, logStream }: AppDependencies) {
   const app = Fastify({
     logger: safeLoggerOptions(logStream),
@@ -33,6 +44,7 @@ export function buildApp({ config, getSetupState, webRoot, auth, reportError, lo
     requestIdHeader: false,
     genReqId: () => randomUUID(),
     trustProxy: config.trustedProxy.length ? [...config.trustedProxy] : false,
+    frameworkErrors: routingError,
   });
 
   app.addHook('onRequest', async (request, reply) => {
@@ -40,8 +52,7 @@ export function buildApp({ config, getSetupState, webRoot, auth, reportError, lo
   });
 
   app.addHook('onSend', async (request, reply, payload) => {
-    const pathname = request.url.split('?', 1)[0];
-    if (pathname === '/api' || pathname?.startsWith('/api/')) {
+    if (httpPolicy(request).api) {
       reply.header('cache-control', 'no-store');
     }
     return payload;
@@ -72,10 +83,7 @@ export function buildApp({ config, getSetupState, webRoot, auth, reportError, lo
   }
 
   app.setNotFoundHandler((request, reply) => {
-    const pathname = request.url.split('?', 1)[0] ?? '';
-    if (webRoot && request.method === 'GET' && request.headers.accept?.includes('text/html')
-      && pathname !== '/api' && !pathname.startsWith('/api/')
-      && !pathname.includes('.') && !/%2e/i.test(pathname)) {
+    if (webRoot && httpPolicy(request).spaNavigation) {
       return reply.code(200).type('text/html').sendFile('index.html');
     }
     reply.code(404).send({ code: 'NOT_FOUND', message: 'Not found', requestId: request.id });
