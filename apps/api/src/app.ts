@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Writable } from 'node:stream';
 
 import Fastify from 'fastify';
+import fastifyStatic from '@fastify/static';
 import { setupStatusSchema, type SetupState } from '@remote-webos-tv/contracts';
 
 import type { AppConfig } from './config.js';
@@ -12,6 +13,7 @@ import { safeCauseTypes, safeLoggerOptions } from './security/logging.js';
 export interface AppDependencies {
   readonly config: AppConfig;
   readonly getSetupState: () => Promise<SetupState>;
+  readonly webRoot?: string;
   readonly auth?: Omit<AuthRoutesDependencies, 'config'>;
   readonly reportError?: (report: { readonly requestId: string; readonly status: number; readonly causeTypes: readonly string[] }) => void;
   readonly logStream?: Writable;
@@ -24,7 +26,7 @@ class StorageUnavailableError extends Error {
   }
 }
 
-export function buildApp({ config, getSetupState, auth, reportError, logStream }: AppDependencies) {
+export function buildApp({ config, getSetupState, webRoot, auth, reportError, logStream }: AppDependencies) {
   const app = Fastify({
     logger: safeLoggerOptions(logStream),
     bodyLimit: 16 * 1024,
@@ -65,7 +67,17 @@ export function buildApp({ config, getSetupState, auth, reportError, logStream }
     reply.code(status).send({ code, message, requestId: request.id });
   });
 
+  if (webRoot) {
+    app.register(fastifyStatic, { root: webRoot, wildcard: false });
+  }
+
   app.setNotFoundHandler((request, reply) => {
+    const pathname = request.url.split('?', 1)[0] ?? '';
+    if (webRoot && request.method === 'GET' && request.headers.accept?.includes('text/html')
+      && pathname !== '/api' && !pathname.startsWith('/api/')
+      && !pathname.includes('.') && !/%2e/i.test(pathname)) {
+      return reply.code(200).type('text/html').sendFile('index.html');
+    }
     reply.code(404).send({ code: 'NOT_FOUND', message: 'Not found', requestId: request.id });
   });
 

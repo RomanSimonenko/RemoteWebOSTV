@@ -1,11 +1,13 @@
 import { loadConfig } from './config.js';
+import { fileURLToPath } from 'node:url';
 import { createApiRuntime } from './runtime.js';
 import { formatStartupError } from './startup-errors.js';
 import { safeListenTextResolver } from './security/logging.js';
 
 async function main(): Promise<void> {
   const config = loadConfig(process.env);
-  const app = await createApiRuntime(config);
+  const webRoot = fileURLToPath(new URL('../../../web/dist/', import.meta.url));
+  const app = await createApiRuntime(config, { webRoot });
 
   let closing = false;
   const shutdown = () => {

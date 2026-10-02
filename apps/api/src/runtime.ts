@@ -8,6 +8,7 @@ import { openDatabase } from './storage/database.js';
 export async function createApiRuntime(config: AppConfig, options: {
   readonly now?: () => number;
   readonly randomBytes?: (length: number) => Uint8Array;
+  readonly webRoot?: string;
 } = {}) {
   const database = await openDatabase({ dataDir: config.dataDir });
   try {
@@ -16,6 +17,7 @@ export async function createApiRuntime(config: AppConfig, options: {
     const sessions = await createAuthSessionService({ repository, masterKey, ...options });
     const app = buildApp({
       config,
+      ...(options.webRoot ? { webRoot: options.webRoot } : {}),
       getSetupState: async () => repository.getSetupState(),
       auth: {
         setup: createOwnerSetupService({ repository, ...options }),
