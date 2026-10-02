@@ -15,6 +15,7 @@ export function Setup({ busy, error, onSubmit }: Props) {
       <label>Имя владельца<input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" maxLength={64} required /></label>
       <label>Пароль<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="new-password" minLength={12} maxLength={128} required /></label>
       {error}
+      <p role="status" aria-live="polite">{busy ? 'Создаём владельца…' : ''}</p>
       <button disabled={busy} type="submit">{busy ? 'Создание…' : 'Создать владельца'}</button>
     </form>
   </section>;

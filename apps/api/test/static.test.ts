@@ -5,6 +5,7 @@ import { afterEach, expect, test } from 'vitest';
 import { apiErrorSchema } from '@remote-webos-tv/contracts';
 import { buildApp } from '../src/app.js';
 import type { AppConfig } from '../src/config.js';
+import { createApiRuntime } from '../src/runtime.js';
 
 const directories: string[] = [];
 const config: AppConfig = {
@@ -44,6 +45,25 @@ test('serves built assets and limits SPA fallback to GET HTML navigation', async
       expect(missing.statusCode).toBe(404);
       expect(apiErrorSchema.parse(missing.json()).code).toBe('NOT_FOUND');
       if (options.url.startsWith('/api/')) expect(missing.headers['cache-control']).toBe('no-store');
+    }
+  } finally { await app.close(); }
+});
+
+test('unknown API paths stay JSON 404 with production authentication enabled', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'remote-webos-static-auth-'));
+  directories.push(root);
+  await writeFile(join(root, 'index.html'), '<!doctype html><title>UI marker</title>');
+  const app = await createApiRuntime({ ...config, dataDir: join(root, 'data') }, { webRoot: root });
+  try {
+    for (const options of [
+      { method: 'GET' as const, url: '/api/missing', headers: { accept: 'text/html' } },
+      { method: 'POST' as const, url: '/api/missing', headers: { accept: 'text/html' } },
+    ]) {
+      const missing = await app.inject(options);
+      expect(missing.statusCode).toBe(404);
+      expect(missing.headers['content-type']).toMatch(/application\/json/);
+      expect(missing.headers['cache-control']).toBe('no-store');
+      expect(apiErrorSchema.parse(missing.json()).code).toBe('NOT_FOUND');
     }
   } finally { await app.close(); }
 });

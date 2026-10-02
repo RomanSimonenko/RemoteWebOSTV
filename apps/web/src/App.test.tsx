@@ -77,8 +77,26 @@ test('pending login cannot submit twice and reports a safe server error', async 
   fireEvent.submit(button.closest('form')!);
   fireEvent.submit(button.closest('form')!);
   await waitFor(() => expect(button.disabled).toBe(true));
+  expect(screen.getByRole('status').textContent).toBe('Выполняется вход…');
   expect(fetch).toHaveBeenCalledTimes(3);
   finish(response(401, { code: 'INVALID_CREDENTIALS', message: 'Invalid credentials', requestId: 'request-3' }));
   expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Неверное имя или пароль.');
   await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('alert')));
+});
+
+test('pending setup announces progress in a live status region', async () => {
+  let finish!: (value: Response) => void;
+  const pending = new Promise<Response>((resolve) => { finish = resolve; });
+  const fetch = vi.fn().mockResolvedValueOnce(response(200, { state: 'unclaimed' }))
+    .mockReturnValueOnce(pending);
+  vi.stubGlobal('fetch', fetch);
+  render(<App />);
+  await screen.findByRole('heading', { name: 'Первичная настройка' });
+  fireEvent.change(screen.getByLabelText('Установочный токен'), { target: { value: 't'.repeat(43) } });
+  fireEvent.change(screen.getByLabelText('Имя владельца'), { target: { value: 'alice' } });
+  fireEvent.change(screen.getByLabelText('Пароль'), { target: { value: 'correct horse battery staple' } });
+  fireEvent.submit(screen.getByRole('button', { name: 'Создать владельца' }).closest('form')!);
+  expect((await screen.findByRole('status')).textContent).toBe('Создаём владельца…');
+  finish(response(201));
+  expect(await screen.findByRole('heading', { name: 'Вход' })).toBeTruthy();
 });

@@ -29,6 +29,7 @@ export function registerAuthRoutes(app: FastifyInstance, { config, setup, sessio
   app.addHook('onRequest', async (request, reply) => {
     const path = request.url.split('?', 1)[0];
     if (!path || (path !== '/api' && !path.startsWith('/api/'))) return;
+    if (request.is404) return;
     const mutating = !['GET', 'HEAD', 'OPTIONS'].includes(request.method);
     if (mutating && request.headers.origin !== config.publicOrigin) {
       reply.code(403).send(error(request, 'FORBIDDEN', 'Forbidden'));
