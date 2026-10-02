@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
 import { expect, test } from '@playwright/test';
+import { waitForListening } from '../api-process.js';
 
 const runFile = promisify(execFile);
 const apiEntry = fileURLToPath(new URL('../../../api/dist/src/index.js', import.meta.url));
@@ -28,31 +29,6 @@ async function availablePort(): Promise<number> {
   const port = (socket.address() as AddressInfo).port;
   await new Promise<void>((resolve, reject) => socket.close((error) => error ? reject(error) : resolve()));
   return port;
-}
-
-async function waitForListening(child: ChildProcess): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    let tail = '';
-    const timeout = setTimeout(() => finish(new Error('API did not start')), 15_000);
-    const output = (chunk: Buffer) => {
-      tail = (tail + chunk.toString('utf8')).slice(-200);
-      if (tail.includes('API listening')) finish();
-    };
-    const exited = () => finish(new Error('API exited before listening'));
-    const spawnFailed = () => finish(new Error('API process could not start'));
-    const finish = (error?: Error) => {
-      clearTimeout(timeout);
-      child.stdout?.off('data', output);
-      child.off('exit', exited);
-      child.off('error', spawnFailed);
-      child.stdout?.resume();
-      error ? reject(error) : resolve();
-    };
-    child.stdout?.on('data', output);
-    child.stderr?.resume();
-    child.once('exit', exited);
-    child.once('error', spawnFailed);
-  });
 }
 
 test.beforeAll(async () => {
