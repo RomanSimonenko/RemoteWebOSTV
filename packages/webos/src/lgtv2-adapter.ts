@@ -103,6 +103,7 @@ export class Lgtv2Adapter implements WebOsAdapter {
   readonly #dependencies: Lgtv2AdapterDependencies;
   #client: Lgtv2Client | undefined;
   #pointerSocket: Lgtv2SpecializedSocket | undefined;
+  #pointerAcquisition: { readonly client: Lgtv2Client; readonly promise: Promise<Lgtv2SpecializedSocket> } | undefined;
   #identity: TvIdentity | undefined;
   #capabilities: MutableCapabilities | undefined;
   #transport: TvTransport | undefined;
@@ -167,19 +168,29 @@ export class Lgtv2Adapter implements WebOsAdapter {
     const pointerSocket = await this.#execute(
       'pointer',
       signal,
-      () => client.getSocket(uris.pointer).then((socket) => {
-        if (this.#client !== client) {
-          // lgtv2 caches wrappers per client. Only a stale client's socket is
-          // ours to close here; cancellation alone must not close a shared cache.
-          try { socket.close(); }
-          catch (cause) {
-            this.#pointerCleanupFailure = new WebOsError('CONNECTION_LOST', 'Unable to close a stale pointer socket', { cause });
-            throw this.#pointerCleanupFailure;
+      () => {
+        // lgtv2 caches only completed sockets. Keep one raw acquisition per
+        // client across eager caller cancellation to prevent late cache overwrite.
+        if (this.#pointerAcquisition?.client === client) return this.#pointerAcquisition.promise;
+        const pending = client.getSocket(uris.pointer).then((socket) => {
+          if (this.#client !== client) {
+            // Only a stale client's socket is ours to close here; cancellation
+            // alone must not close a cache shared with a later caller.
+            try { socket.close(); }
+            catch (cause) {
+              this.#pointerCleanupFailure = new WebOsError('CONNECTION_LOST', 'Unable to close a stale pointer socket', { cause });
+              throw this.#pointerCleanupFailure;
+            }
+            throw new WebOsError('CONNECTION_LOST', 'Pointer belongs to a replaced client');
           }
-          throw new WebOsError('CONNECTION_LOST', 'Pointer belongs to a replaced client');
-        }
-        return socket;
-      }),
+          return socket;
+        });
+        const acquisition = { client, promise: pending.finally(() => {
+          if (this.#pointerAcquisition === acquisition) this.#pointerAcquisition = undefined;
+        }) };
+        this.#pointerAcquisition = acquisition;
+        return acquisition.promise;
+      },
     );
     throwIfAborted(signal);
     if (this.#client !== client) throw new WebOsError('CONNECTION_LOST', 'Pointer belongs to a replaced client');

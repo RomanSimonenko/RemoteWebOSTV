@@ -15,6 +15,7 @@ import type {
 } from '../src/lgtv2-types.js';
 import { WebOsError } from '../src/errors.js';
 import type { ClientKeyStore } from '../src/key-store.js';
+import { runProbe } from '../src/probe.js';
 import { MockWebOsTv } from './support/mock-webos-tv.js';
 import {
   mockClientKey,
@@ -151,6 +152,95 @@ describe('Lgtv2Adapter', () => {
     await adapter.sendButton('UP', new AbortController().signal);
     expect(send).toHaveBeenCalledExactlyOnceWith('button', { name: 'UP' });
     await adapter.disconnect(); expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  test('coalesces overlapping acquisitions after abort so late cache overwrite cannot orphan a socket', async () => {
+    // Match lgtv2: only completed sockets are cached, and every open overwrites
+    // that cache. Disconnect closes the cached socket, not all historic sockets.
+    let cached: Lgtv2SpecializedSocket | undefined;
+    const frames: string[] = [];
+    const sockets: Array<{ closed: boolean }> = [];
+    const acquisitions: Array<{ open(): void }> = [];
+    const getSocket = () => {
+      if (cached) return Promise.resolve(cached);
+      return new Promise<Lgtv2SpecializedSocket>((resolve) => {
+        acquisitions.push({ open() {
+          const state = { closed: false }; sockets.push(state);
+          const socket: Lgtv2SpecializedSocket = {
+            send(_type, payload) { frames.push(String(payload?.name)); },
+            close() { state.closed = true; },
+          };
+          cached = socket; resolve(socket);
+        } });
+      });
+    };
+    const { adapter } = createUnitAdapter({ getSocket, disconnect: async () => { cached?.close(); cached = undefined; } }); await pair(adapter);
+    const controller = new AbortController(); const first = adapter.sendButton('HOME', controller.signal); controller.abort();
+    await expect(first).rejects.toMatchObject({ delivery: 'not_sent' });
+    const second = adapter.sendButton('UP', new AbortController().signal);
+    const firstAcquisition = acquisitions[0]!; const newestAcquisition = acquisitions.at(-1)!;
+    newestAcquisition.open(); await second;
+    if (firstAcquisition !== newestAcquisition) firstAcquisition.open();
+    for (let index = 0; index < 10; index++) await Promise.resolve();
+    await adapter.sendButton('RIGHT', new AbortController().signal); await adapter.disconnect();
+    expect(frames).toEqual(['UP', 'RIGHT']);
+    expect.soft(acquisitions).toHaveLength(1); expect(sockets.every((socket) => socket.closed)).toBe(true);
+  });
+
+  test('failed shared acquisition releases ownership for the next explicit command', async () => {
+    let reject!: (cause: unknown) => void;
+    const pendingPointer = new Promise<Lgtv2SpecializedSocket>((_resolve, no) => { reject = no; });
+    const send = vi.fn(); const getSocket = vi.fn<() => Promise<Lgtv2SpecializedSocket>>().mockReturnValueOnce(pendingPointer).mockResolvedValue({ send, close() {} });
+    const { adapter } = createUnitAdapter({ getSocket }); await pair(adapter);
+    const controller = new AbortController(); const cancelled = adapter.sendButton('HOME', controller.signal); controller.abort();
+    await expect(cancelled).rejects.toMatchObject({ delivery: 'not_sent' });
+    const waiting = adapter.sendButton('UP', new AbortController().signal);
+    const assertion = expect(waiting).rejects.toMatchObject({ code: 'CONNECTION_LOST', delivery: 'not_sent' });
+    reject(new WebOsError('CONNECTION_LOST', 'synthetic acquisition failure')); await assertion;
+    await adapter.sendButton('RIGHT', new AbortController().signal);
+    expect(getSocket).toHaveBeenCalledTimes(2); expect(send).toHaveBeenCalledExactlyOnceWith('button', { name: 'RIGHT' });
+  });
+
+  test('old acquisition settlement cannot release a pending replacement acquisition', async () => {
+    let oldRelease!: (socket: Lgtv2SpecializedSocket) => void; let newRelease!: (socket: Lgtv2SpecializedSocket) => void;
+    const oldPointer = new Promise<Lgtv2SpecializedSocket>((resolve) => { oldRelease = resolve; });
+    const newPointer = new Promise<Lgtv2SpecializedSocket>((resolve) => { newRelease = resolve; });
+    const oldClose = vi.fn(); const newClose = vi.fn();
+    const getSocket = vi.fn<() => Promise<Lgtv2SpecializedSocket>>().mockReturnValueOnce(oldPointer).mockReturnValue(newPointer);
+    const { adapter } = createUnitAdapter({ getSocket }); await pair(adapter);
+    const controller = new AbortController(); const cancelled = adapter.openPointerSocket(controller.signal); controller.abort();
+    await expect(cancelled).rejects.toMatchObject({ code: 'CONNECTION_LOST' }); await adapter.disconnect(); await pair(adapter);
+    const first = adapter.openPointerSocket(new AbortController().signal);
+    oldRelease({ send: vi.fn(), close: oldClose }); for (let index = 0; index < 10; index++) await Promise.resolve();
+    const second = adapter.openPointerSocket(new AbortController().signal);
+    newRelease({ send: vi.fn(), close: newClose }); await Promise.all([first, second]);
+    expect(getSocket).toHaveBeenCalledTimes(2); expect(oldClose).toHaveBeenCalledTimes(1); expect(newClose).not.toHaveBeenCalled();
+  });
+
+  test.each(['sent', 'preparation-failure', 'send-failure'] as const)('real CLI command path preserves safe output and exit for %s', async (result) => {
+    const send = vi.fn(() => { if (result === 'send-failure') throw new Error('private send cause'); });
+    const { adapter } = createUnitAdapter({ getSocket: async () => {
+      if (result === 'preparation-failure') throw new WebOsError('CONNECTION_LOST', 'private preparation cause');
+      return { send, close() {} };
+    } });
+    const cli = await runAdapterCli(adapter);
+    expect(cli.exitCode).toBe(result === 'sent' ? 0 : 1);
+    expect(cli.output).toContain(result === 'sent' ? 'button: pass' : result === 'preparation-failure' ? 'CONNECTION_LOST' : 'UNKNOWN');
+    expect(cli.output).not.toMatch(/private|tv\.invalid|synthetic-mock-client-key/);
+    expect(send).toHaveBeenCalledTimes(result === 'preparation-failure' ? 0 : 1);
+  });
+
+  test('real CLI cancels pending acquisition eagerly and a late socket never sends', async () => {
+    let entered!: () => void; const enteredPointer = new Promise<void>((resolve) => { entered = resolve; });
+    let release!: (socket: Lgtv2SpecializedSocket) => void;
+    const pointer = new Promise<Lgtv2SpecializedSocket>((resolve) => { release = resolve; });
+    const { adapter } = createUnitAdapter({ getSocket: () => { entered(); return pointer; } });
+    const listeners = new Map<string, () => void>(); const pending = runAdapterCli(adapter, listeners);
+    await enteredPointer; listeners.get('SIGINT')!(); const cli = await pending;
+    expect(cli.exitCode).toBe(1); expect(cli.output).toContain('CONNECTION_LOST'); expect(listeners.size).toBe(0);
+    const send = vi.fn(); const close = vi.fn(); release({ send, close });
+    for (let index = 0; index < 10; index++) await Promise.resolve();
+    expect(send).not.toHaveBeenCalled(); expect(close).toHaveBeenCalledTimes(1);
   });
 
   test('late old-client pointer cleanup cannot close the replacement pointer', async () => {
@@ -761,6 +851,20 @@ function createUnitAdapter(
   );
   createdAdapters.push(adapter);
   return { adapter, client };
+}
+
+async function runAdapterCli(adapter: Lgtv2Adapter, listeners = new Map<string, () => void>()) {
+  // Exercise the real CLI, probe, and adapter; only persistence/output are in memory.
+  const { runProtocolProbeCli } = await import(new URL('../../../apps/protocol-probe/src/main.js', import.meta.url).href);
+  const output: string[] = [];
+  const exitCode = await runProtocolProbeCli(['command', '--host', 'tv.invalid', '--data-dir', '.', '--operation', 'button', '--button', 'HOME'], {
+    createKeyStore: () => new MemoryKeyStore(), createAdapter: () => adapter, runProbe,
+    readReport: async () => undefined, writeReport: async (_directory: string, report: unknown) => report,
+    writeMarkdown: async () => '', now: () => new Date('2026-09-03T10:00:00.000Z'),
+    stdout: { write: (text: string) => output.push(text) }, stderr: { write: (text: string) => output.push(text) },
+    signals: { once: (name: string, listener: () => void) => listeners.set(name, listener), off: (name: string) => listeners.delete(name) },
+  });
+  return { exitCode, output: output.join('') };
 }
 
 function responseForPairing(uri: string): unknown {
