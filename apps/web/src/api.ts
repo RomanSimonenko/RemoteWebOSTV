@@ -2,7 +2,11 @@ import { apiErrorSchema, loginResponseSchema, sessionResponseSchema, setupStatus
 
 export class ApiFailure extends Error {
   constructor(readonly status: number, readonly code: string) { super('API request failed'); }
+  get commandRejectedBeforeDispatch(): boolean { return validatedCommandRejections.has(this); }
 }
+// Status/code alone (including a manually constructed ApiFailure) cannot prove
+// delivery. Only this module's validated command error response can mark it.
+const validatedCommandRejections = new WeakSet<ApiFailure>();
 
 async function request(path: string, init?: RequestInit, resultStatuses: readonly number[] = []): Promise<Response> {
   let response: Response;
@@ -10,11 +14,17 @@ async function request(path: string, init?: RequestInit, resultStatuses: readonl
   catch { throw new ApiFailure(0, 'NETWORK_ERROR'); }
   if (!response.ok && !resultStatuses.includes(response.status)) {
     let code = 'UNEXPECTED_ERROR';
+    let commandRejected = false;
     try {
       const parsed = apiErrorSchema.safeParse(await response.json());
-      if (parsed.success) code = parsed.data.code;
+      if (parsed.success) {
+        code = parsed.data.code;
+        commandRejected = path === '/tv/commands' && ((response.status === 400 && code === 'BAD_REQUEST') || (response.status === 403 && code === 'FORBIDDEN'));
+      }
     } catch { /* Malformed responses remain generic API failures. */ }
-    throw new ApiFailure(response.status, code);
+    const failure = new ApiFailure(response.status, code);
+    if (commandRejected) validatedCommandRejections.add(failure);
+    throw failure;
   }
   return response;
 }

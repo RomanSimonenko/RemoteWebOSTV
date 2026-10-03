@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { Home } from './Home.js';
 import { Remote } from './Remote.js';
 import { App } from '../App.js';
+import { api, ApiFailure } from '../api.js';
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 test('saved television exposes the browser remote beside its setup', async () => {
@@ -142,10 +143,34 @@ test('consecutive explicit commands get distinct IDs while a lost response is ne
   expect(view.commands()).toHaveLength(2);
   expect(JSON.parse(view.commands()[0]![1]!.body as string).id).not.toBe(JSON.parse(view.commands()[1]![1]!.body as string).id);
 });
-test.each([400, 403])('auth/schema HTTP %s is a safe pre-send rejection', async (status) => {
-  await mount(() => Promise.resolve(response({ code: 'INVALID_REQUEST', message: 'synthetic private detail', requestId: 'synthetic' }, status)));
+test.each([[400, 'BAD_REQUEST'], [403, 'FORBIDDEN']])('validated producer HTTP %s %s is a safe pre-send rejection', async (status, code) => {
+  await mount(() => Promise.resolve(response({ code, message: 'synthetic private detail', requestId: 'synthetic' }, status)));
   fireEvent.click(screen.getByRole('button', { name: 'OK' })); await act(async () => {});
   expect(screen.getByRole('alert').textContent).toContain('Команда отклонена'); expect(screen.queryByText(unknown)).toBeNull();
+});
+test.each([400, 403])('HTTP %s malformed or inconsistent responses remain unknown without retry', async (status) => {
+  const payloads = [
+    {},
+    'invalid JSON',
+    { code: status === 400 ? 'BAD_REQUEST' : 'FORBIDDEN', message: 'safe', requestId: 'synthetic', secret: 'synthetic' },
+    { code: 'INVALID_REQUEST', message: 'safe', requestId: 'synthetic' },
+    { code: status === 400 ? 'FORBIDDEN' : 'BAD_REQUEST', message: 'safe', requestId: 'synthetic' },
+  ];
+  for (const payload of payloads) {
+    const view = await mount(() => Promise.resolve(typeof payload === 'string' ? new Response(payload, { status }) : response(payload, status)));
+    fireEvent.click(screen.getByRole('button', { name: 'OK' })); await act(async () => {});
+    expect(screen.getByRole('alert').textContent).toBe(unknown); expect(view.commands()).toHaveLength(1); view.unmount();
+  }
+  const view = await mount((input) => Promise.resolve(response({ id: input.id, outcome: 'sent' }, status)));
+  fireEvent.click(screen.getByRole('button', { name: 'OK' })); await act(async () => {});
+  expect(screen.getByRole('alert').textContent).toBe(unknown); expect(view.commands()).toHaveLength(1);
+});
+test.each([[400, 'BAD_REQUEST'], [403, 'FORBIDDEN']])('a manually constructed API failure %s %s cannot prove rejection', async (status, code) => {
+  await mount(); const send = vi.spyOn(api, 'sendCommand').mockRejectedValueOnce(new ApiFailure(status, code));
+  try {
+    fireEvent.click(screen.getByRole('button', { name: 'OK' })); await act(async () => {});
+    expect(screen.getByRole('alert').textContent).toBe(unknown);
+  } finally { send.mockRestore(); }
 });
 test('direct active/token lifecycle stops polls and ignores old command even when the component is retained', async () => {
   vi.useFakeTimers(); const pending = barrier<Response>(); const expired = vi.fn();

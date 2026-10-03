@@ -89,7 +89,7 @@ export function Remote({ csrfToken, active, onSessionExpired }: Props) {
       } else {
         // Auth/schema rejection is before dispatch. All lost or malformed
         // command responses remain uncertain; no automatic POST retry.
-        const rejected = cause instanceof ApiFailure && (cause.status === 400 || cause.status === 403);
+        const rejected = cause instanceof ApiFailure && cause.commandRejectedBeforeDispatch;
         setFeedback({ text: rejected ? 'Команда отклонена. Проверьте сессию и попробуйте снова.' : unknownMessage, alert: true });
       }
     } finally {
