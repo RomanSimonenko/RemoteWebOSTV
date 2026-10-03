@@ -42,7 +42,7 @@
 
 TV Service предоставляет `start(input): TvOperation` (принимает, но не ждёт сетевого завершения), `status(): Promise<TvStatusResponse>`, `cancel(id): TvOperation`, `initialize(): Promise<void>`, `close(): Promise<void>`. `initialize` запускает фоновую ограниченную попытку подключения, не блокируя HTTP на ожидании выключенного ТВ.
 
-Runtime dependencies: `repository`, `cipher`, `createAdapter(host: string, stagingKeyStore: ClientKeyStore, requestTimeoutMs: number): WebOsAdapter`, `now(): number`, `newId(): string`, внедряемый scheduler тайм-аутов. Scheduler использует monotonic длительность; epoch deadline предназначен UI. Откат wall-clock не продлевает реальный 60-секундный бюджет.
+Runtime dependencies: `repository`, `cipher`, `createAdapter(host: string, stagingKeyStore: ClientKeyStore, requestTimeoutMs: number, allowPairingPrompt: boolean): WebOsAdapter`, `now(): number`, `newId(): string`, внедряемый scheduler `{now(): number, setTimeout(callback, delay): unknown, clearTimeout(handle): void}`. Scheduler использует monotonic длительность; epoch deadline предназначен UI. Откат wall-clock не продлевает реальный 60-секундный бюджет. Сохранённый ключ проверяется с `allowPairingPrompt=false`; pair/repair разрешают новое подтверждение. Опция adapter по умолчанию остаётся true для совместимости CLI.
 
 ## Task 1: Публичные контракты и адреса
 
@@ -79,15 +79,17 @@ Runtime dependencies: `repository`, `cipher`, `createAdapter(host: string, stagi
 
 **Interfaces:** service и зависимости из общего блока; `createStagingKeyStore(initialKey?: string): ClientKeyStore` хранит ключ только в памяти. Репозиторий и cipher — из задачи 2.
 
-- [ ] Написать тесты успешного pair, registered без ключа, identity/readSnapshot failure после saveKey, отказа, network loss, тайм-аута 60000 ms и отмены. Проверить, что permanent replace вызывается только после полного успеха.
-- [ ] Написать детерминированные barrier tests: два start→одна попытка/409; cancel до/после commit; timeout против resolve; close против resolve; поздний reject/resolve не меняет следующую операцию. ID старой операции не отменяет новую.
-- [ ] Написать tests reconnect/restart без PROMPT, выключенного ТВ, revoked key без автоматического нового PROMPT; repair с пустым staging key; change_address с текущим ключом, rollback при ошибке. Старый adapter после неудачной замены закрывается, старая сохранённая настройка остаётся и может быть подключена снова.
-- [ ] Написать status tests: safe read подтверждает available; падение меняет runtime status; concurrent status разделяют один in-flight read, не пишут SQLite и не запускают pair. Logout не отключает backend; initialize не задерживает готовность HTTP.
-- [ ] Подтвердить RED: `pnpm --filter @remote-webos-tv/api test -- test/tv-service.test.ts test/tv-lifecycle.test.ts`.
-- [ ] Реализовать состояния, staging и сериализацию. После async encrypt/проверок повторно проверить generation и abort; синхронный SQLite replace — точка commit, между финальной проверкой и commit нет await. После commit операция succeeded; cancel завершённой операции возвращает её неизменённой. Неопределённый чужой ID даёт 404.
-- [ ] Полное pair/read имеет один deadline; общий AbortSignal останавливает работу при исчерпании бюджета, requestTimeoutMs adapter не превышает 60000. Перед повторным start предыдущий cleanup завершён; ошибка cleanup сохраняется как безопасная причинная классификация. `close` идемпотентен и ждёт незавершённых работ.
-- [ ] Запустить узкие tests/typecheck и suite mock adapter; подтвердить GREEN.
-- [ ] Коммит `feat: manage cancellable TV pairing lifecycle`.
+- [x] Написать тесты успешного pair, registered без ключа, identity/readSnapshot failure после saveKey, отказа, network loss, тайм-аута 60000 ms и отмены. Проверить, что permanent replace вызывается только после полного успеха.
+- [x] Написать детерминированные barrier tests: два start→одна попытка/409; cancel до/после commit; timeout против resolve; close против resolve; поздний reject/resolve не меняет следующую операцию. ID старой операции не отменяет новую.
+- [x] Написать tests reconnect/restart без PROMPT, выключенного ТВ, revoked key без автоматического нового PROMPT; repair с пустым staging key; change_address с текущим ключом, rollback при ошибке. Старый adapter после неудачной замены закрывается, старая сохранённая настройка остаётся и может быть подключена снова.
+- [x] Написать status tests: safe read подтверждает available; падение меняет runtime status; concurrent status разделяют один in-flight read, не пишут SQLite и не запускают pair. Logout не отключает backend; initialize не задерживает готовность HTTP. Проверка через реальные HTTP/logout относится к задачам 4–6.
+- [x] Подтвердить RED: `pnpm --filter @remote-webos-tv/api exec vitest run test/tv-service.test.ts test/tv-lifecycle.test.ts`.
+- [x] Реализовать состояния, staging и сериализацию. После async encrypt/проверок повторно проверить generation и abort; синхронный SQLite replace — точка commit, между финальной проверкой и commit нет await. После commit операция succeeded; cancel завершённой операции возвращает её неизменённой. Неопределённый чужой ID даёт 404.
+- [x] Полное pair/read имеет один deadline; общий AbortSignal останавливает работу при исчерпании бюджета, requestTimeoutMs adapter не превышает 60000. Перед повторным start предыдущий cleanup завершён; ошибка cleanup сохраняется как безопасная причинная классификация. `close` идемпотентен и ждёт незавершённых работ.
+- [x] Запустить узкие tests/typecheck и suite mock adapter; подтвердить GREEN.
+- [x] Коммит `feat: manage cancellable TV pairing lifecycle`.
+
+Приёмка задачи 3: `aff3112`, `0d719a7`, `ea75936`; 40 service/lifecycle tests, полный прогон 405 tests и typecheck всех пяти пакетов прошли. Независимое review и два scoped re-review закрыли замечания. Ошибка/тайм-аут публикуются без ожидания зависшего cleanup, но cleanup остаётся под управлением сервиса, блокирует новую попытку и ожидается при shutdown. Ранняя отмена не оставляет старое соединение доступным. Следующий шаг — задача 4: защищённые HTTP-маршруты и runtime; они пока не реализованы. Аппаратная приёмка веб-пути не выполнена.
 
 ## Task 4: Защищённый HTTP и runtime
 
@@ -131,6 +133,6 @@ Runtime dependencies: `repository`, `cipher`, `createAdapter(host: string, stagi
 
 ## Самопроверка и передача
 
-Спецификация покрыта задачами 1–6; каждый Review Focus привязан к tests. Публичные типы определены один раз; ключи не входят в status. Задачи 1–2 выполнены и проверены; остальные задачи остаются открытыми.
+Спецификация покрыта задачами 1–6; каждый Review Focus привязан к tests. Публичные типы определены один раз; ключи не входят в status. Задачи 1–3 выполнены и проверены; задачи 4–6 остаются открытыми. Перед исчерпанием лимита сохранена промежуточная точка после review задачи 3.
 
 Следующий шаг после одобрения плана: изолированная ветка от текущего подтверждённого состояния; выполнение задач последовательно с субагентами Sol 6.1 и независимыми проверками. Не объединять этот этап с несогласованными командами пульта или фоновым reconnect.
