@@ -8,7 +8,14 @@ const saved = { tv: { host: '192.168.1.20', identity: { model: 'Synthetic TV' } 
 const operation = { id: 'synthetic-operation', action: 'pair', status: 'running', startedAt: 10000, deadlineAt: 70000 };
 function response(data: unknown, status = 200) { return new Response(JSON.stringify(data), { status }); }
 function barrier<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
-async function mount() { render(<TvSetup csrfToken={csrfToken} onSessionExpired={vi.fn()} />); await act(async () => {}); }
+async function mount() {
+  // Capability reads belong to the remote; keep this suite's controlled
+  // sequence and assertions scoped to the existing setup/status requests.
+  const setupFetch = globalThis.fetch;
+  vi.stubGlobal('fetch', (path: RequestInfo | URL, init?: RequestInit) => path === '/api/tv/remote'
+    ? Promise.resolve(response({ enabled: false, reason: 'UNSUPPORTED' })) : setupFetch(path, init));
+  render(<TvSetup csrfToken={csrfToken} onSessionExpired={vi.fn()} />); await act(async () => {});
+}
 function submitHost(host: string) {
   fireEvent.change(screen.getByLabelText('IP-адрес телевизора'), { target: { value: host } });
   fireEvent.submit(screen.getByLabelText('IP-адрес телевизора').closest('form')!);

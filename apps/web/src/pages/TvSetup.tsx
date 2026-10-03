@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { startTvOperationSchema, type StartTvOperation, type TvConnectionState, type TvOperation, type SavedTvView } from '@remote-webos-tv/contracts';
 import { api, ApiFailure, friendlyError } from '../api.js';
 import { useTvStatus } from '../useTvStatus.js';
+import { Remote } from './Remote.js';
 
 interface Props { csrfToken: string; onSessionExpired(): void }
 const connections: Record<TvConnectionState, string> = {
@@ -98,5 +99,6 @@ export function TvSetup({ csrfToken, onSessionExpired }: Props) {
       </div>}
     </>}
     <button type="button" disabled={loading} onClick={refresh}>Обновить статус</button>
+    {tv && <Remote csrfToken={csrfToken} active onSessionExpired={onSessionExpired} />}
   </section>;
 }

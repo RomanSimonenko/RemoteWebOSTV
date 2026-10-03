@@ -69,11 +69,12 @@ test('expired session returns to login when an authenticated operation is reject
 test('authenticated reload reads TV status without starting a new pairing', async () => {
   const fetch = vi.fn().mockResolvedValueOnce(response(200, { state: 'claimed' }))
     .mockResolvedValueOnce(response(200, { username: 'alice', csrfToken }))
-    .mockResolvedValueOnce(response(200, { tv: { host: '192.168.1.20', identity: { model: 'Synthetic TV' } }, connection: 'unavailable', operation: null }));
+    .mockResolvedValueOnce(response(200, { tv: { host: '192.168.1.20', identity: { model: 'Synthetic TV' } }, connection: 'unavailable', operation: null }))
+    .mockResolvedValueOnce(response(200, { enabled: false, reason: 'UNAVAILABLE' }));
   vi.stubGlobal('fetch', fetch); render(<App />);
   expect(await screen.findByText('Synthetic TV')).toBeTruthy();
   expect(screen.getByText('192.168.1.20')).toBeTruthy();
-  expect(fetch.mock.calls.map(([path]) => path)).toEqual(['/api/setup/status', '/api/auth/session', '/api/tv']);
+  expect(fetch.mock.calls.map(([path]) => path)).toEqual(['/api/setup/status', '/api/auth/session', '/api/tv', '/api/tv/remote']);
 });
 
 test('status 401 returns to login through the App session owner', async () => {
