@@ -105,6 +105,101 @@ test('runtime shutdown awaits pending TV cleanup before closing SQLite', async (
   finally { reopened.close(); }
 });
 
+test('runtime wires commands; shutdown aborts HTTP command then awaits adapter work before SQLite closes', async () => {
+  const f = await fixture();
+  const app = await createApiRuntime(f.config, f.options);
+  const headers = await authenticate(app, f.database(), f.config);
+  const command = { id: '00000000-0000-4000-8000-000000000001', button: 'HOME' };
+  const gate = barrier<void>();
+  let closing: Promise<void> | undefined;
+  try {
+    expect((await app.inject({ method: 'POST', url: '/api/tv/operations', headers, payload: { action: 'pair', host: '192.168.1.10' } })).statusCode).toBe(202);
+    await succeed(f.adapters[0]!);
+    expect((await app.inject({ url: '/api/tv/remote', headers })).json()).toEqual({ enabled: true, reason: null });
+    const adapter = f.adapters[0]!;
+    adapter.sendResult = gate.promise;
+    const pending = app.inject({ method: 'POST', url: '/api/tv/commands', headers, payload: command });
+    const signal = await adapter.enteredSend.promise;
+    const aborted = new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
+    let closed = false;
+    closing = app.close().then(() => { closed = true; });
+    await aborted;
+    expect(signal.aborted).toBe(true);
+    expect((await pending).json()).toMatchObject({ id: command.id, outcome: 'unknown' });
+    await drain();
+    expect(closed).toBe(false);
+    expect(f.database().sqlite.open).toBe(true);
+    gate.resolve();
+    await closing;
+    expect(adapter.closed).toBe(true);
+    expect(f.database().sqlite.open).toBe(false);
+  } finally { gate.resolve(); await (closing ?? app.close()); }
+});
+
+test('runtime logout revokes its owned command and a new login keeps the saved TV without repeating it', async () => {
+  const f = await fixture();
+  const app = await createApiRuntime(f.config, f.options);
+  const headers = await authenticate(app, f.database(), f.config);
+  const gate = barrier<void>();
+  try {
+    await app.inject({ method: 'POST', url: '/api/tv/operations', headers, payload: { action: 'pair', host: '192.168.1.10' } });
+    await succeed(f.adapters[0]!);
+    const adapter = f.adapters[0]!;
+    adapter.sendResult = gate.promise;
+    const command = { id: '00000000-0000-4000-8000-000000000001', button: 'HOME' };
+    const pending = app.inject({ method: 'POST', url: '/api/tv/commands', headers, payload: command });
+    const signal = await adapter.enteredSend.promise;
+    expect((await app.inject({ method: 'POST', url: '/api/auth/logout', headers })).statusCode).toBe(204);
+    expect(signal.aborted).toBe(true);
+    expect((await pending).json()).toMatchObject({ id: command.id, outcome: 'unknown' });
+    gate.resolve(); await drain();
+    expect((await app.inject({ url: '/api/auth/session', headers })).statusCode).toBe(401);
+    const login = await app.inject({ method: 'POST', url: '/api/auth/login', headers: { origin: f.config.publicOrigin }, payload: { username: 'owner', password: 'synthetic password 123' } });
+    expect(login.statusCode).toBe(200);
+    const cookie = String(login.headers['set-cookie']).split(';', 1)[0]!;
+    expect((await app.inject({ url: '/api/tv/remote', headers: { cookie } })).json()).toEqual({ enabled: true, reason: null });
+    expect(createTvRepository(f.database().sqlite).hasStoredKey()).toBe(true);
+    expect(adapter.sent).toEqual(['HOME']);
+    expect(f.adapters).toHaveLength(1);
+  } finally { gate.resolve(); await app.close(); }
+});
+
+test('runtime shutdown awaits held command admission before closing session storage', async () => {
+  const f = await fixture();
+  const app = await createApiRuntime(f.config, f.options);
+  const headers = await authenticate(app, f.database(), f.config);
+  await app.inject({ method: 'POST', url: '/api/tv/operations', headers, payload: { action: 'pair', host: '192.168.1.10' } });
+  await succeed(f.adapters[0]!);
+  const entered = barrier<void>();
+  const release = barrier<void>();
+  const createLimiter = app.createRateLimit.bind(app);
+  vi.spyOn(app, 'createRateLimit').mockImplementation((options) => {
+    const limiter = createLimiter(options);
+    return async (request, callOptions) => {
+      if (options?.max === 10 && callOptions?.increment === false) { entered.resolve(); await release.promise; }
+      return limiter(request, callOptions);
+    };
+  });
+  const pending = app.inject({ method: 'POST', url: '/api/tv/commands', headers, payload: { id: '00000000-0000-4000-8000-000000000001', button: 'HOME' } });
+  await entered.promise;
+  let closed = false;
+  const closing = app.close().then(() => { closed = true; });
+  try {
+    // One event-loop turn lets Fastify run nextTick close hooks; the held
+    // limiter controls the race window, rather than any elapsed-time delay.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(closed).toBe(false);
+    expect(f.database().sqlite.open).toBe(true);
+    release.resolve();
+    const response = await pending;
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toMatchObject({ outcome: 'rejected', error: { code: 'COMMAND_NOT_SENT' } });
+    expect(f.adapters[0]!.sent).toEqual([]);
+    await closing;
+    expect(f.database().sqlite.open).toBe(false);
+  } finally { release.resolve(); await pending; await closing; }
+});
+
 test('corrupt TV cipher fails before HTTP and closes startup SQLite', async () => {
   const f = await fixture();
   await writeFile(join(f.config.dataDir, 'tv-master.key'), 'corrupt synthetic cipher');

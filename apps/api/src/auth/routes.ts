@@ -22,11 +22,13 @@ function sessionCookie(request: FastifyRequest): string | undefined {
   return cookies[0]!.slice('remote_webos_session='.length);
 }
 
-export function registerAuthRoutes(app: FastifyInstance, { config, setup, sessions, beforeAuthAttempt }: AuthRoutesDependencies): void {
+export function registerAuthRoutes(app: FastifyInstance, { config, setup, sessions, beforeAuthAttempt }: AuthRoutesDependencies): (request: FastifyRequest) => string | undefined {
   if (config.publicOrigin.startsWith('https://') && !config.secureCookies) {
     throw new Error('Secure cookies are required for an HTTPS public origin');
   }
   const error = (request: FastifyRequest, code: string, message: string) => ({ code, message, requestId: request.id });
+  // Internal ownership context, never a request field or public session response.
+  const authenticatedSessions = new WeakMap<FastifyRequest, string>();
   app.addHook('onRequest', async (request, reply) => {
     const policy = httpPolicy(request);
     if (!policy.api) return;
@@ -44,7 +46,9 @@ export function registerAuthRoutes(app: FastifyInstance, { config, setup, sessio
     }
     if (mutating && !sessions.verifyCsrf(cookie!, request.headers['x-csrf-token'])) {
       reply.code(403).send(error(request, 'FORBIDDEN', 'Forbidden'));
+      return;
     }
+    authenticatedSessions.set(request, cookie!);
   });
 
   app.post('/api/setup', async (request, reply) => {
@@ -84,4 +88,5 @@ export function registerAuthRoutes(app: FastifyInstance, { config, setup, sessio
     reply.header('set-cookie', `remote_webos_session=; Max-Age=0; Path=/; HttpOnly; SameSite=Strict${config.secureCookies ? '; Secure' : ''}`);
     return reply.code(204).send();
   });
+  return (request) => authenticatedSessions.get(request);
 }

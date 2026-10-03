@@ -12,7 +12,8 @@ import { safeCauseTypes, safeLoggerOptions } from './security/logging.js';
 import { httpPolicy } from './security/http-policy.js';
 import type { TvService } from './tv/service.js';
 import { registerTvRoutes } from './tv/routes.js';
-import { createTvAttemptLimiter } from './tv/rate-limit.js';
+import { createTvAttemptLimiter, createTvCommandLimiter } from './tv/rate-limit.js';
+import { registerTvCommandRoutes } from './tv/command-routes.js';
 
 export interface AppDependencies {
   readonly config: AppConfig;
@@ -104,13 +105,15 @@ export function buildApp({ config, getSetupState, webRoot, auth, tv, reportError
     return { status: 'ok' };
   });
 
+  let sessionForRequest: ((request: FastifyRequest) => string | undefined) | undefined;
   if (auth) {
     installAuthRateLimit(app);
-    registerAuthRoutes(app, { config, ...auth });
+    sessionForRequest = registerAuthRoutes(app, { config, ...auth });
   }
   if (tv) {
     if (!auth) throw new Error('TV routes require owner authentication');
     registerTvRoutes(app, { service: tv, beforeTvAttempt: createTvAttemptLimiter(app) });
+    registerTvCommandRoutes(app, { service: tv, sessions: auth.sessions, sessionForRequest: sessionForRequest!, beforeCommandAttempt: createTvCommandLimiter(app) });
   }
 
   return app;
