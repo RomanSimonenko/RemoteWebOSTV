@@ -35,12 +35,12 @@
 `packages/contracts/src/tv-setup.ts` определяет строгие Zod-схемы и readonly типы:
 
 - `TvAction = 'pair' | 'reconnect' | 'change_address' | 'repair'`.
-- `TvOperation`: `id`, `action`, `status: 'running'|'succeeded'|'failed'|'cancelled'`, `startedAt`, `deadlineAt` (epoch ms), необязательная `error: {code,message}`. Последняя операция хранится в памяти до следующей операции; после рестарта её нет.
+- `TvOperation`: `id`, `action`, `status: 'running'|'succeeded'|'failed'|'cancelled'`, `startedAt`, `deadlineAt` (epoch ms), необязательная `error: {code,message}`. Последняя операция хранится в памяти до следующей операции; после рестарта прежняя операция не восстанавливается. При сохранённом ТВ `initialize` создаёт новую ограниченную операцию reconnect.
 - `SavedTvView`: `host`, `identity: TvIdentity`; никаких секретных полей.
 - `TvStatusResponse`: `tv: SavedTvView|null`, `connection: TvConnectionState`, `operation: TvOperation|null`, необязательная `error: {code,message}`.
 - Запрос запуска: `{action: TvAction, host?: string}`; host обязателен только для pair/change_address и запрещён для reconnect/repair. Pair допустим только без настройки, остальные действия — только с настройкой.
 
-TV Service предоставляет `start(input): TvOperation` (принимает, но не ждёт сетевого завершения), `status(): Promise<TvStatusResponse>`, `cancel(id): TvOperation`, `initialize(): Promise<void>`, `close(): Promise<void>`. `initialize` запускает фоновую ограниченную попытку подключения, не блокируя HTTP на ожидании выключенного ТВ.
+TV Service предоставляет `assertCanStart(input): StartTvOperation` (проверяет доступность и нормализует вход перед учётом принятой попытки), `start(input): TvOperation` (принимает, но не ждёт сетевого завершения), `status(): Promise<TvStatusResponse>`, `cancel(id): TvOperation`, `initialize(): Promise<void>`, `close(): Promise<void>`. `initialize` запускает фоновую ограниченную попытку подключения, не блокируя HTTP на ожидании выключенного ТВ.
 
 Runtime dependencies: `repository`, `cipher`, `createAdapter(host: string, stagingKeyStore: ClientKeyStore, requestTimeoutMs: number, allowPairingPrompt: boolean): WebOsAdapter`, `now(): number`, `newId(): string`, внедряемый scheduler `{now(): number, setTimeout(callback, delay): unknown, clearTimeout(handle): void}`. Scheduler использует monotonic длительность; epoch deadline предназначен UI. Откат wall-clock не продлевает реальный 60-секундный бюджет. Сохранённый ключ проверяется с `allowPairingPrompt=false`; pair/repair разрешают новое подтверждение. Опция adapter по умолчанию остаётся true для совместимости CLI.
 
@@ -89,7 +89,7 @@ Runtime dependencies: `repository`, `cipher`, `createAdapter(host: string, stagi
 - [x] Запустить узкие tests/typecheck и suite mock adapter; подтвердить GREEN.
 - [x] Коммит `feat: manage cancellable TV pairing lifecycle`.
 
-Приёмка задачи 3: `aff3112`, `0d719a7`, `ea75936`; 40 service/lifecycle tests, полный прогон 405 tests и typecheck всех пяти пакетов прошли. Независимое review и два scoped re-review закрыли замечания. Ошибка/тайм-аут публикуются без ожидания зависшего cleanup, но cleanup остаётся под управлением сервиса, блокирует новую попытку и ожидается при shutdown. Ранняя отмена не оставляет старое соединение доступным. Следующий шаг — задача 4: защищённые HTTP-маршруты и runtime; они пока не реализованы. Аппаратная приёмка веб-пути не выполнена.
+Приёмка задачи 3: `aff3112`, `0d719a7`, `ea75936`; 40 service/lifecycle tests, полный прогон 405 tests и typecheck всех пяти пакетов прошли. Независимое review и два scoped re-review закрыли замечания. Ошибка/тайм-аут публикуются без ожидания зависшего cleanup, но cleanup остаётся под управлением сервиса, блокирует новую попытку и ожидается при shutdown. Ранняя отмена не оставляет старое соединение доступным. Аппаратная приёмка веб-пути не выполнена.
 
 ## Task 4: Защищённый HTTP и runtime
 
@@ -97,13 +97,15 @@ Runtime dependencies: `repository`, `cipher`, `createAdapter(host: string, stagi
 
 **Interfaces:** `registerTvRoutes(app,{service,beforeTvAttempt})`; `AppDependencies.tv?: TvService`. Маршруты: `GET /api/tv`→200 TvStatusResponse; `POST /api/tv/operations`→202 TvOperation; `POST /api/tv/operations/:id/cancel`→200 TvOperation. TV Service conflicts→409, invalid action for configuration→409, unknown id→404; network failure принятой async операции отображается в её status, а не меняет уже отправленный 202.
 
-- [ ] Написать inject tests auth/Origin/CSRF для каждого mutation, extra fields→400, status без session→401, no-store, encoded route aliases и safe requestId errors. JSON и capture logs не содержат ключей/raw ошибок/IP.
-- [ ] Написать limiter tests 5 accepted attempts/60000 ms на единственного owner; шестая→429 с Retry-After; другой source IP не обходит owner limit. Использовать существующий @fastify/rate-limit с owner key и внедряемым clock; conflict/invalid request не расходует accepted budget. Cancel не блокируется лимитом запуска. Если plugin не поддерживает нужную точку учёта, остановиться и согласовать контракт, не вводить скрытый другой подсчёт.
-- [ ] Написать runtime tests startup migration/cipher failure, init выключенного ТВ, shutdown pending pair, сохранённая настройка после restart, cleanup failure: SQLite закрывается только после TV Service, все причины безопасно наблюдаемы.
-- [ ] Подтвердить RED соответствующими API tests.
-- [ ] Подключить routes после общих auth hooks, production factory Lgtv2Adapter со staging. Регистрировать единый onClose: сначала service.close, затем database.close; попытаться закрыть оба ресурса и сохранить обе причины при двойной ошибке. Ошибки init чистят частично созданные ресурсы.
-- [ ] Запустить все API tests/typecheck и `pnpm build`; подтвердить GREEN.
-- [ ] Коммит `feat: expose protected TV pairing API`.
+- [x] Написать inject tests auth/Origin/CSRF для каждого mutation, extra fields→400, status без session→401, no-store, encoded route aliases и safe requestId errors. JSON и capture logs не содержат ключей/raw ошибок/IP.
+- [x] Написать limiter tests 5 accepted attempts/60000 ms на единственного owner; шестая→429 с Retry-After; другой source IP не обходит owner limit. Использовать существующий @fastify/rate-limit с owner key и внедряемым clock; conflict/invalid request не расходует accepted budget. Cancel не блокируется лимитом запуска. Если plugin не поддерживает нужную точку учёта, остановиться и согласовать контракт, не вводить скрытый другой подсчёт.
+- [x] Написать runtime tests startup migration/cipher failure, init выключенного ТВ, shutdown pending pair, сохранённая настройка после restart, cleanup failure: SQLite закрывается только после TV Service, все причины безопасно наблюдаемы.
+- [x] Подтвердить RED соответствующими API tests.
+- [x] Подключить routes после общих auth hooks, production factory Lgtv2Adapter со staging. Регистрировать единый onClose: сначала service.close, затем database.close; попытаться закрыть оба ресурса и сохранить обе причины при двойной ошибке. Ошибки init чистят частично созданные ресурсы.
+- [x] Запустить все API tests/typecheck и `pnpm build`; подтвердить GREEN.
+- [x] Коммит `feat: expose protected TV pairing API`.
+
+Приёмка задачи 4: `b415cf5`; 12 новых API tests, полный прогон 417 tests, build/typecheck прошли. Независимое task review принято.
 
 ## Task 5: Веб-путь и повторный вход
 
@@ -111,12 +113,14 @@ Runtime dependencies: `repository`, `cipher`, `createAdapter(host: string, stagi
 
 **Interfaces:** api методы `tvStatus(signal?: AbortSignal)`, `startTvOperation(input,csrfToken)`, `cancelTvOperation(id,csrfToken)` со схемами задачи 1. `TvSetup({csrfToken,onSessionExpired})`; hook `useTvStatus` владеет polling и abort, возвращает status/loading/error/refresh. Auth App остаётся владельцем logout и обработки 401.
 
-- [ ] Написать component tests формы IPv4, blocked double submit, running operation/deadline, cancel и specific failures; saved identity/IP при unavailable; repair/change_address/reconnect как действия без второго ТВ. Секреты не попадают в URL, storage, console.
-- [ ] Написать fake-time tests polling минимум 2000 ms без overlap, unmount/logout abort, 401→login, late response после logout игнорируется, error остаётся видимым и не подменяется прежним available. Обновление страницы восстанавливает серверную операцию и deadline.
-- [ ] Подтвердить RED: `pnpm --filter @remote-webos-tv/web test`.
-- [ ] Реализовать русские формы и статусы из spec; модель и адрес показывать только после session. Таймер — представление server deadline, не клиентский запуск нового TTL. Выйти можно во время pair; это прекращает UI запросы, не server operation.
-- [ ] Запустить web tests/typecheck/build; подтвердить GREEN и сохранность auth tests.
-- [ ] Коммит `feat: add persistent TV setup browser flow`.
+- [x] Написать component tests формы IPv4, blocked double submit, running operation/deadline, cancel и specific failures; saved identity/IP при unavailable; repair/change_address/reconnect как действия без второго ТВ. Секреты не попадают в URL, storage, console.
+- [x] Написать fake-time tests polling минимум 2000 ms без overlap, unmount/logout abort, 401→login, late response после logout игнорируется, error остаётся видимым и не подменяется прежним available. Обновление страницы восстанавливает серверную операцию и deadline.
+- [x] Подтвердить RED: `pnpm --filter @remote-webos-tv/web test`.
+- [x] Реализовать русские формы и статусы из spec; модель и адрес показывать только после session. Таймер — представление server deadline, не клиентский запуск нового TTL. Выйти можно во время pair; это прекращает UI запросы, не server operation.
+- [x] Запустить web tests/typecheck/build; подтвердить GREEN и сохранность auth tests.
+- [x] Коммит `feat: add persistent TV setup browser flow`.
+
+Приёмка задачи 5: `1fb92a7`, `67e3b00`; 36 web tests, полный прогон 443 tests, build/typecheck прошли. Независимое review и scoped re-review приняты. Свежий GET после ответа mutation имеет приоритет даже при новой операции из другой вкладки; порядок определяется локальными версиями запросов, а не ID или wall-clock.
 
 ## Task 6: Приёмка и документация
 
@@ -124,15 +128,17 @@ Runtime dependencies: `repository`, `cipher`, `createAdapter(host: string, stagi
 
 **Interfaces:** test fixture запускает production build/API с synthetic dataDir и mock-TV; fixture adapter инъецируется программно, без публичного env-переключателя обхода безопасности. Startup errors выводят только безопасную классификацию. Restart сохраняет тот же test dataDir.
 
-- [ ] Написать Chromium E2E: setup/login→pair через mock prompt gate→saved TV→reload→logout/login→тот же ТВ; reload during pair не продлевает deadline; отказ/отмена; API restart; mock недоступен; change address failure и revoked key. Проверить отсутствие secret fields и browser storage secrets.
-- [ ] Подтвердить RED, затем собрать fixture и проверить GREEN: `pnpm build`, `pnpm --filter @remote-webos-tv/web test:e2e`.
-- [ ] Выполнить свежие `pnpm test`, `pnpm typecheck`, `pnpm build`, Chromium E2E, `git diff --check`. Для socket tests разрешить loopback в среде; EPERM песочницы не объявлять дефектом продукта и не маскировать skip.
+- [x] Написать Chromium E2E: setup/login→pair через mock prompt gate→saved TV→reload→logout/login→тот же ТВ; reload during pair не продлевает deadline; отказ/отмена; API restart; mock недоступен; change address failure и revoked key. Проверить отсутствие secret fields и browser storage secrets.
+- [x] Подтвердить RED, затем собрать fixture и проверить GREEN: `pnpm build`, `pnpm --filter @remote-webos-tv/web test:e2e`.
+- [x] Выполнить свежие `pnpm test`, `pnpm typecheck`, `pnpm build`, Chromium E2E, `git diff --check`. Для socket tests разрешить loopback в среде; EPERM песочницы не объявлять дефектом продукта и не маскировать skip.
 - [ ] С согласия владельца прогнать на реальном ТВ: PROMPT, модель в UI, повторный вход и restart без нового PROMPT, выключенный ТВ остаётся настроенным. Без аппаратного прогона зафиксировать «автоматически проверено, аппаратная приёмка не завершена».
 - [ ] Независимое review на Sol 6.1 high: безопасность, persistence, cancel/commit races, resource cleanup, реальные API/CLI contracts. Исправления проходят regression tests и повторный review.
-- [ ] Обновить README: сохранённый ТВ, диапазоны адресов, reconnect ограничения, постоянный dataDir и ограничения проверки. Коммит `test: verify persistent TV pairing lifecycle`; checkpoint перед исчерпанием лимита, без ложного закрытия незавершённых пунктов.
+- [x] Обновить README: сохранённый ТВ, диапазоны адресов, reconnect ограничения, постоянный dataDir и ограничения проверки. Коммит `test: verify persistent TV pairing lifecycle`; checkpoint перед исчерпанием лимита, без ложного закрытия незавершённых пунктов.
+
+Автоматическая приёмка задачи 6: 447 unit/component/integration tests, typecheck и build всех пакетов; 8 Chromium E2E (7 новых TV-сценариев и сохранённый auth CLI-сценарий), `git diff --check` прошли. RED диагностики: четыре typed startup-кода терялись как `unavailable`; GREEN — 40 web tests. Mutation RED двух вкладок: временное прежнее сопоставление по ID оставляло «Отменить» видимой после завершения другой операции; возврат текущего правила восстановил GREEN. Fixture использует собранный API, SQLite/cipher/auth и настоящий Lgtv2Adapter с existing mock-TV; приватный адрес сопоставляется с динамическим loopback-портом только в тесте. API повторно открывается с тем же dataDir; это не аппаратное доказательство перезапуска процесса на реальном ТВ. Новых аппаратных доказательств нет, compatibility report не изменён. Автоматически проверено, аппаратная приёмка не завершена; финальное независимое review ожидается.
 
 ## Самопроверка и передача
 
-Спецификация покрыта задачами 1–6; каждый Review Focus привязан к tests. Публичные типы определены один раз; ключи не входят в status. Задачи 1–3 выполнены и проверены; задачи 4–6 остаются открытыми. Перед исчерпанием лимита сохранена промежуточная точка после review задачи 3.
+Задачи 1–5 выполнены и прошли независимые task reviews. Публичные типы определены один раз; ключи не входят в status. Задача 6: автоматическая часть проверена с собранным API и протокольным mock-TV; аппаратная приёмка и финальное независимое review остаются открытыми.
 
-Следующий шаг после одобрения плана: изолированная ветка от текущего подтверждённого состояния; выполнение задач последовательно с субагентами Sol 6.1 и независимыми проверками. Не объединять этот этап с несогласованными командами пульта или фоновым reconnect.
+Следующие шаги — аппаратная приёмка с согласия владельца и финальное независимое review на Sol 6.1 high. Автоматические результаты не закрывают аппаратный пункт. Команды пульта и фоновый reconnect остаются за рамками этого этапа.

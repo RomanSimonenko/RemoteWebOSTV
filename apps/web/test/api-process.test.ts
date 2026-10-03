@@ -4,6 +4,17 @@ import { fileURLToPath } from 'node:url';
 import { expect, test } from 'vitest';
 import { waitForListening } from './api-process.js';
 
+test.each(['KEY_STORE_CORRUPT', 'KEY_STORE_WRITE_FAILED', 'CLEANUP_FAILED', 'STORAGE_FAILED'])('browser fixture preserves typed TV startup cause %s without private error text', async (code) => {
+  const child = spawn(process.execPath, ['-e', `
+    process.stderr.write('API startup failed [${code}]\\n');
+    process.stderr.write('client-key=synthetic-private-value\\n');
+    process.exitCode = 1;
+  `], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const failure = await waitForListening(child).catch((error: Error) => error);
+  expect((failure as Error).message).toContain(`cause=${code}`);
+  expect((failure as Error).message).not.toContain('synthetic-private-value');
+});
+
 test('failed browser fixture reports an allowlisted cause and exit code without child secrets', async () => {
   const child = spawn(process.execPath, ['-e', `
     process.stderr.write('synthetic-secret'.repeat(10000) + '\\n');
