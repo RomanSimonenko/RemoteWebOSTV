@@ -23,6 +23,7 @@ export interface TvServiceDependencies {
   readonly scheduler: TvScheduler;
 }
 export interface TvService {
+  assertCanStart(input: StartTvOperation): StartTvOperation;
   start(input: StartTvOperation): TvOperation;
   status(): Promise<TvStatusResponse>;
   cancel(id: string): TvOperation;
@@ -152,7 +153,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     } finally { scheduler.clearTimeout(context.timer); }
   }
 
-  function start(input: StartTvOperation): TvOperation {
+  function assertCanStart(input: StartTvOperation): StartTvOperation {
     if (closed) throw new TvServiceError('SERVICE_CLOSED', 409);
     if (unsafeCleanup) throw new TvServiceError('CLEANUP_FAILED', 409, { cause: unsafeCleanup });
     if (work || cleanup) throw new TvServiceError('OPERATION_CONFLICT', 409);
@@ -160,6 +161,11 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     if (!parsed.success) throw new TvServiceError('INVALID_REQUEST', 400);
     input = parsed.data;
     if ((input.action === 'pair') !== (saved === null)) throw new TvServiceError('INVALID_ACTION', 409);
+    return input;
+  }
+
+  function start(input: StartTvOperation): TvOperation {
+    input = assertCanStart(input);
     const startedAt = dependencies.now();
     const controller = new AbortController();
     const operation: TvOperation = { id: dependencies.newId(), action: input.action, status: 'running', startedAt, deadlineAt: startedAt + operationBudgetMs };
@@ -239,7 +245,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     })();
     return closing;
   }
-  return { start, status, cancel, initialize, close };
+  return { assertCanStart, start, status, cancel, initialize, close };
 }
 
 function copyOperation(operation: TvOperation): TvOperation {

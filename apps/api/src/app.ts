@@ -10,12 +10,16 @@ import { registerAuthRoutes, type AuthRoutesDependencies } from './auth/routes.j
 import { installAuthRateLimit } from './security/rate-limit.js';
 import { safeCauseTypes, safeLoggerOptions } from './security/logging.js';
 import { httpPolicy } from './security/http-policy.js';
+import type { TvService } from './tv/service.js';
+import { registerTvRoutes } from './tv/routes.js';
+import { createTvAttemptLimiter } from './tv/rate-limit.js';
 
 export interface AppDependencies {
   readonly config: AppConfig;
   readonly getSetupState: () => Promise<SetupState>;
   readonly webRoot?: string;
   readonly auth?: Omit<AuthRoutesDependencies, 'config'>;
+  readonly tv?: TvService;
   readonly reportError?: (report: { readonly requestId: string; readonly status: number; readonly causeTypes: readonly string[] }) => void;
   readonly logStream?: Writable;
 }
@@ -37,7 +41,7 @@ function routingError(error: Error & { code?: string }, request: FastifyRequest,
     });
 }
 
-export function buildApp({ config, getSetupState, webRoot, auth, reportError, logStream }: AppDependencies) {
+export function buildApp({ config, getSetupState, webRoot, auth, tv, reportError, logStream }: AppDependencies) {
   const app = Fastify({
     logger: safeLoggerOptions(logStream),
     bodyLimit: 16 * 1024,
@@ -103,6 +107,10 @@ export function buildApp({ config, getSetupState, webRoot, auth, reportError, lo
   if (auth) {
     installAuthRateLimit(app);
     registerAuthRoutes(app, { config, ...auth });
+  }
+  if (tv) {
+    if (!auth) throw new Error('TV routes require owner authentication');
+    registerTvRoutes(app, { service: tv, beforeTvAttempt: createTvAttemptLimiter(app) });
   }
 
   return app;

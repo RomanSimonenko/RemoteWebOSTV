@@ -7,11 +7,14 @@ export function safeListenTextResolver(): string {
 export function safeCauseTypes(error: unknown): string[] {
   const types: string[] = [];
   const seen = new Set<unknown>();
-  let current = error;
-  while (current instanceof Error && !seen.has(current) && types.length < 5) {
+  const pending: unknown[] = [error];
+  while (pending.length && types.length < 16) {
+    const current = pending.shift();
+    if (!(current instanceof Error) || seen.has(current)) continue;
     seen.add(current);
     types.push(['Error', 'TypeError', 'SyntaxError', 'StorageUnavailableError', 'ZodError'].includes(current.name) ? current.name : 'OtherError');
-    current = current.cause;
+    if (current instanceof AggregateError) pending.push(...current.errors.slice(0, 16));
+    pending.push(current.cause);
   }
   return types;
 }
