@@ -22,9 +22,17 @@ export class TvServiceError extends Error {
 }
 
 function hasCleanupFailure(cause: unknown): boolean {
-  if (cause instanceof TvServiceError && cause.code === 'CLEANUP_FAILED') return true;
-  if (cause instanceof AggregateError) return true;
-  return cause instanceof Error && cause.cause !== undefined && hasCleanupFailure(cause.cause);
+  const visited = new Set<Error>();
+  // Error causes come from external boundaries: neither cycles nor extreme depth
+  // may turn safe diagnostic projection into another operation failure.
+  for (let depth = 0; depth < 64 && cause instanceof Error; depth++) {
+    if (visited.has(cause)) return false;
+    visited.add(cause);
+    if (cause instanceof TvServiceError && cause.code === 'CLEANUP_FAILED') return true;
+    if (cause instanceof AggregateError) return true;
+    cause = cause.cause;
+  }
+  return false;
 }
 
 /** The only browser error projection: raw messages and nested causes never cross it. */

@@ -3,12 +3,30 @@ import { tvStatusResponseSchema } from '@remote-webos-tv/contracts';
 import { Lgtv2Adapter, createLgtv2Client, createClientKeyCipher, WebOsError } from '@remote-webos-tv/webos';
 import Database from 'better-sqlite3';
 import { createTvService, type TvServiceDependencies } from '../src/tv/service.js';
+import { projectTvError, TvServiceError } from '../src/tv/operation.js';
 import { createTvRepository } from '../src/tv/repository.js';
 import { tvConfigTableSql } from '../src/storage/migrations.js';
 import { createStagingKeyStore } from '../src/tv/staging-key-store.js';
 import { harness, succeed, drain, pairing, snapshot, barrier, ControlledScheduler } from './support/tv-harness.js';
 
 describe('TV service persistence and projection', () => {
+  test('safe projection terminates on cyclic and deeply nested error causes', () => {
+    const cyclic = new WebOsError('NETWORK_UNREACHABLE', 'private cyclic detail'); cyclic.cause = cyclic;
+    let deep: Error = new TvServiceError('CLEANUP_FAILED');
+    for (let index = 0; index < 20_000; index++) deep = new Error('private deep detail', { cause: deep });
+    expect(projectTvError(cyclic).code).toBe('NETWORK_UNREACHABLE');
+    expect(projectTvError(deep).code).toBe('TV_OPERATION_FAILED');
+    expect(projectTvError(new WebOsError('NETWORK_UNREACHABLE', 'private', { cause: new TvServiceError('CLEANUP_FAILED') })).code).toBe('NETWORK_UNREACHABLE_CLEANUP_FAILED');
+  });
+
+  test('cyclic adapter failure still produces a terminal safe operation response', async () => {
+    const h = harness(); h.service.start({ action: 'pair', host: '192.168.1.10' }); await drain();
+    const cause = new WebOsError('NETWORK_UNREACHABLE', 'private cyclic detail'); cause.cause = cause;
+    h.adapters[0]!.pairResult.reject(cause); await drain();
+    const status = await h.service.status();
+    expect(status.operation).toMatchObject({ status: 'failed', error: { code: 'NETWORK_UNREACHABLE' } });
+    expect(JSON.stringify(status)).not.toContain('private cyclic detail'); await h.service.close();
+  });
   test('commits encrypted TV only after registration and safe snapshot succeed', async () => {
     const h = harness();
     const operation = h.service.start({ action: 'pair', host: '192.168.1.10' });

@@ -39,6 +39,7 @@ interface Attempt {
   readonly timer: unknown;
 }
 interface Probe { readonly controller: AbortController; readonly promise: Promise<void> }
+interface Cleanup { readonly adapter: WebOsAdapter; readonly promise: Promise<void> }
 
 export function createTvService(dependencies: TvServiceDependencies): TvService {
   const { repository, cipher, scheduler } = dependencies;
@@ -49,6 +50,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
   let work: Promise<void> | undefined;
   let activeAdapter: WebOsAdapter | undefined;
   let probe: Probe | undefined;
+  let cleanup: Cleanup | undefined;
   let generation = 0;
   let initialized = false;
   let closed = false;
@@ -62,10 +64,16 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     ...(error ? { error: { ...error } } : {}),
   });
 
-  async function disconnect(adapter: WebOsAdapter): Promise<void> {
-    try { await adapter.disconnect(); }
-    catch (cause) { unsafeCleanup = new TvServiceError('CLEANUP_FAILED', 500, { cause }); throw unsafeCleanup; }
-    finally { if (activeAdapter === adapter) activeAdapter = undefined; }
+  function disconnect(adapter: WebOsAdapter): Promise<void> {
+    if (cleanup?.adapter === adapter) return cleanup.promise;
+    if (activeAdapter === adapter) activeAdapter = undefined;
+    const pending = Promise.resolve().then(() => adapter.disconnect()).catch((cause: unknown) => {
+      unsafeCleanup = new TvServiceError('CLEANUP_FAILED', 500, { cause });
+      throw unsafeCleanup;
+    });
+    const current: Cleanup = { adapter, promise: pending.finally(() => { if (cleanup === current) cleanup = undefined; }) };
+    cleanup = current;
+    return current.promise;
   }
 
   function check(context: Attempt): void {
@@ -79,10 +87,12 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
 
   async function run(context: Attempt, input: StartTvOperation, previous: StoredTv | null): Promise<void> {
     let adapter: WebOsAdapter | undefined;
+    let previousCleanup: Promise<void> | undefined;
     const signal = context.controller.signal;
     try {
-      if (probe) { probe.controller.abort(new TvServiceError('CANCELLED')); await probe.promise; }
-      if (activeAdapter) await disconnect(activeAdapter);
+      if (probe) { probe.controller.abort(new TvServiceError('CANCELLED')); await abortable(probe.promise, signal); }
+      if (cleanup) { previousCleanup = cleanup.promise; await abortable(previousCleanup, signal); }
+      if (activeAdapter) { previousCleanup = disconnect(activeAdapter); await abortable(previousCleanup, signal); }
       check(context);
       const host = 'host' in input ? input.host : previous!.host;
       const allowPrompt = input.action === 'pair' || input.action === 'repair';
@@ -117,16 +127,22 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       context.operation = { ...context.operation, status: 'succeeded' };
       connection = 'available'; error = undefined;
     } catch (cause) {
-      let failure = signal.aborted ? signal.reason : cause;
-      if (adapter) {
-        try { await disconnect(adapter); }
-        catch (cleanup) { failure = cleanupFailure(failure, cleanup); }
-      }
-      if (attempt === context) {
-        const cancelled = context.operation.status === 'cancelled' || (failure instanceof TvServiceError && failure.code === 'CANCELLED');
-        error = projectTvError(failure);
+      const failure = signal.aborted ? signal.reason : cause;
+      const failureVersion = generation;
+      const publishFailure = (reason: unknown) => {
+        if (attempt !== context || generation !== failureVersion) return;
+        const cancelled = context.operation.status === 'cancelled' || (reason instanceof TvServiceError && reason.code === 'CANCELLED');
+        error = projectTvError(reason);
         context.operation = { ...context.operation, status: cancelled ? 'cancelled' : 'failed', error };
-        connection = cancelled ? (saved ? 'unavailable' : 'unconfigured') : failedConnection(failure);
+        connection = cancelled ? (saved ? 'unavailable' : 'unconfigured') : failedConnection(reason);
+      };
+      // Terminal publication has the operation budget; cleanup remains owned and
+      // blocks reuse independently, even when disconnect ignores cancellation.
+      publishFailure(failure);
+      const pendingCleanup = adapter ? disconnect(adapter) : previousCleanup;
+      if (pendingCleanup) {
+        try { await pendingCleanup; }
+        catch (cleanupCause) { publishFailure(cleanupFailure(failure, cleanupCause)); }
       }
     } finally { scheduler.clearTimeout(context.timer); }
   }
@@ -134,7 +150,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
   function start(input: StartTvOperation): TvOperation {
     if (closed) throw new TvServiceError('SERVICE_CLOSED', 409);
     if (unsafeCleanup) throw new TvServiceError('CLEANUP_FAILED', 409, { cause: unsafeCleanup });
-    if (work) throw new TvServiceError('OPERATION_CONFLICT', 409);
+    if (work || cleanup) throw new TvServiceError('OPERATION_CONFLICT', 409);
     const parsed = startTvOperationSchema.safeParse(input);
     if (!parsed.success) throw new TvServiceError('INVALID_REQUEST', 400);
     input = parsed.data;
@@ -175,11 +191,13 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     } catch (cause) {
       // A new operation/close owns cleanup after its cancellation; the old probe cannot publish.
       if (!closed && generation === version) {
-        let failure = controller.signal.aborted ? controller.signal.reason : cause;
-        try { await disconnect(adapter); } catch (cleanup) { failure = cleanupFailure(failure, cleanup); }
-        if (!closed && generation === version) {
-          connection = failedConnection(failure); error = projectTvError(failure);
-        }
+        const failure = controller.signal.aborted ? controller.signal.reason : cause;
+        connection = failedConnection(failure); error = projectTvError(failure);
+        // GET resolves on its own budget. The service still owns and awaits this
+        // tracked cleanup on shutdown, and start rejects while it is pending.
+        void disconnect(adapter).catch((cleanupCause: unknown) => {
+          if (!closed && generation === version) error = projectTvError(cleanupFailure(failure, cleanupCause));
+        });
       }
     } finally { scheduler.clearTimeout(timer); }
   }
@@ -210,6 +228,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     probe?.controller.abort(new TvServiceError('CANCELLED'));
     closing = (async () => {
       await work; await probe?.promise;
+      await cleanup?.promise;
       if (activeAdapter) await disconnect(activeAdapter);
       if (unsafeCleanup) throw unsafeCleanup;
     })();

@@ -3,6 +3,55 @@ import { WebOsError } from '@remote-webos-tv/webos';
 import { barrier, drain, harness, pairing, snapshot, succeed } from './support/tv-harness.js';
 
 describe('TV lifecycle barriers', () => {
+  test('operation timeout is terminal while adapter cleanup remains pending and close waits', async () => {
+    const h = harness(); h.service.start({ action: 'pair', host: '192.168.1.10' }); await drain();
+    const cleanup = barrier<void>(); h.adapters[0]!.disconnectResult = cleanup.promise;
+    h.scheduler.advance(60_000); await drain();
+    try {
+      expect((await h.service.status()).operation).toMatchObject({ status: 'failed', error: { code: 'PAIRING_TIMEOUT' } });
+      expect(() => h.service.start({ action: 'pair', host: '192.168.1.11' })).toThrowError(expect.objectContaining({ statusCode: 409 }));
+      let closed = false; const closing = h.service.close().then(() => { closed = true; }); await drain();
+      expect(closed).toBe(false); cleanup.resolve(); await closing;
+    } finally { cleanup.resolve(); await h.service.close(); }
+  });
+
+  test('replacement timeout publishes even while disconnecting the previous adapter', async () => {
+    const h = harness(true); h.service.start({ action: 'reconnect' }); await drain(); await succeed(h.adapters[0]!);
+    const cleanup = barrier<void>(); h.adapters[0]!.disconnectResult = cleanup.promise;
+    h.service.start({ action: 'repair' }); await drain(); h.scheduler.advance(60_000); await drain();
+    try {
+      expect((await h.service.status()).operation).toMatchObject({ status: 'failed', error: { code: 'PAIRING_TIMEOUT' } });
+      expect(h.adapters).toHaveLength(1); expect(h.writes).toEqual([]);
+      expect(() => h.service.start({ action: 'reconnect' })).toThrowError(expect.objectContaining({ statusCode: 409 }));
+    } finally { cleanup.resolve(); await h.service.close(); }
+  });
+
+  test('status timeout publishes unavailable before pending cleanup finishes', async () => {
+    const h = harness(true); h.service.start({ action: 'reconnect' }); await drain(); await succeed(h.adapters[0]!);
+    const adapter = h.adapters[0]!; adapter.readResult = barrier(); const cleanup = barrier<void>(); adapter.disconnectResult = cleanup.promise;
+    let response: Awaited<ReturnType<typeof h.service.status>> | undefined;
+    const reading = h.service.status().then((status) => { response = status; }); await drain(); h.scheduler.advance(5_000); await drain();
+    try {
+      expect(response?.connection).toBe('unavailable');
+      expect(() => h.service.start({ action: 'repair' })).toThrowError(expect.objectContaining({ statusCode: 409 }));
+      let closed = false; const closing = h.service.close().then(() => { closed = true; }); await drain(); expect(closed).toBe(false);
+      cleanup.resolve(); await Promise.all([reading, closing]);
+    } finally { cleanup.resolve(); await reading; await h.service.close(); }
+  });
+
+  test('known status failure publishes immediately and late cleanup failure safely enriches it', async () => {
+    const h = harness(true); h.service.start({ action: 'reconnect' }); await drain(); await succeed(h.adapters[0]!);
+    const adapter = h.adapters[0]!; adapter.readResult = barrier(); const cleanup = barrier<void>(); adapter.disconnectResult = cleanup.promise;
+    let response: Awaited<ReturnType<typeof h.service.status>> | undefined;
+    const reading = h.service.status().then((status) => { response = status; }); await drain();
+    adapter.readResult.reject(new WebOsError('AUTHORIZATION_FAILED', 'private')); await drain();
+    try {
+      expect(response?.connection).toBe('authorization_error'); expect(response?.error?.code).toBe('AUTHORIZATION_FAILED');
+      cleanup.reject(new Error('private cleanup')); await drain();
+      expect((await h.service.status()).error?.code).toBe('AUTHORIZATION_FAILED_CLEANUP_FAILED');
+      await expect(h.service.close()).rejects.toMatchObject({ code: 'CLEANUP_FAILED' });
+    } finally { cleanup.resolve(); await reading; await h.service.close().catch(() => {}); }
+  });
   test('cancel aborts registration, waits for cleanup before reuse and ignores late resolution', async () => {
     const h = harness(); const op = h.service.start({ action: 'pair', host: '192.168.1.10' }); await drain();
     const adapter = h.adapters[0]!; const request = await adapter.enteredPair.promise;
@@ -96,13 +145,14 @@ describe('TV lifecycle barriers', () => {
     await expect(h.service.close()).rejects.toMatchObject({ code: 'CLEANUP_FAILED' });
   });
 
-  test('status cleanup finishing after a repair starts cannot overwrite pairing state', async () => {
+  test('known status cleanup gates repair until it finishes and cannot overwrite the next state', async () => {
     const h = harness(true); h.service.start({ action: 'reconnect' }); await drain(); await succeed(h.adapters[0]!);
     const old = h.adapters[0]!; old.readResult = barrier();
     const cleanup = barrier<void>(); old.disconnectResult = cleanup.promise;
     const reading = h.service.status(); await drain();
     old.readResult.reject(new WebOsError('CONNECTION_LOST', 'private')); await drain();
-    h.service.start({ action: 'repair' }); await drain(); cleanup.resolve(); await reading; await drain();
+    expect(() => h.service.start({ action: 'repair' })).toThrowError(expect.objectContaining({ statusCode: 409 }));
+    cleanup.resolve(); await reading; await drain(); h.service.start({ action: 'repair' }); await drain();
     expect((await h.service.status()).connection).toBe('pairing');
     await h.service.close();
   });
@@ -154,9 +204,29 @@ describe('TV lifecycle barriers', () => {
   test('an accepted replacement never creates an adapter after its prior probe cleanup fails', async () => {
     const h = harness(true); h.service.start({ action: 'reconnect' }); await drain(); await succeed(h.adapters[0]!);
     const old = h.adapters[0]!; old.readResult = barrier(); const cleanup = barrier<void>(); old.disconnectResult = cleanup.promise;
-    const reading = h.service.status(); await drain(); old.readResult.reject(new WebOsError('CONNECTION_LOST', 'private')); await drain();
-    h.service.start({ action: 'repair' }); cleanup.reject(new Error('private cleanup')); await reading; await drain();
+    const reading = h.service.status(); await drain();
+    h.service.start({ action: 'repair' }); await drain(); cleanup.reject(new Error('private cleanup')); await reading; await drain();
     expect(h.adapters).toHaveLength(1); expect((await h.service.status()).operation).toMatchObject({ status: 'failed', error: { code: 'CLEANUP_FAILED' } });
+    await expect(h.service.close()).rejects.toMatchObject({ code: 'CLEANUP_FAILED' });
+  });
+
+  test('a terminal operation preserves its cause when current-generation cleanup later fails', async () => {
+    const h = harness(); h.service.start({ action: 'pair', host: '192.168.1.10' }); await drain();
+    const adapter = h.adapters[0]!; const cleanup = barrier<void>(); adapter.disconnectResult = cleanup.promise;
+    adapter.pairResult.reject(new WebOsError('NETWORK_UNREACHABLE', 'private primary')); await drain();
+    expect((await h.service.status()).operation).toMatchObject({ status: 'failed', error: { code: 'NETWORK_UNREACHABLE' } });
+    cleanup.reject(new Error('private cleanup')); await drain();
+    expect((await h.service.status()).operation).toMatchObject({ status: 'failed', error: { code: 'NETWORK_UNREACHABLE_CLEANUP_FAILED' } });
+    await expect(h.service.close()).rejects.toMatchObject({ code: 'CLEANUP_FAILED' });
+  });
+
+  test('replacement timeout retains its cause when previous adapter cleanup later fails', async () => {
+    const h = harness(true); h.service.start({ action: 'reconnect' }); await drain(); await succeed(h.adapters[0]!);
+    const cleanup = barrier<void>(); h.adapters[0]!.disconnectResult = cleanup.promise;
+    h.service.start({ action: 'repair' }); await drain(); h.scheduler.advance(60_000); await drain();
+    expect((await h.service.status()).operation?.error?.code).toBe('PAIRING_TIMEOUT');
+    cleanup.reject(new Error('private cleanup')); await drain();
+    expect((await h.service.status()).operation?.error?.code).toBe('PAIRING_TIMEOUT_CLEANUP_FAILED');
     await expect(h.service.close()).rejects.toMatchObject({ code: 'CLEANUP_FAILED' });
   });
 });
