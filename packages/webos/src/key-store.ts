@@ -11,7 +11,7 @@ import type { FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { WebOsError } from './errors.js';
-import { createClientKeyCipher, encryptedEnvelopeV1Schema } from './key-cipher.js';
+import { createClientKeyCipher, encryptedEnvelopeV1Schema, type EncryptedEnvelopeV1 } from './key-cipher.js';
 
 const masterKeyLength = 32;
 
@@ -129,7 +129,14 @@ export class EncryptedFileKeyStore implements ClientKeyStore {
 
   async #persist(clientKey: string): Promise<void> {
     const masterKey = await this.#loadOrCreateMasterKey();
-    const envelope = createClientKeyCipher(masterKey, this.#randomBytes).encrypt(clientKey);
+    let envelope: EncryptedEnvelopeV1;
+    try {
+      envelope = createClientKeyCipher(masterKey, this.#randomBytes).encrypt(clientKey);
+    } catch (error) {
+      // CLI encryption preceded the persistence error boundary and exposed its original failure.
+      if (error instanceof WebOsError && error.code === 'KEY_STORE_WRITE_FAILED' && error.cause !== undefined) throw error.cause;
+      throw error;
+    }
     const temporaryPath = join(
       this.#directory,
       `client-key.enc.tmp-${process.pid}-${this.#randomBytes(8).toString('hex')}`,

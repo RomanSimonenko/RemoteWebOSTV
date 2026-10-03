@@ -95,6 +95,22 @@ test('cleans an incomplete master and preserves the cause when entropy fails', a
   expect(await readdir(dataDir)).toEqual([]);
 });
 
+test('removes a partially written TV master and retains the write failure cause', async () => {
+  const dataDir = await directory();
+  const cause = new Error('synthetic master write failure');
+  const original = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+  vi.mocked(open).mockImplementationOnce(async (...args: Parameters<typeof open>) => {
+    const handle = await original.open(...args);
+    const write = handle.writeFile.bind(handle);
+    handle.writeFile = async () => { await write(Buffer.alloc(8, 3)); throw cause; };
+    return handle;
+  });
+  const failure = await webos.loadClientKeyCipher({ directory: dataDir, hasStoredKey: false }).catch((error: unknown) => error);
+  expect(failure).toMatchObject({ code: 'KEY_STORE_WRITE_FAILED' });
+  expect((failure as Error).cause).toBe(cause);
+  expect(await readdir(dataDir)).toEqual([]);
+});
+
 test('keeps both the creation failure and close failure when master cleanup also fails', async () => {
   const dataDir = await directory();
   const primary = new Error('synthetic entropy failure');
@@ -162,4 +178,33 @@ test('preserves the CLI corruption diagnostic and authentication cause', async (
   envelope.authTag = Buffer.alloc(16).toString('base64');
   await writeFile(join(dataDir, 'client-key.enc'), JSON.stringify(envelope));
   await expect(store.load()).rejects.toMatchObject({ code: 'KEY_STORE_CORRUPT', message: expect.stringMatching(/Encrypted client key at .* is invalid/), cause: expect.any(Error) });
+});
+
+test('propagates the original CLI IV entropy failure without writing ciphertext', async () => {
+  const dataDir = await directory();
+  const cause = new Error('synthetic CLI IV entropy failure');
+  const entropy = ((length: number) => {
+    if (length === 12) throw cause;
+    return Buffer.alloc(length, 3);
+  }) as typeof randomBytes;
+  const store = new webos.EncryptedFileKeyStore({ directory: dataDir, randomBytes: entropy });
+  await expect(store.save('synthetic-cli-key')).rejects.toBe(cause);
+  expect(await readdir(dataDir)).toEqual(['master.key']);
+});
+
+test('normalizes IV entropy failure in the cipher API while retaining its original cause', async () => {
+  const dataDir = await directory();
+  const cause = new Error('synthetic cipher IV entropy failure');
+  const entropy = ((length: number) => {
+    if (length === 12) throw cause;
+    return Buffer.alloc(length, 3);
+  }) as typeof randomBytes;
+  const cipher = await webos.loadClientKeyCipher({ directory: dataDir, hasStoredKey: false, randomBytes: entropy });
+  try {
+    cipher.encrypt('synthetic-client-key');
+    throw new Error('Expected cipher encryption failure');
+  } catch (error) {
+    expect(error).toMatchObject({ code: 'KEY_STORE_WRITE_FAILED' });
+    expect((error as Error).cause).toBe(cause);
+  }
 });
