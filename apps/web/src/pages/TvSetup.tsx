@@ -11,11 +11,11 @@ const connections: Record<TvConnectionState, string> = {
 };
 
 export function TvSetup({ csrfToken, onSessionExpired }: Props) {
-  const { status, loading, error, refresh } = useTvStatus(onSessionExpired);
+  const { status, statusReadVersion, getReadVersion, loading, error, refresh } = useTvStatus(onSessionExpired);
   const [host, setHost] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
-  const [accepted, setAccepted] = useState<TvOperation | null>(null);
+  const [accepted, setAccepted] = useState<{ operation: TvOperation; afterReadVersion: number } | null>(null);
   const [now, setNow] = useState(Date.now);
   const saved = useRef<SavedTvView | null>(null);
   const pending = useRef(false);
@@ -24,11 +24,12 @@ export function TvSetup({ csrfToken, onSessionExpired }: Props) {
   const alert = useRef<HTMLParagraphElement>(null);
   if (status) saved.current = status.tv;
   const tv = saved.current;
-  // A GET already in flight before a mutation may carry the previous operation.
-  // Keep the accepted response until polling observes that operation and its result.
+  // Reads started before the mutation response may carry a previous snapshot.
+  // A read started afterwards is authoritative even if another tab replaced the
+  // operation. Opaque server ids and wall-clock timestamps do not order reads.
   const observed = status?.operation;
-  const hasObservedAccepted = accepted && observed?.id === accepted.id && (accepted.status === 'running' || observed.status !== 'running');
-  const operation = accepted && !hasObservedAccepted ? accepted : observed;
+  const hasObservedAccepted = accepted && status && statusReadVersion > accepted.afterReadVersion;
+  const operation = accepted && !hasObservedAccepted ? accepted.operation : observed;
   const running = operation?.status === 'running';
   const progress = running ? (operation.action === 'pair' || operation.action === 'repair' ? 'Сопряжение' : 'Подключение') : null;
   const diagnostic = message || error || status?.error?.message || operation?.error?.message || '';
@@ -57,7 +58,7 @@ export function TvSetup({ csrfToken, onSessionExpired }: Props) {
     try {
       const next = await action(controller.current.signal);
       if (!active.current) return;
-      setAccepted(next);
+      setAccepted({ operation: next, afterReadVersion: getReadVersion() });
       refresh();
     } catch (cause) {
       if (!active.current) return;

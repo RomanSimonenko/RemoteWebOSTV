@@ -148,6 +148,25 @@ test('an in-flight status response cannot resurrect a cancelled operation', asyn
   expect(screen.getByRole('alert').textContent).toContain('Операция отменена');
 });
 
+test.each(['running', 'cancelled'])('a fresh snapshot replaces accepted %s operation A with another tab’s operation B', async (acceptedStatus) => {
+  vi.useFakeTimers(); vi.setSystemTime(40000);
+  const secondOperation = { ...operation, id: 'a-opaque-new-operation', action: 'repair', startedAt: 5000, deadlineAt: 90000 };
+  const fetch = vi.fn().mockResolvedValueOnce(response(acceptedStatus === 'running' ? empty : { ...empty, connection: 'pairing', operation }))
+    .mockResolvedValueOnce(response({ ...operation, status: acceptedStatus }))
+    .mockResolvedValueOnce(response({ ...saved, connection: 'pairing', operation: secondOperation }))
+    .mockResolvedValueOnce(response({ ...secondOperation, status: 'cancelled' }));
+  vi.stubGlobal('fetch', fetch); await mount();
+  if (acceptedStatus === 'running') submitHost('192.168.1.20');
+  else fireEvent.click(screen.getByRole('button', { name: 'Отменить' }));
+  await act(async () => {});
+  // A ends and a second authenticated tab starts B before this tab sees A's terminal snapshot.
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(screen.getByText('Осталось: 48 с')).toBeTruthy();
+  expect(screen.getByText('Подтвердите доступ на экране телевизора.')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Отменить' })); await act(async () => {});
+  expect(fetch.mock.calls[3]?.[0]).toBe('/api/tv/operations/a-opaque-new-operation/cancel');
+});
+
 test('pairing uses neither browser storage nor logging and strict responses reject secret-bearing payloads', async () => {
   const store = vi.spyOn(Storage.prototype, 'setItem');
   const log = vi.spyOn(console, 'log');

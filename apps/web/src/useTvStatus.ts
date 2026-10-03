@@ -6,13 +6,15 @@ const pollInterval = 2000;
 
 /** One read at a time. Manual refresh shares the same completion-based cooldown. */
 export function useTvStatus(onSessionExpired: () => void) {
-  const [status, setStatus] = useState<TvStatusResponse | null>(null);
+  const [snapshot, setSnapshot] = useState<{ status: TvStatusResponse | null; readVersion: number }>({ status: null, readVersion: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const expired = useRef(onSessionExpired);
   expired.current = onSessionExpired;
   const requestRefresh = useRef<() => void>(() => {});
   const refresh = useCallback(() => requestRefresh.current(), []);
+  const startedReads = useRef(0);
+  const getReadVersion = useCallback(() => startedReads.current, []);
 
   useEffect(() => {
     let active = true;
@@ -25,12 +27,13 @@ export function useTvStatus(onSessionExpired: () => void) {
     async function read() {
       if (!active || inFlight) return;
       inFlight = true;
+      const readVersion = ++startedReads.current;
       controller = new AbortController();
       setLoading(true);
       try {
         const next = await api.tvStatus(controller.signal);
         if (!active) return;
-        setStatus(next);
+        setSnapshot({ status: next, readVersion });
         setError('');
       } catch (cause) {
         if (!active) return;
@@ -38,7 +41,7 @@ export function useTvStatus(onSessionExpired: () => void) {
           active = false;
           expired.current();
         } else {
-          setStatus(null);
+          setSnapshot({ status: null, readVersion });
           setError(friendlyError(cause));
         }
       } finally {
@@ -55,5 +58,5 @@ export function useTvStatus(onSessionExpired: () => void) {
       controller?.abort();
     };
   }, []);
-  return { status, loading, error, refresh };
+  return { status: snapshot.status, statusReadVersion: snapshot.readVersion, getReadVersion, loading, error, refresh };
 }
