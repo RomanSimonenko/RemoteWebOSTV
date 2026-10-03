@@ -64,12 +64,14 @@ Runtime dependencies: `repository`, `cipher`, `createAdapter(host: string, stagi
 
 **Interfaces:** `ClientKeyCipher {encrypt(key: string): EncryptedEnvelopeV1; decrypt(envelope: EncryptedEnvelopeV1): string}`; `loadClientKeyCipher({directory,hasStoredKey,randomBytes?}): Promise<ClientKeyCipher>`. Общие envelope/schema/AES-GCM функции извлекаются из существующего key-store без изменения файлового формата. `createTvRepository(sqlite): TvRepository`, где `load(): StoredTv|null`, `replace(value: StoredTv): void`, `hasStoredKey(): boolean`; `StoredTv = {host,identity,encryptedClientKey}`.
 
-- [ ] Написать regression tests неизменного файлового формата CLI и общего cipher: round-trip, разные IV, tampered tag/ciphertext, неверный ключ, пустой plaintext, отсутствующий master при шифротексте, ошибка чтения/записи и private permissions.
-- [ ] Написать storage tests: миграция v1→v2 сохраняет owner/sessions и создаёт backup; один `tv_config` с `id=1`; атомарная замена, injected rollback и reopen; нет plaintext ключа; malformed identity/envelope и отсутствующая таблица v2 запрещают использование схемы.
-- [ ] Подтвердить RED узкими tests: `pnpm --filter @remote-webos-tv/webos test -- test/key-cipher.test.ts`, `pnpm --filter @remote-webos-tv/api test -- test/tv-storage.test.ts`.
-- [ ] Реализовать cipher и repository. Миграция v2 создаёт `tv_config(id INTEGER PRIMARY KEY CHECK(id=1), host TEXT NOT NULL, identity_json TEXT NOT NULL, encrypted_client_key_json TEXT NOT NULL)`. Расширить validation v2 в database; не обходить существующий backup/transaction lifecycle. Master для веб-ТВ — `tv-master.key` в dataDir, отдельно от auth master; plaintext появляется только в памяти.
-- [ ] Запустить package tests/typecheck, включая существующий key-store и database suites; подтвердить GREEN и неизменность CLI формата.
-- [ ] Коммит `feat: persist encrypted TV configuration atomically`.
+- [x] Написать regression tests неизменного файлового формата CLI и общего cipher: round-trip, разные IV, tampered tag/ciphertext, неверный ключ, пустой plaintext, отсутствующий master при шифротексте, ошибка чтения/записи и private permissions.
+- [x] Написать storage tests: миграция v1→v2 сохраняет owner/sessions и создаёт backup; один `tv_config` с `id=1`; атомарная замена, injected rollback и reopen; нет plaintext ключа; malformed identity/envelope и отсутствующая таблица v2 запрещают использование схемы.
+- [x] Подтвердить RED узкими tests: `pnpm --filter @remote-webos-tv/webos exec vitest run test/key-cipher.test.ts`, `pnpm --filter @remote-webos-tv/api exec vitest run test/tv-storage.test.ts`.
+- [x] Реализовать cipher и repository. Миграция v2 создаёт `tv_config(id INTEGER PRIMARY KEY CHECK(id=1), host TEXT NOT NULL, identity_json TEXT NOT NULL, encrypted_client_key_json TEXT NOT NULL)`. Расширить validation v2 в database; не обходить существующий backup/transaction lifecycle. Master для веб-ТВ — `tv-master.key` в dataDir, отдельно от auth master; plaintext появляется только в памяти.
+- [x] Запустить package tests/typecheck, включая существующий key-store и database suites; подтвердить GREEN и неизменность CLI формата.
+- [x] Коммит `feat: persist encrypted TV configuration atomically`.
+
+Приёмка задачи 2: `fb88cee` и совместимостное исправление `34352d9`; общий прогон 364 tests и build прошли. Независимое review и scoped re-review приняты. Однократная инициализация cipher в runtime проверяется в задаче 4; параллельные независимые серверные старты могут потребовать повторного запуска при незавершённой первой записи мастер-ключа.
 
 ## Task 3: TV Service и жизненный цикл
 
@@ -129,6 +131,6 @@ Runtime dependencies: `repository`, `cipher`, `createAdapter(host: string, stagi
 
 ## Самопроверка и передача
 
-Спецификация покрыта задачами 1–6; каждый Review Focus привязан к tests. Публичные типы определены один раз; ключи не входят в status. Задача 1 выполнена и проверена; остальные задачи остаются открытыми.
+Спецификация покрыта задачами 1–6; каждый Review Focus привязан к tests. Публичные типы определены один раз; ключи не входят в status. Задачи 1–2 выполнены и проверены; остальные задачи остаются открытыми.
 
 Следующий шаг после одобрения плана: изолированная ветка от текущего подтверждённого состояния; выполнение задач последовательно с субагентами Sol 6.1 и независимыми проверками. Не объединять этот этап с несогласованными командами пульта или фоновым reconnect.
