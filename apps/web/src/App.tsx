@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SessionResponse } from '@remote-webos-tv/contracts';
 import { api, ApiFailure, friendlyError } from './api.js';
 import { Setup } from './pages/Setup.js';
@@ -12,8 +12,13 @@ export function App() {
   const [session, setSession] = useState<SessionResponse | null>(null);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [tvActive, setTvActive] = useState(true);
   const pending = useRef(false);
   const errorRef = useRef<HTMLParagraphElement>(null);
+  const expireSession = useCallback(() => {
+    setSession(null); setView('login'); setTvActive(false);
+    setMessage('Сессия истекла. Войдите снова.');
+  }, []);
 
   useEffect(() => { if (message) errorRef.current?.focus(); }, [message]);
   useEffect(() => {
@@ -47,9 +52,7 @@ export function App() {
     try { await action(); }
     catch (error) {
       if (error instanceof ApiFailure && error.status === 401 && view === 'home') {
-        setSession(null);
-        setView('login');
-        setMessage('Сессия истекла. Войдите снова.');
+        expireSession();
       } else setMessage(friendlyError(error));
     } finally { pending.current = false; setBusy(false); }
   }
@@ -68,10 +71,13 @@ export function App() {
       await api.login(input);
       const current = await api.session();
       setSession(current);
+      setTvActive(true);
       setView('home');
     })} />}
-    {view === 'home' && session && <Home username={session.username} busy={busy} error={error} onLogout={() => submit(async () => {
-      await api.logout(session.csrfToken);
+    {view === 'home' && session && <Home username={session.username} csrfToken={session.csrfToken} tvActive={tvActive} busy={busy} error={error} onSessionExpired={expireSession} onLogout={() => submit(async () => {
+      setTvActive(false);
+      try { await api.logout(session.csrfToken); }
+      catch (cause) { if (!(cause instanceof ApiFailure && cause.status === 401)) setTvActive(true); throw cause; }
       setSession(null);
       setView('login');
     })} />}

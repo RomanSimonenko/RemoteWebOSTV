@@ -1,4 +1,4 @@
-import { apiErrorSchema, loginResponseSchema, sessionResponseSchema, setupStatusSchema, type LoginRequest, type SetupRequest } from '@remote-webos-tv/contracts';
+import { apiErrorSchema, loginResponseSchema, sessionResponseSchema, setupStatusSchema, tvStatusResponseSchema, tvOperationSchema, type LoginRequest, type SetupRequest, type StartTvOperation, type TvOperation, type TvStatusResponse } from '@remote-webos-tv/contracts';
 
 export class ApiFailure extends Error {
   constructor(readonly status: number, readonly code: string) { super('API request failed'); }
@@ -31,10 +31,24 @@ export const api = {
   async setup(input: SetupRequest) { await request('/setup', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(input) }); },
   async login(input: LoginRequest) { return parsed(await request('/auth/login', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(input) }), loginResponseSchema); },
   async logout(csrfToken: string) { await request('/auth/logout', { method: 'POST', headers: { 'x-csrf-token': csrfToken } }); },
+  // JSON cannot carry an explicitly undefined optional property. The validated
+  // wire values satisfy the contracts' stricter exact-optional public types.
+  async tvStatus(signal?: AbortSignal): Promise<TvStatusResponse> { return await parsed(await request('/tv', { signal: signal ?? null }), tvStatusResponseSchema) as TvStatusResponse; },
+  async startTvOperation(input: StartTvOperation, csrfToken: string, signal?: AbortSignal) {
+    return await parsed(await request('/tv/operations', { method: 'POST', headers: { ...jsonHeaders, 'x-csrf-token': csrfToken }, body: JSON.stringify(input), signal: signal ?? null }), tvOperationSchema) as TvOperation;
+  },
+  async cancelTvOperation(id: string, csrfToken: string, signal?: AbortSignal) {
+    return await parsed(await request(`/tv/operations/${encodeURIComponent(id)}/cancel`, { method: 'POST', headers: { 'x-csrf-token': csrfToken }, signal: signal ?? null }), tvOperationSchema) as TvOperation;
+  },
 };
 
 export function friendlyError(error: unknown): string {
   if (error instanceof ApiFailure) {
+    if (error.code === 'OPERATION_CONFLICT') return 'Другая операция с телевизором ещё не завершена.';
+    if (error.code === 'INVALID_ACTION') return 'Это действие недоступно для текущей настройки телевизора.';
+    if (error.code === 'OPERATION_NOT_FOUND') return 'Операция с телевизором не найдена. Обновите статус.';
+    if (error.code === 'SERVICE_CLOSED') return 'Сервис телевизора остановлен.';
+    if (error.code === 'INVALID_RESPONSE') return 'Сервер вернул некорректный ответ. Обновите статус.';
     if (error.status === 401 && error.code === 'INVALID_CREDENTIALS') return 'Неверное имя или пароль.';
     if (error.status === 429) return 'Слишком много попыток. Попробуйте позже.';
     if (error.status === 403) return 'Действие отклонено. Проверьте данные и попробуйте снова.';

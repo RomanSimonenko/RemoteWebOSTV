@@ -1,0 +1,62 @@
+import { useEffect, useRef, useState, useCallback } from 'react';
+import type { TvStatusResponse } from '@remote-webos-tv/contracts';
+import { api, ApiFailure, friendlyError } from './api.js';
+
+const pollInterval = 2000;
+
+/** One read at a time. Manual refresh shares the same completion-based cooldown. */
+export function useTvStatus(onSessionExpired: () => void) {
+  const [snapshot, setSnapshot] = useState<{ status: TvStatusResponse | null; readVersion: number }>({ status: null, readVersion: 0 });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const expired = useRef(onSessionExpired);
+  expired.current = onSessionExpired;
+  const requestRefresh = useRef<() => void>(() => {});
+  const refresh = useCallback(() => requestRefresh.current(), []);
+  const startedReads = useRef(0);
+  const getReadVersion = useCallback(() => startedReads.current, []);
+
+  useEffect(() => {
+    let active = true;
+    let inFlight = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let controller: AbortController | undefined;
+    function schedule() {
+      if (active && !inFlight && timer === undefined) timer = setTimeout(() => { timer = undefined; void read(); }, pollInterval);
+    }
+    async function read() {
+      if (!active || inFlight) return;
+      inFlight = true;
+      const readVersion = ++startedReads.current;
+      controller = new AbortController();
+      setLoading(true);
+      try {
+        const next = await api.tvStatus(controller.signal);
+        if (!active) return;
+        setSnapshot({ status: next, readVersion });
+        setError('');
+      } catch (cause) {
+        if (!active) return;
+        if (cause instanceof ApiFailure && cause.status === 401) {
+          active = false;
+          expired.current();
+        } else {
+          setSnapshot({ status: null, readVersion });
+          setError(friendlyError(cause));
+        }
+      } finally {
+        inFlight = false;
+        if (active) { setLoading(false); schedule(); }
+      }
+    }
+    requestRefresh.current = schedule;
+    void read();
+    return () => {
+      active = false;
+      requestRefresh.current = () => {};
+      if (timer !== undefined) clearTimeout(timer);
+      controller?.abort();
+    };
+  }, []);
+  return { status: snapshot.status, statusReadVersion: snapshot.readVersion, getReadVersion, loading, error, refresh };
+}

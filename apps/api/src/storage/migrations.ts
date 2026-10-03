@@ -11,6 +11,13 @@ export const ownerTableSql = `CREATE TABLE owner (
           password_hash TEXT NOT NULL
         )`;
 
+export const tvConfigTableSql = `CREATE TABLE tv_config (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          host TEXT NOT NULL,
+          identity_json TEXT NOT NULL,
+          encrypted_client_key_json TEXT NOT NULL
+        )`;
+
 export const schemaMigrations: readonly Migration[] = [
   {
     version: 1,
@@ -35,5 +42,9 @@ export const schemaMigrations: readonly Migration[] = [
         );
       `);
     },
+  },
+  {
+    version: 2,
+    up(sqlite) { sqlite.exec(tvConfigTableSql); },
   },
 ];

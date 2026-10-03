@@ -6,6 +6,8 @@ import { systemDiagnosticCodes } from '../../api/src/security/diagnostic-codes.j
 const allowedCodes = new Set<string>([
   ...Object.keys(storageErrorMessages), ...systemDiagnosticCodes,
   'AUTH_STORAGE_UNAVAILABLE', 'SETUP_UNAVAILABLE', 'INVALID_SETUP_TOKEN', 'INVALID_OWNER_INPUT',
+  // Typed TV initialization/cleanup failures emitted by formatStartupError.
+  'KEY_STORE_CORRUPT', 'KEY_STORE_WRITE_FAILED', 'CLEANUP_FAILED', 'STORAGE_FAILED',
 ]);
 
 export async function waitForListening(child: ChildProcess): Promise<void> {
