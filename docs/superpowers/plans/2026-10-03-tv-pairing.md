@@ -50,11 +50,13 @@ Runtime dependencies: `repository`, `cipher`, `createAdapter(host: string, stagi
 
 **Interfaces:** схемы `tvOperationSchema`, `tvStatusResponseSchema`, `startTvOperationSchema`; типы выше. Существующие `TvIdentity` и `TvConnectionState` переиспользуются.
 
-- [ ] Написать тесты `valid local IPv4`, `rejects URL hostname port and non-private targets`, `rejects malformed octets and extra fields`, `action requires its own host shape`, `public response rejects secret fields`. Примеры — синтетические, не адрес стенда; проверить 10/8, 172.16/12 и 192.168/16, границы диапазонов, loopback, unspecified, multicast, 255.255.255.255 и неканонические записи.
-- [ ] Запустить `pnpm --filter @remote-webos-tv/contracts test`, подтвердить RED из-за отсутствующих схем.
-- [ ] Реализовать строгие схемы; нормализация trim допускается, hostname/DNS не используются. Не пытаться вычислять subnet-directed broadcast без известной маски интерфейса.
-- [ ] Повторить package tests и typecheck; подтвердить GREEN.
-- [ ] Коммит `feat: define protected TV setup contracts`.
+- [x] Написать тесты `valid local IPv4`, `rejects URL hostname port and non-private targets`, `rejects malformed octets and extra fields`, `action requires its own host shape`, `public response rejects secret fields`. Примеры — синтетические, не адрес стенда; проверить 10/8, 172.16/12 и 192.168/16, границы диапазонов, loopback, unspecified, multicast, 255.255.255.255 и неканонические записи.
+- [x] Запустить `pnpm --filter @remote-webos-tv/contracts test`, подтвердить RED из-за отсутствующих схем.
+- [x] Реализовать строгие схемы; нормализация trim допускается, hostname/DNS не используются. Не пытаться вычислять subnet-directed broadcast без известной маски интерфейса.
+- [x] Повторить package tests и typecheck; подтвердить GREEN.
+- [x] Коммит `feat: define protected TV setup contracts`.
+
+Приёмка задачи 1: `1de0535`; 110 contracts tests, полный прогон 332 tests и package typecheck прошли. Независимое task review приняло spec и quality без замечаний. Схемы не являются реализацией TV Service или пульта.
 
 ## Task 2: Криптография и атомарное хранилище
 
@@ -127,6 +129,6 @@ Runtime dependencies: `repository`, `cipher`, `createAdapter(host: string, stagi
 
 ## Самопроверка и передача
 
-Спецификация покрыта задачами 1–6; каждый Review Focus привязан к tests. Публичные типы определены один раз; ключи не входят в status. Пока ни один пункт реализации не выполнен.
+Спецификация покрыта задачами 1–6; каждый Review Focus привязан к tests. Публичные типы определены один раз; ключи не входят в status. Задача 1 выполнена и проверена; остальные задачи остаются открытыми.
 
 Следующий шаг после одобрения плана: изолированная ветка от текущего подтверждённого состояния; выполнение задач последовательно с субагентами Sol 6.1 и независимыми проверками. Не объединять этот этап с несогласованными командами пульта или фоновым reconnect.
