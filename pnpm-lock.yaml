@@ -35,6 +35,9 @@ importers:
       '@remote-webos-tv/web':
         specifier: workspace:*
         version: link:../web
+      '@remote-webos-tv/webos':
+        specifier: workspace:*
+        version: link:../../packages/webos
       better-sqlite3:
         specifier: 12.11.1
         version: 12.11.1

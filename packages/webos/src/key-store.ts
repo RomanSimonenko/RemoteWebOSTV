@@ -1,8 +1,4 @@
-import {
-  createCipheriv,
-  createDecipheriv,
-  randomBytes as nodeRandomBytes,
-} from 'node:crypto';
+import { randomBytes as nodeRandomBytes } from 'node:crypto';
 import {
   chmod,
   mkdir,
@@ -14,34 +10,10 @@ import {
 import type { FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { z } from 'zod';
-
 import { WebOsError } from './errors.js';
+import { createClientKeyCipher, encryptedEnvelopeV1Schema } from './key-cipher.js';
 
 const masterKeyLength = 32;
-const initializationVectorLength = 12;
-const authenticationTagLength = 16;
-
-const base64Schema = z.string().min(1).refine(isCanonicalBase64);
-const envelopeSchema = z.strictObject({
-  version: z.literal(1),
-  algorithm: z.literal('aes-256-gcm'),
-  iv: base64Schema.refine(
-    (value) => Buffer.from(value, 'base64').length === initializationVectorLength,
-  ),
-  ciphertext: base64Schema,
-  authTag: base64Schema.refine(
-    (value) => Buffer.from(value, 'base64').length === authenticationTagLength,
-  ),
-});
-
-interface EncryptedEnvelopeV1 {
-  readonly version: 1;
-  readonly algorithm: 'aes-256-gcm';
-  readonly iv: string;
-  readonly ciphertext: string;
-  readonly authTag: string;
-}
 
 export interface ClientKeyStore {
   load(): Promise<string | undefined>;
@@ -104,24 +76,15 @@ export class EncryptedFileKeyStore implements ClientKeyStore {
     }
 
     try {
-      const envelope = envelopeSchema.parse(JSON.parse(serialized));
+      const envelope = encryptedEnvelopeV1Schema.parse(JSON.parse(serialized));
       const masterKey = await this.#readMasterKey();
-      const decipher = createDecipheriv(
-        envelope.algorithm,
-        masterKey,
-        Buffer.from(envelope.iv, 'base64'),
-      );
-      decipher.setAuthTag(Buffer.from(envelope.authTag, 'base64'));
-      const plaintext = Buffer.concat([
-        decipher.update(Buffer.from(envelope.ciphertext, 'base64')),
-        decipher.final(),
-      ]).toString('utf8');
-
-      if (plaintext.length === 0) {
-        throw new Error('Decrypted client key is empty');
+      try {
+        return createClientKeyCipher(masterKey).decrypt(envelope);
+      } catch (error) {
+        throw new WebOsError('KEY_STORE_CORRUPT', `Encrypted client key at ${encryptedPath} is invalid`, {
+          cause: error instanceof WebOsError ? error.cause : error,
+        });
       }
-
-      return plaintext;
     } catch (error) {
       if (error instanceof WebOsError) {
         throw error;
@@ -166,19 +129,7 @@ export class EncryptedFileKeyStore implements ClientKeyStore {
 
   async #persist(clientKey: string): Promise<void> {
     const masterKey = await this.#loadOrCreateMasterKey();
-    const iv = this.#randomBytes(initializationVectorLength);
-    const cipher = createCipheriv('aes-256-gcm', masterKey, iv);
-    const ciphertext = Buffer.concat([
-      cipher.update(clientKey, 'utf8'),
-      cipher.final(),
-    ]);
-    const envelope: EncryptedEnvelopeV1 = {
-      version: 1,
-      algorithm: 'aes-256-gcm',
-      iv: iv.toString('base64'),
-      ciphertext: ciphertext.toString('base64'),
-      authTag: cipher.getAuthTag().toString('base64'),
-    };
+    const envelope = createClientKeyCipher(masterKey, this.#randomBytes).encrypt(clientKey);
     const temporaryPath = join(
       this.#directory,
       `client-key.enc.tmp-${process.pid}-${this.#randomBytes(8).toString('hex')}`,
@@ -275,12 +226,4 @@ function hasErrorCode(error: unknown, code: string): boolean {
     'code' in error &&
     error.code === code
   );
-}
-
-function isCanonicalBase64(value: string): boolean {
-  try {
-    return Buffer.from(value, 'base64').toString('base64') === value;
-  } catch {
-    return false;
-  }
 }

@@ -1,6 +1,7 @@
 export * from './adapter.js';
 export * from './buttons.js';
 export * from './errors.js';
+export * from './key-cipher.js';
 export * from './key-store.js';
 export * from './lgtv2-adapter.js';
 export * from './lgtv2-types.js';

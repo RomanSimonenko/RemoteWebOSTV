@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import Database from 'better-sqlite3';
 
-import { ownerTableSql, schemaMigrations, type Migration } from './migrations.js';
+import { ownerTableSql, tvConfigTableSql, schemaMigrations, type Migration } from './migrations.js';
 import { StorageStartupError, type StorageErrorCode } from './errors.js';
 
 export interface AppDatabase {
@@ -68,6 +68,14 @@ function migrationVersion(sqlite: Database.Database, latestVersion: number): num
     } catch (cause) {
       throw new StorageStartupError('STORAGE_SCHEMA_INVALID', cause);
     }
+  }
+  if (version >= 2) {
+    const savedTvSql = sqlite.prepare('SELECT sql FROM sqlite_schema WHERE type = ? AND name = ?').pluck().get('table', 'tv_config');
+    const extendsTvTable = version > 2 && typeof savedTvSql === 'string' && savedTvSql.startsWith(tvConfigTableSql.slice(0, -1));
+    if (savedTvSql !== tvConfigTableSql && !extendsTvTable) throw new StorageStartupError('STORAGE_SCHEMA_INVALID');
+    try {
+      sqlite.prepare('SELECT id, host, identity_json, encrypted_client_key_json FROM tv_config LIMIT 0');
+    } catch (cause) { throw new StorageStartupError('STORAGE_SCHEMA_INVALID', cause); }
   }
   return version;
 }
