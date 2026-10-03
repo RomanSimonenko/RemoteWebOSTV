@@ -3,6 +3,30 @@ import { WebOsError } from '@remote-webos-tv/webos';
 import { barrier, drain, harness, pairing, snapshot, succeed } from './support/tv-harness.js';
 
 describe('TV lifecycle barriers', () => {
+  test.each(['cancel', 'timeout'] as const)('early replacement %s still closes the adapter behind an old probe', async (ending) => {
+    const h = harness(true); h.service.start({ action: 'reconnect' }); await drain(); await succeed(h.adapters[0]!);
+    const old = h.adapters[0]!; old.readResult = barrier(); const cleanup = barrier<void>(); old.disconnectResult = cleanup.promise;
+    const reading = h.service.status(); await drain();
+    const replacement = h.service.start({ action: 'repair' });
+    // End the operation before its deferred worker reaches the probe await.
+    if (ending === 'cancel') h.service.cancel(replacement.id);
+    else h.scheduler.advance(60_000);
+    await drain(); old.readResult.resolve(snapshot); await reading; await drain();
+    try {
+      const status = await h.service.status();
+      expect.soft(old.closed).toBe(true);
+      expect.soft(status.connection).toBe('unavailable');
+      expect(status.operation).toMatchObject({
+        id: replacement.id, status: ending === 'cancel' ? 'cancelled' : 'failed',
+        error: { code: ending === 'cancel' ? 'CANCELLED' : 'PAIRING_TIMEOUT' },
+      });
+      expect(h.adapters).toHaveLength(1); expect(h.writes).toEqual([]);
+      expect(() => h.service.start({ action: 'reconnect' })).toThrowError(expect.objectContaining({ statusCode: 409 }));
+      let closed = false; const closing = h.service.close().then(() => { closed = true; }); await drain();
+      expect(closed).toBe(false); cleanup.resolve(); await closing;
+    } finally { cleanup.resolve(); await h.service.close(); }
+  });
+
   test('operation timeout is terminal while adapter cleanup remains pending and close waits', async () => {
     const h = harness(); h.service.start({ action: 'pair', host: '192.168.1.10' }); await drain();
     const cleanup = barrier<void>(); h.adapters[0]!.disconnectResult = cleanup.promise;

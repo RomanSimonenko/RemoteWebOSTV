@@ -86,6 +86,9 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
   }
 
   async function run(context: Attempt, input: StartTvOperation, previous: StoredTv | null): Promise<void> {
+    // Own the old connection before any abortable await: an early abort while
+    // waiting for its probe must still disconnect it before releasing the gate.
+    const previousAdapter = activeAdapter;
     let adapter: WebOsAdapter | undefined;
     let previousCleanup: Promise<void> | undefined;
     const signal = context.controller.signal;
@@ -139,7 +142,9 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       // Terminal publication has the operation budget; cleanup remains owned and
       // blocks reuse independently, even when disconnect ignores cancellation.
       publishFailure(failure);
-      const pendingCleanup = adapter ? disconnect(adapter) : previousCleanup;
+      const pendingCleanup = adapter
+        ? disconnect(adapter)
+        : previousCleanup ?? (previousAdapter ? disconnect(previousAdapter) : undefined);
       if (pendingCleanup) {
         try { await pendingCleanup; }
         catch (cleanupCause) { publishFailure(cleanupFailure(failure, cleanupCause)); }
