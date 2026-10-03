@@ -1,4 +1,4 @@
-import type { TvSnapshot } from '@remote-webos-tv/contracts';
+import type { TvButton, TvSnapshot } from '@remote-webos-tv/contracts';
 import { createClientKeyCipher, type ClientKeyStore, type PairingRequest, type PairingResult, type WebOsAdapter } from '@remote-webos-tv/webos';
 import { createTvService, type TvServiceDependencies, type TvScheduler } from '../../src/tv/service.js';
 import type { StoredTv, TvRepository } from '../../src/tv/repository.js';
@@ -45,6 +45,9 @@ export class ControlledAdapter implements WebOsAdapter {
   readResult = barrier<TvSnapshot>();
   disconnectResult: Promise<void> = Promise.resolve();
   reads = 0;
+  readonly sent: TvButton[] = [];
+  readonly enteredSend = barrier<AbortSignal>();
+  sendResult: Promise<void> = Promise.resolve();
   pairs = 0;
   closed = false;
   constructor(readonly staging: ClientKeyStore) {}
@@ -58,7 +61,7 @@ export class ControlledAdapter implements WebOsAdapter {
   async openPointerSocket() { throw new Error('outside test scope'); }
   async listApps() { return []; }
   async listInputs() { return []; }
-  async sendButton() { throw new Error('outside test scope'); }
+  async sendButton(button: TvButton, signal: AbortSignal) { this.sent.push(button); this.enteredSend.resolve(signal); await this.sendResult; }
 }
 
 export function harness(saved = false, overrides: Partial<TvServiceDependencies> = {}) {

@@ -107,6 +107,77 @@ function pair(adapter: Lgtv2Adapter, signal = new AbortController().signal) {
 }
 
 describe('Lgtv2Adapter', () => {
+  test('classifies preparation failure as not_sent and send failure as unknown', async () => {
+    const cause = new Error('synthetic failure');
+    const preparing = createUnitAdapter({ getSocket: async () => { throw cause; } }); await pair(preparing.adapter);
+    await expect(preparing.adapter.sendButton('HOME', new AbortController().signal)).rejects.toMatchObject({ code: 'UNKNOWN', delivery: 'not_sent', cause: expect.any(WebOsError) });
+    const sending = createUnitAdapter({ getSocket: async () => ({ send: () => { throw cause; }, close() {} }) }); await pair(sending.adapter);
+    await expect(sending.adapter.sendButton('HOME', new AbortController().signal)).rejects.toMatchObject({ code: 'UNKNOWN', delivery: 'unknown' });
+  });
+
+  test('late pointer acquisition after cancellation never sends', async () => {
+    let release!: (socket: Lgtv2SpecializedSocket) => void;
+    const pointer = new Promise<Lgtv2SpecializedSocket>((resolve) => { release = resolve; });
+    const send = vi.fn(); const { adapter } = createUnitAdapter({ getSocket: () => pointer }); await pair(adapter);
+    const controller = new AbortController(); const pending = adapter.sendButton('HOME', controller.signal);
+    controller.abort(); release({ send, close() {} });
+    await expect(pending).rejects.toMatchObject({ delivery: 'not_sent' }); expect(send).not.toHaveBeenCalled();
+  });
+
+  test('abort at the send boundary reports unknown rather than not_sent', async () => {
+    const controller = new AbortController(); const send = vi.fn(() => controller.abort());
+    const { adapter } = createUnitAdapter({ getSocket: async () => ({ send, close() {} }) }); await pair(adapter);
+    await expect(adapter.sendButton('HOME', controller.signal)).rejects.toMatchObject({ delivery: 'unknown' }); expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  test('closes a late pointer from the disconnected client without sending', async () => {
+    let release!: (socket: Lgtv2SpecializedSocket) => void;
+    const pointer = new Promise<Lgtv2SpecializedSocket>((resolve) => { release = resolve; });
+    const send = vi.fn(); const close = vi.fn(); const { adapter } = createUnitAdapter({ getSocket: () => pointer }); await pair(adapter);
+    const pending = adapter.sendButton('HOME', new AbortController().signal);
+    await adapter.disconnect(); release({ send, close });
+    await expect(pending).rejects.toMatchObject({ delivery: 'not_sent', code: 'CONNECTION_LOST' });
+    expect(send).not.toHaveBeenCalled(); expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  test('cancelled same-client preparation leaves the reusable socket owned by that client', async () => {
+    let release!: (socket: Lgtv2SpecializedSocket) => void;
+    const pointer = new Promise<Lgtv2SpecializedSocket>((resolve) => { release = resolve; });
+    const send = vi.fn(); const close = vi.fn(); const { adapter } = createUnitAdapter({ getSocket: () => pointer }); await pair(adapter);
+    const controller = new AbortController(); const pending = adapter.sendButton('HOME', controller.signal); controller.abort();
+    await expect(pending).rejects.toMatchObject({ delivery: 'not_sent' }); release({ send, close });
+    for (let index = 0; index < 10; index++) await Promise.resolve();
+    expect(close).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled();
+    await adapter.sendButton('UP', new AbortController().signal);
+    expect(send).toHaveBeenCalledExactlyOnceWith('button', { name: 'UP' });
+    await adapter.disconnect(); expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  test('late old-client pointer cleanup cannot close the replacement pointer', async () => {
+    let release!: (socket: Lgtv2SpecializedSocket) => void;
+    const oldPointer = new Promise<Lgtv2SpecializedSocket>((resolve) => { release = resolve; });
+    const oldSend = vi.fn(); const oldClose = vi.fn(); const newSend = vi.fn(); const newClose = vi.fn();
+    const getSocket = vi.fn<() => Promise<Lgtv2SpecializedSocket>>().mockReturnValueOnce(oldPointer).mockResolvedValue({ send: newSend, close: newClose });
+    const { adapter } = createUnitAdapter({ getSocket }); await pair(adapter);
+    const controller = new AbortController(); const pending = adapter.sendButton('HOME', controller.signal); controller.abort();
+    await expect(pending).rejects.toMatchObject({ delivery: 'not_sent' });
+    await adapter.disconnect(); await pair(adapter); await adapter.sendButton('UP', new AbortController().signal);
+    release({ send: oldSend, close: oldClose }); for (let index = 0; index < 10; index++) await Promise.resolve();
+    expect(oldSend).not.toHaveBeenCalled(); expect(oldClose).toHaveBeenCalledTimes(1);
+    expect(newSend).toHaveBeenCalledExactlyOnceWith('button', { name: 'UP' }); expect(newClose).not.toHaveBeenCalled();
+  });
+
+  test('late stale-pointer cleanup failure remains causal and observable on disconnect', async () => {
+    let release!: (socket: Lgtv2SpecializedSocket) => void;
+    const pointer = new Promise<Lgtv2SpecializedSocket>((resolve) => { release = resolve; });
+    const cause = new Error('synthetic cleanup'); const { adapter } = createUnitAdapter({ getSocket: () => pointer }); await pair(adapter);
+    const controller = new AbortController(); const pending = adapter.sendButton('HOME', controller.signal); controller.abort();
+    await expect(pending).rejects.toMatchObject({ delivery: 'not_sent' }); await adapter.disconnect();
+    release({ send: vi.fn(), close() { throw cause; } }); for (let index = 0; index < 10; index++) await Promise.resolve();
+    await expect(adapter.disconnect()).rejects.toMatchObject({ code: 'CONNECTION_LOST', cause });
+    createdAdapters.splice(createdAdapters.indexOf(adapter), 1);
+  });
+
   test('refuses a fresh PROMPT for a saved-key reconnect and never saves a replacement', async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
