@@ -1,5 +1,5 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { createServer, type AddressInfo } from 'node:net';
+import { createServer, type AddressInfo, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Writable } from 'node:stream';
@@ -68,10 +68,13 @@ export class TvFixture {
   #app: Awaited<ReturnType<typeof createApiRuntime>> | undefined;
   #tv!: MockWebOsTv;
   #offlineUrl = '';
+  #unavailable: Server | undefined;
+  #tvUnavailable = false;
   #epoch = Date.now();
   #id = 0;
   get origin() { return this.#origin; }
   get tv() { return this.#tv; }
+  get unavailablePort() { return Number(new URL(this.#offlineUrl).port); }
   get promptCount() { return this.#mocks.reduce((count, mock) => count + mock.pairingPromptCount, 0); }
 
   async start() {
@@ -86,9 +89,15 @@ export class TvFixture {
     if (!/^[A-Za-z0-9_-]{43}$/.test(this.#setupToken)) throw new Error('Invalid synthetic setup token');
     this.#origin = `http://127.0.0.1:${await availablePort()}`;
     await this.replaceTv({ kind: 'deferred-pairing', gate: this.promptGate.promise });
-    const offline = await this.#startMock({ kind: 'success' });
-    this.#offlineUrl = offline.url;
-    await offline.stop();
+    // Own the endpoint until teardown. Both TLS and WebSocket handshakes fail
+    // deterministically; another listener cannot turn this target into a TV.
+    const unavailable = createServer((socket) => socket.destroy());
+    await new Promise<void>((resolve, reject) => {
+      unavailable.once('error', reject);
+      unavailable.listen(0, '127.0.0.1', resolve);
+    });
+    this.#unavailable = unavailable;
+    this.#offlineUrl = `ws://127.0.0.1:${(unavailable.address() as AddressInfo).port}`;
     await this.#startApi();
   }
 
@@ -102,6 +111,12 @@ export class TvFixture {
   async replaceTv(scenario: MockScenario) {
     await this.#tv?.stop();
     this.#tv = await this.#startMock(scenario);
+    this.#tvUnavailable = false;
+  }
+
+  async makeTvUnavailable() {
+    this.#tvUnavailable = true;
+    await this.#tv.stop();
   }
 
   async #startApi() {
@@ -118,7 +133,7 @@ export class TvFixture {
           // Mapping is confined to this fixture: public validation and HTTP security remain real.
           if (host !== tvHost && host !== failedHost) throw new Error('Unmapped synthetic TV address');
           this.policies.push({ host, prompt: allowPairingPrompt });
-          const url = host === tvHost ? this.#tv.url : this.#offlineUrl;
+          const url = host === tvHost && !this.#tvUnavailable ? this.#tv.url : this.#offlineUrl;
           const port = Number(new URL(url).port);
           return new Lgtv2Adapter({ host, keyStore, requestTimeoutMs, handshakeTimeoutMs: requestTimeoutMs,
             allowPairingPrompt, now: () => new Date(this.#epoch + this.clock.time) }, {
@@ -171,7 +186,16 @@ export class TvFixture {
     this.promptGate.release();
     try { await this.#app?.close(); }
     finally {
-      try { await Promise.all(this.#mocks.map((mock) => mock.stop())); }
+      const unavailable = this.#unavailable;
+      this.#unavailable = undefined;
+      try {
+        await Promise.all([
+          ...this.#mocks.map((mock) => mock.stop()),
+          ...(unavailable ? [new Promise<void>((resolve, reject) => {
+            unavailable.close((error) => error ? reject(error) : resolve());
+          })] : []),
+        ]);
+      }
       finally { if (this.#directory) await rm(this.#directory, { recursive: true, force: true }); }
     }
   }

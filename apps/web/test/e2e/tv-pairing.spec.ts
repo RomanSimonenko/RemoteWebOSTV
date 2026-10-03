@@ -1,5 +1,16 @@
 import { expect, type Page } from '@playwright/test';
+import { createServer } from 'node:net';
 import { test, gate, tvHost, failedHost, type TvFixture } from '../support/tv-fixture.js';
+
+async function competingBind(port: number) {
+  const server = createServer();
+  const result = await new Promise<string>((resolve) => {
+    server.once('error', (error: NodeJS.ErrnoException) => resolve(error.code ?? 'unknown'));
+    server.listen(port, '127.0.0.1', () => resolve('listening'));
+  });
+  if (server.listening) await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  return result;
+}
 
 async function startPair(page: Page, tv: TvFixture) {
   await expect(page.getByRole('button', { name: 'Подключить', exact: true })).toBeVisible();
@@ -119,7 +130,8 @@ test('cancel closes the prompt connection and a late TV approval cannot configur
 test('unavailable TV and failed address change keep the saved identity through restart', async ({ page, tv }) => {
   await pairSuccessfully(page, tv);
   const original = (await tv.status(page)).tv;
-  await tv.tv.stop();
+  expect(await competingBind(tv.unavailablePort)).toBe('EADDRINUSE');
+  await tv.makeTvUnavailable();
   await expect.poll(async () => (await tv.status(page)).connection).toBe('unavailable');
   await expect(page.getByRole('status')).toHaveText('Нет соединения');
   await savedTv(page);
@@ -135,7 +147,10 @@ test('unavailable TV and failed address change keep the saved identity through r
   await expect(page.getByRole('status')).toHaveText('Нет соединения');
   expect((await tv.status(page)).tv).toEqual(original);
   expect(tv.promptCount).toBe(1);
+  expect(await competingBind(tv.unavailablePort)).toBe('EADDRINUSE');
   expect(tv.policies.at(-1)).toEqual({ host: tvHost, prompt: false });
+  await tv.close();
+  expect(await competingBind(tv.unavailablePort)).toBe('listening');
 });
 
 test('revoked saved key requires explicit repair and reload never starts another prompt', async ({ page, tv }) => {
