@@ -44,7 +44,7 @@ TV Service предоставляет `start(input): TvOperation` (приним�
 
 Runtime dependencies: `repository`, `cipher`, `createAdapter(host: string, stagingKeyStore: ClientKeyStore, requestTimeoutMs: number): WebOsAdapter`, `now(): number`, `newId(): string`, внедряемый scheduler тайм-аутов. Scheduler использует monotonic длительность; epoch deadline предназначен UI. Откат wall-clock не продлевает реальный 60-секундный бюджет.
 
-## Задача 1. Публичные контракты и адреса
+## Task 1: Публичные контракты и адреса
 
 **Files:** создать `packages/contracts/src/tv-setup.ts`, `packages/contracts/test/tv-setup.test.ts`; изменить `packages/contracts/src/index.ts`.
 
@@ -56,7 +56,7 @@ Runtime dependencies: `repository`, `cipher`, `createAdapter(host: string, stagi
 - [ ] Повторить package tests и typecheck; подтвердить GREEN.
 - [ ] Коммит `feat: define protected TV setup contracts`.
 
-## Задача 2. Криптография и атомарное хранилище
+## Task 2: Криптография и атомарное хранилище
 
 **Files:** создать `packages/webos/src/key-cipher.ts`, `packages/webos/test/key-cipher.test.ts`, `apps/api/src/tv/repository.ts`, `apps/api/test/tv-storage.test.ts`; изменить `packages/webos/src/key-store.ts`, `packages/webos/src/index.ts`, `apps/api/src/storage/{migrations,database}.ts`.
 
@@ -69,7 +69,7 @@ Runtime dependencies: `repository`, `cipher`, `createAdapter(host: string, stagi
 - [ ] Запустить package tests/typecheck, включая существующий key-store и database suites; подтвердить GREEN и неизменность CLI формата.
 - [ ] Коммит `feat: persist encrypted TV configuration atomically`.
 
-## Задача 3. TV Service и жизненный цикл
+## Task 3: TV Service и жизненный цикл
 
 **Files:** создать `apps/api/src/tv/{service,operation,staging-key-store}.ts`, `apps/api/test/{tv-service,tv-lifecycle}.test.ts`; использовать mock-TV из `packages/webos/test/support/mock-webos-tv.ts` через явно тестовый import, не включать fixture в production.
 
@@ -85,7 +85,7 @@ Runtime dependencies: `repository`, `cipher`, `createAdapter(host: string, stagi
 - [ ] Запустить узкие tests/typecheck и suite mock adapter; подтвердить GREEN.
 - [ ] Коммит `feat: manage cancellable TV pairing lifecycle`.
 
-## Задача 4. Защищённый HTTP и runtime
+## Task 4: Защищённый HTTP и runtime
 
 **Files:** создать `apps/api/src/tv/{routes,rate-limit}.ts`, `apps/api/test/{tv-routes,tv-runtime}.test.ts`; изменить `apps/api/src/{app,runtime}.ts` и API manifest только для существующей workspace-зависимости webos.
 
@@ -99,7 +99,7 @@ Runtime dependencies: `repository`, `cipher`, `createAdapter(host: string, stagi
 - [ ] Запустить все API tests/typecheck и `pnpm build`; подтвердить GREEN.
 - [ ] Коммит `feat: expose protected TV pairing API`.
 
-## Задача 5. Веб-путь и повторный вход
+## Task 5: Веб-путь и повторный вход
 
 **Files:** создать `apps/web/src/pages/TvSetup.tsx`, `apps/web/src/useTvStatus.ts`, `apps/web/src/pages/TvSetup.test.tsx`, `apps/web/src/useTvStatus.test.tsx`; изменить `apps/web/src/api.ts`, `apps/web/src/App.tsx`, `apps/web/src/pages/Home.tsx`, `apps/web/src/App.test.tsx`.
 
@@ -112,7 +112,7 @@ Runtime dependencies: `repository`, `cipher`, `createAdapter(host: string, stagi
 - [ ] Запустить web tests/typecheck/build; подтвердить GREEN и сохранность auth tests.
 - [ ] Коммит `feat: add persistent TV setup browser flow`.
 
-## Задача 6. Приёмка и документация
+## Task 6: Приёмка и документация
 
 **Files:** создать `apps/web/test/e2e/tv-pairing.spec.ts`, `apps/web/test/support/tv-fixture.ts`; изменить `README.md`, этот план и `docs/compatibility/lg-43up76906le-webos-6.5.3.md` только по новым аппаратным доказательствам.
 
