@@ -80,7 +80,7 @@ export function TvSetup({ csrfToken, onSessionExpired }: Props) {
   return <section>
     <h1>{tv ? 'Телевизор' : 'Телевизор ещё не настроен'}</h1>
     {tv && <><p>{tv.identity.model}</p><p>{tv.host}</p></>}
-    <p role="status" aria-live="polite">{error ? 'Статус неизвестен' : progress || (status ? connections[status.connection] : 'Загрузка статуса…')}</p>
+    <p role="status" aria-label="Соединение с телевизором" aria-live="polite">{error ? 'Статус неизвестен' : progress || (status ? connections[status.connection] : 'Загрузка статуса…')}</p>
     {diagnostic && <p ref={alert} tabIndex={-1} role="alert" className="error">{diagnostic}</p>}
     {running && <div>
       {(operation.action === 'pair' || operation.action === 'repair') && <p>Подтвердите доступ на экране телевизора.</p>}

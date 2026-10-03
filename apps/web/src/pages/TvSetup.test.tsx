@@ -38,7 +38,7 @@ test('validates literal private IPv4 and sends one protected pair request despit
   expect(fetch.mock.calls[1]).toEqual(['/api/tv/operations', expect.objectContaining({ method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken }, body: '{"action":"pair","host":"192.168.1.20"}' })]);
   await act(async () => { pending.resolve(response(operation, 202)); });
   expect(screen.getByText('Подтвердите доступ на экране телевизора.')).toBeTruthy();
-  expect(screen.getByRole('status').textContent).toBe('Сопряжение');
+  expect(screen.getByRole('status', { name: 'Соединение с телевизором' }).textContent).toBe('Сопряжение');
 });
 
 test('restores server deadline on reload, keeps an expired operation running until server completion and explicitly cancels', async () => {
