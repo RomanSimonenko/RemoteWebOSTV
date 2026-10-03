@@ -77,6 +77,8 @@ export interface Lgtv2AdapterOptions {
   readonly requestTimeoutMs: number;
   readonly handshakeTimeoutMs: number;
   readonly now: () => Date;
+  /** Explicit setup may authorize PROMPT; saved-key reconnection must fail closed. */
+  readonly allowPairingPrompt?: boolean;
 }
 
 interface Lgtv2AdapterDependencies {
@@ -426,6 +428,11 @@ export class Lgtv2Adapter implements WebOsAdapter {
       });
       client.on('connect', () => {
         void finish();
+      });
+      client.on('prompt', () => {
+        if (this.#options.allowPairingPrompt === false) {
+          fail(new WebOsError('AUTHORIZATION_FAILED', 'Saved authorization requires a fresh pairing prompt'));
+        }
       });
       client.on('error', (error) => {
         if (!settled) {

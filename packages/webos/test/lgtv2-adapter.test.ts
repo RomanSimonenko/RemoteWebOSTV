@@ -107,6 +107,21 @@ function pair(adapter: Lgtv2Adapter, signal = new AbortController().signal) {
 }
 
 describe('Lgtv2Adapter', () => {
+  test('refuses a fresh PROMPT for a saved-key reconnect and never saves a replacement', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const mock = await startMock({ kind: 'deferred-pairing', gate });
+    const keyStore = new MemoryKeyStore(mockClientKey);
+    const { adapter } = createHarness(mock, keyStore, { allowPairingPrompt: false });
+    const pending = pair(adapter);
+    await expect(pending).rejects.toMatchObject({ code: 'AUTHORIZATION_FAILED' });
+    await mock.waitForActiveSocketCount(0);
+    release();
+    expect(keyStore.current).toBe(mockClientKey);
+    expect(keyStore.saved).toEqual([]);
+    expect(mock.requests).toHaveLength(1);
+  });
+
   test('uses secure-first fallback and saves a key only after registration', async () => {
     let releasePairing!: () => void;
     const gate = new Promise<void>((resolve) => {
