@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react';
+import { TvSetup } from './TvSetup.js';
 
-interface Props { username: string; busy: boolean; error: ReactNode; onLogout(): void }
-export function Home({ username, busy, error, onLogout }: Props) {
+interface Props { username: string; csrfToken: string; tvActive: boolean; busy: boolean; error: ReactNode; onLogout(): void; onSessionExpired(): void }
+export function Home({ username, csrfToken, tvActive, busy, error, onLogout, onSessionExpired }: Props) {
   return <section>
-    <h1>Телевизор ещё не настроен</h1>
-    <p>Вы вошли как {username}. Настройка телевизора появится позже.</p>
+    <p>Вы вошли как {username}.</p>
+    {tvActive && <TvSetup csrfToken={csrfToken} onSessionExpired={onSessionExpired} />}
     {error}
     <button type="button" disabled={busy} onClick={onLogout}>{busy ? 'Выход…' : 'Выйти'}</button>
   </section>;

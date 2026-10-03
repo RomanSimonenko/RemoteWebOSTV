@@ -1,11 +1,12 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App } from './App.js';
 
 const csrfToken = 'c'.repeat(43);
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -37,7 +38,8 @@ test('claimed installation shows login, then authenticated home after verified s
   const fetch = vi.fn().mockResolvedValueOnce(response(200, { state: 'claimed' }))
     .mockResolvedValueOnce(response(401, { code: 'UNAUTHORIZED', message: 'Unauthorized', requestId: 'request-1' }))
     .mockResolvedValueOnce(response(200, { username: 'alice' }))
-    .mockResolvedValueOnce(response(200, { username: 'alice', csrfToken }));
+    .mockResolvedValueOnce(response(200, { username: 'alice', csrfToken }))
+    .mockResolvedValueOnce(response(200, { tv: null, connection: 'unconfigured', operation: null }));
   vi.stubGlobal('fetch', fetch);
   render(<App />);
   expect(await screen.findByRole('heading', { name: 'Вход' })).toBeTruthy();
@@ -48,11 +50,13 @@ test('claimed installation shows login, then authenticated home after verified s
   expect(await screen.findByText('Телевизор ещё не настроен')).toBeTruthy();
   expect(fetch.mock.calls[2]?.[1]).toMatchObject({ method: 'POST', credentials: 'same-origin' });
   expect(fetch.mock.calls[3]?.[0]).toBe('/api/auth/session');
+  expect(await screen.findByLabelText('IP-адрес телевизора')).toBeTruthy();
 });
 
 test('expired session returns to login when an authenticated operation is rejected', async () => {
   const fetch = vi.fn().mockResolvedValueOnce(response(200, { state: 'claimed' }))
     .mockResolvedValueOnce(response(200, { username: 'alice', csrfToken }))
+    .mockResolvedValueOnce(response(200, { tv: null, connection: 'unconfigured', operation: null }))
     .mockResolvedValueOnce(response(401, { code: 'UNAUTHORIZED', message: 'Unauthorized', requestId: 'request-2' }));
   vi.stubGlobal('fetch', fetch);
   render(<App />);
@@ -60,6 +64,71 @@ test('expired session returns to login when an authenticated operation is reject
   fireEvent.click(screen.getByRole('button', { name: 'Выйти' }));
   expect(await screen.findByRole('heading', { name: 'Вход' })).toBeTruthy();
   expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Сессия истекла. Войдите снова.');
+});
+
+test('authenticated reload reads TV status without starting a new pairing', async () => {
+  const fetch = vi.fn().mockResolvedValueOnce(response(200, { state: 'claimed' }))
+    .mockResolvedValueOnce(response(200, { username: 'alice', csrfToken }))
+    .mockResolvedValueOnce(response(200, { tv: { host: '192.168.1.20', identity: { model: 'Synthetic TV' } }, connection: 'unavailable', operation: null }));
+  vi.stubGlobal('fetch', fetch); render(<App />);
+  expect(await screen.findByText('Synthetic TV')).toBeTruthy();
+  expect(screen.getByText('192.168.1.20')).toBeTruthy();
+  expect(fetch.mock.calls.map(([path]) => path)).toEqual(['/api/setup/status', '/api/auth/session', '/api/tv']);
+});
+
+test('status 401 returns to login through the App session owner', async () => {
+  const fetch = vi.fn().mockResolvedValueOnce(response(200, { state: 'claimed' }))
+    .mockResolvedValueOnce(response(200, { username: 'alice', csrfToken }))
+    .mockResolvedValueOnce(response(401, { code: 'UNAUTHORIZED', message: 'Unauthorized', requestId: 'synthetic' }));
+  vi.stubGlobal('fetch', fetch); render(<App />);
+  expect(await screen.findByRole('heading', { name: 'Вход' })).toBeTruthy();
+  expect(screen.getByRole('alert').textContent).toContain('Сессия истекла');
+  expect(screen.queryByLabelText('IP-адрес телевизора')).toBeNull();
+});
+
+test('logout during pair stops UI requests immediately and ignores late responses without cancelling server work', async () => {
+  let finishStatus!: (value: Response) => void;
+  let finishLogout!: (value: Response) => void;
+  const pendingStatus = new Promise<Response>((resolve) => { finishStatus = resolve; });
+  const pendingLogout = new Promise<Response>((resolve) => { finishLogout = resolve; });
+  const fetch = vi.fn().mockResolvedValueOnce(response(200, { state: 'claimed' }))
+    .mockResolvedValueOnce(response(200, { username: 'alice', csrfToken }))
+    .mockReturnValueOnce(pendingStatus).mockReturnValueOnce(pendingLogout);
+  vi.stubGlobal('fetch', fetch); render(<App />);
+  await screen.findByRole('button', { name: 'Выйти' });
+  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+  const signal = fetch.mock.calls[2]?.[1].signal as AbortSignal;
+  fireEvent.click(screen.getByRole('button', { name: 'Выйти' }));
+  expect(signal.aborted).toBe(true);
+  finishStatus(response(200, { tv: { host: '192.168.1.20', identity: { model: 'Late synthetic TV' } }, connection: 'available', operation: null }));
+  finishLogout(response(204));
+  expect(await screen.findByRole('heading', { name: 'Вход' })).toBeTruthy();
+  expect(screen.queryByText('Late synthetic TV')).toBeNull();
+  expect(fetch.mock.calls.map(([path]) => path)).toEqual(['/api/setup/status', '/api/auth/session', '/api/tv', '/api/auth/logout']);
+});
+
+test('logout stays available while a pair submission is pending and aborts it without an explicit server cancellation', async () => {
+  vi.useFakeTimers();
+  let finishPair!: (value: Response) => void;
+  const pair = new Promise<Response>((resolve) => { finishPair = resolve; });
+  const fetch = vi.fn().mockResolvedValueOnce(response(200, { state: 'claimed' }))
+    .mockResolvedValueOnce(response(200, { username: 'alice', csrfToken }))
+    .mockResolvedValueOnce(response(200, { tv: null, connection: 'unconfigured', operation: null }))
+    .mockReturnValueOnce(pair).mockResolvedValueOnce(response(204));
+  vi.stubGlobal('fetch', fetch); render(<App />);
+  await act(async () => {});
+  fireEvent.change(screen.getByLabelText('IP-адрес телевизора'), { target: { value: '10.0.0.25' } });
+  fireEvent.submit(screen.getByRole('button', { name: 'Подключить' }).closest('form')!);
+  const signal = fetch.mock.calls[3]?.[1].signal as AbortSignal;
+  expect((screen.getByRole('button', { name: 'Выйти' }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: 'Выйти' }));
+  expect(signal.aborted).toBe(true);
+  await act(async () => {
+    finishPair(response(202, { id: 'late-synthetic', action: 'pair', status: 'running', startedAt: 10000, deadlineAt: 70000 }));
+    await vi.advanceTimersByTimeAsync(10000);
+  });
+  expect(screen.getByRole('heading', { name: 'Вход' })).toBeTruthy();
+  expect(fetch.mock.calls.map(([path]) => path)).toEqual(['/api/setup/status', '/api/auth/session', '/api/tv', '/api/tv/operations', '/api/auth/logout']);
 });
 
 test('pending login cannot submit twice and reports a safe server error', async () => {
