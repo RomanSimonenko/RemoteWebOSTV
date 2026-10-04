@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { startTvOperationSchema, type StartTvOperation, type TvConnectionState, type TvOperation, type SavedTvView } from '@remote-webos-tv/contracts';
+import { startTvOperationSchema, type StartTvOperation, type TvConnectionState, type TvOperation, type SavedTvView, type TvPowerState } from '@remote-webos-tv/contracts';
 import { api, ApiFailure, friendlyError } from '../api.js';
 import { useTvStatus } from '../useTvStatus.js';
 import { Remote } from './Remote.js';
+import { PowerControls } from './PowerControls.js';
 
 interface Props { csrfToken: string; onSessionExpired(): void }
 const connections: Record<TvConnectionState, string> = {
@@ -16,6 +17,7 @@ export function TvSetup({ csrfToken, onSessionExpired }: Props) {
   const [host, setHost] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [powerState, setPowerState] = useState<TvPowerState | null>(null);
   const [accepted, setAccepted] = useState<{ operation: TvOperation; afterReadVersion: number } | null>(null);
   const [now, setNow] = useState(Date.now);
   const saved = useRef<SavedTvView | null>(null);
@@ -32,6 +34,8 @@ export function TvSetup({ csrfToken, onSessionExpired }: Props) {
   const hasObservedAccepted = accepted && status && statusReadVersion > accepted.afterReadVersion;
   const operation = accepted && !hasObservedAccepted ? accepted.operation : observed;
   const running = operation?.status === 'running';
+  const powerRunning = powerState?.operation?.status === 'running';
+  const controlsBusy = busy || powerRunning;
   const progress = running ? (operation.action === 'pair' || operation.action === 'repair' ? 'Сопряжение' : 'Подключение') : null;
   const diagnostic = message || error || status?.error?.message || operation?.error?.message || '';
 
@@ -71,7 +75,7 @@ export function TvSetup({ csrfToken, onSessionExpired }: Props) {
     }
   }
   function start(input: StartTvOperation) {
-    if (pending.current || running) return;
+    if (pending.current || running || powerRunning) return;
     const parsed = startTvOperationSchema.safeParse(input);
     if (!parsed.success) { setMessage('Введите буквальный IPv4-адрес частной локальной сети (например, 192.168.1.20).'); return; }
     void mutate((signal) => api.startTvOperation(parsed.data, csrfToken, signal));
@@ -82,7 +86,7 @@ export function TvSetup({ csrfToken, onSessionExpired }: Props) {
     {tv && <><p>{tv.identity.model}</p><p>{tv.host}</p></>}
     <p role="status" aria-label="Соединение с телевизором" aria-live="polite">{error ? 'Статус неизвестен' : progress || (status ? connections[status.connection] : 'Загрузка статуса…')}</p>
     {diagnostic && <p ref={alert} tabIndex={-1} role="alert" className="error">{diagnostic}</p>}
-    {running && <div>
+    {running && !powerRunning && <div>
       {(operation.action === 'pair' || operation.action === 'repair') && <p>Подтвердите доступ на экране телевизора.</p>}
       <p>Осталось: {Math.max(0, Math.ceil((operation.deadlineAt - now) / 1000))} с</p>
       <button type="button" disabled={busy} onClick={() => void mutate((signal) => api.cancelTvOperation(operation.id, csrfToken, signal))}>Отменить</button>
@@ -90,15 +94,16 @@ export function TvSetup({ csrfToken, onSessionExpired }: Props) {
     {status && !running && <>
       {!tv && <p>Телевизор должен быть включён и доступен серверу. Разрешите управление мобильными устройствами в настройках ТВ.</p>}
       <form onSubmit={(event) => { event.preventDefault(); start({ action: tv ? 'change_address' : 'pair', host }); }} noValidate>
-        <label>IP-адрес телевизора<input inputMode="decimal" autoComplete="off" value={host} disabled={busy} onChange={(event) => setHost(event.target.value)} /></label>
-        <button type="submit" disabled={busy}>{tv ? 'Изменить адрес' : 'Подключить'}</button>
+        <label>IP-адрес телевизора<input inputMode="decimal" autoComplete="off" value={host} disabled={controlsBusy} onChange={(event) => setHost(event.target.value)} /></label>
+        <button type="submit" disabled={controlsBusy}>{tv ? 'Изменить адрес' : 'Подключить'}</button>
       </form>
       {tv && <div>
-        <button type="button" disabled={busy} onClick={() => start({ action: 'reconnect' })}>Подключиться снова</button>
-        <button type="button" disabled={busy} onClick={() => start({ action: 'repair' })}>Повторить сопряжение</button>
+        <button type="button" disabled={controlsBusy} onClick={() => start({ action: 'reconnect' })}>Подключиться снова</button>
+        <button type="button" disabled={controlsBusy} onClick={() => start({ action: 'repair' })}>Повторить сопряжение</button>
       </div>}
     </>}
     <button type="button" disabled={loading} onClick={refresh}>Обновить статус</button>
+    {tv && <PowerControls csrfToken={csrfToken} active onSessionExpired={onSessionExpired} onStateChange={setPowerState} />}
     {tv && <Remote csrfToken={csrfToken} active onSessionExpired={onSessionExpired} />}
   </section>;
 }

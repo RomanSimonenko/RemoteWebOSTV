@@ -190,7 +190,7 @@ test.each(['logout', 'revoke'] as const)('%s aborts only commands owned by that 
     expect(foreignLogout.statusCode).toBe(204);
     expect(signal.aborted).toBe(false);
     if (ending === 'logout') expect((await app.inject({ method: 'POST', url: '/api/auth/logout', headers })).statusCode).toBe(204);
-    else sessions.revoke(login.token);
+    else await sessions.revoke(login.token);
     expect(signal.aborted).toBe(true);
     const response = await pending;
     expect(response.statusCode).toBe(504);
@@ -241,7 +241,7 @@ test.each(['revoke', 'lifecycle', 'disconnect'] as const)('admission rechecks %s
   const settled = pending.then((response) => ({ response }), (error: unknown) => ({ error }));
   await entered.promise;
   try {
-    if (change === 'revoke') sessions.revoke(login.token);
+    if (change === 'revoke') await sessions.revoke(login.token);
     if (change === 'lifecycle') h.service.start({ action: 'reconnect' });
     if (change === 'disconnect') reply.raw.emit('close');
     release.resolve();

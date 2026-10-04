@@ -37,6 +37,8 @@ class Clock implements TvScheduler {
     return id;
   }
   clearTimeout(id: unknown) { this.#timers.delete(id as number); }
+  get pendingCount() { return this.#timers.size; }
+  get nextDelay() { return Math.min(...[...this.#timers.values()].map((timer) => timer.at - this.time)); }
   advance(ms: number) {
     this.time += ms;
     for (const [id, timer] of [...this.#timers]) {
@@ -60,6 +62,8 @@ export class TvFixture {
   readonly clock = new Clock();
   readonly promptGate = gate();
   readonly policies: Array<{ host: string; prompt: boolean }> = [];
+  readonly wakes: Array<{ macs: readonly string[]; signal: AbortSignal }> = [];
+  #wakeGate: ReturnType<typeof gate> | undefined;
   readonly #mocks: MockWebOsTv[] = [];
   readonly #logs: string[] = [];
   #directory = '';
@@ -76,6 +80,7 @@ export class TvFixture {
   get tv() { return this.#tv; }
   get unavailablePort() { return Number(new URL(this.#offlineUrl).port); }
   get promptCount() { return this.#mocks.reduce((count, mock) => count + mock.pairingPromptCount, 0); }
+  holdWake() { this.#wakeGate = gate(); return this.#wakeGate; }
 
   async start() {
     this.#directory = await mkdtemp(join(tmpdir(), 'remote-webos-tv-browser-'));
@@ -127,7 +132,7 @@ export class TvFixture {
     try {
       this.#app = await createApiRuntime(config, {
         webRoot, scheduler: this.clock, now: () => this.#epoch + this.clock.time,
-        newId: () => `browser-operation-${++this.#id}`,
+        newId: () => `00000000-0000-4000-8000-${String(++this.#id).padStart(12, '0')}`,
         logStream: new Writable({ write: (chunk, _encoding, done) => { this.#logs.push(String(chunk)); done(); } }),
         createAdapter: (host, keyStore, requestTimeoutMs, allowPairingPrompt) => {
           // Mapping is confined to this fixture: public validation and HTTP security remain real.
@@ -137,6 +142,18 @@ export class TvFixture {
           const port = Number(new URL(url).port);
           return new Lgtv2Adapter({ host, keyStore, requestTimeoutMs, handshakeTimeoutMs: requestTimeoutMs,
             allowPairingPrompt, now: () => new Date(this.#epoch + this.clock.time) }, {
+            // Only the external WOL transport is replaced; adapter/service/API remain real.
+            // Actual UDP delivery has a separate loopback integration test.
+            wake: async (macs, signal) => {
+              this.wakes.push({ macs: [...macs], signal });
+              if (!this.#wakeGate) return;
+              await new Promise<void>((resolve, reject) => {
+                const abort = () => { signal.removeEventListener('abort', abort); reject(signal.reason); };
+                signal.addEventListener('abort', abort, { once: true });
+                if (signal.aborted) { abort(); return; }
+                void this.#wakeGate!.promise.then(() => { signal.removeEventListener('abort', abort); resolve(); });
+              });
+            },
             createClient: (options) => createLgtv2Client({ ...options, host: '127.0.0.1',
               ports: { secure: port, insecure: port }, verifyCert: false }),
           });
@@ -174,6 +191,14 @@ export class TvFixture {
     return response.json();
   }
 
+  async expireUnavailableRecovery(page: Page) {
+    await this.status(page); // Observe the disconnect and start its single bounded cycle.
+    await expect.poll(() => this.clock.nextDelay).toBe(1000);
+    this.clock.advance(60_000);
+    await expect.poll(async () => (await this.status(page)).error?.code).toBe('RECOVERY_TIMEOUT');
+    await expect.poll(() => this.clock.pendingCount).toBe(0);
+  }
+
   async hasExposedSecrets(text: string) {
     const masters = await Promise.all(['auth-master.key', 'tv-master.key'].map((name) => readFile(join(this.#directory, 'data', name))));
     return [mockClientKey, this.#setupToken, password, ...masters.flatMap((key) => [key.toString('hex'), key.toString('base64'), key.toString('base64url')])]
@@ -184,6 +209,7 @@ export class TvFixture {
 
   async close() {
     this.promptGate.release();
+    this.#wakeGate?.release();
     try { await this.#app?.close(); }
     finally {
       const unavailable = this.#unavailable;

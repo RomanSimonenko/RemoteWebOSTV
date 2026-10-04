@@ -52,10 +52,26 @@ export class WebOsError extends Error {
   }
 }
 
+/** Producer-owned evidence that a resource did not complete cleanup. */
+export class WebOsCleanupError extends AggregateError {
+  constructor(errors: readonly unknown[], message: string, options?: ErrorOptions) {
+    super(errors, message, options);
+    this.name = 'WebOsCleanupError';
+  }
+}
+
 /** Transport-owned evidence; consumers must never infer delivery from messages. */
 export class TvButtonSendError extends WebOsError {
   constructor(code: WebOsErrorCode, readonly delivery: 'not_sent' | 'unknown', message: string, options?: ErrorOptions) {
     super(code, message, options);
     this.name = 'TvButtonSendError';
+  }
+}
+
+/** SSAP/UDP-owned evidence, independent of the caller's timeout or cancellation. */
+export class TvPowerSendError extends WebOsError {
+  constructor(code: WebOsErrorCode, readonly delivery: 'not_sent' | 'unknown', message: string, options?: ErrorOptions) {
+    super(code, message, options);
+    this.name = 'TvPowerSendError';
   }
 }

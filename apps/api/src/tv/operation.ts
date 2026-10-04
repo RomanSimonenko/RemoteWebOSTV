@@ -12,6 +12,11 @@ const messages = {
   CLEANUP_FAILED: 'Не удалось завершить очистку соединения с телевизором.',
   STORAGE_FAILED: 'Не удалось сохранить настройку телевизора.',
   TV_OPERATION_FAILED: 'Не удалось завершить операцию с телевизором.',
+  TV_UNAVAILABLE: 'Телевизор недоступен.',
+  UNSUPPORTED_CAPABILITY: 'Эта возможность не поддерживается телевизором.',
+  WOL_NOT_CONFIGURED: 'Для включения телевизора требуется MAC-адрес.',
+  RECOVERY_TIMEOUT: 'Не удалось подключиться к телевизору за отведённое время.',
+  POWER_OFF_UNCONFIRMED: 'Выключение телевизора не подтверждено.',
 } as const;
 export type TvServiceErrorCode = keyof typeof messages;
 
@@ -21,7 +26,8 @@ export class TvServiceError extends Error {
   }
 }
 
-function hasCleanupFailure(cause: unknown): boolean {
+/** Shared fail-closed classification for diagnostics, recovery and ownership. */
+export function hasCleanupFailure(cause: unknown): boolean {
   const visited = new Set<Error>();
   // Error causes come from external boundaries: neither cycles nor extreme depth
   // may turn safe diagnostic projection into another operation failure.

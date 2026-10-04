@@ -157,6 +157,7 @@ test('offline remote disables commands and reconnect never replays offline input
   await pair(page, tv);
   const original = tv.tv;
   await tv.makeTvUnavailable();
+  await tv.expireUnavailableRecovery(page);
   await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Нет соединения');
   await expect(remote(page).getByText('Телевизор недоступен. Подключитесь снова.', { exact: true })).toBeVisible();
   for (const [label] of mappings) await expect(remote(page).getByRole('button', { name: label, exact: true })).toBeDisabled();
@@ -202,6 +203,7 @@ test('lost genuine command response after pointer receipt shows uncertainty and 
     loseResponse.release();
     await expect(remote(page).getByRole('alert')).toHaveText('Результат команды неизвестен. Автоматический повтор не выполняется');
     await page.unroute(`${tv.origin}/api/tv/commands`);
+    await tv.expireUnavailableRecovery(page);
     await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Нет соединения');
     await tv.replaceTv({ kind: 'success' });
     await page.getByRole('button', { name: 'Подключиться снова', exact: true }).click();

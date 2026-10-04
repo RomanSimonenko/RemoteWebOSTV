@@ -78,7 +78,7 @@ test('runtime migrates existing owner storage, persists TV, and reconnects witho
     expect(response.body).not.toMatch(/synthetic-key|encrypted|clientKey|master/);
     f.adapters[1]!.pairResult.reject(new WebOsError('NETWORK_UNREACHABLE', 'synthetic raw error'));
     await drain();
-    expect((await app.inject({ url: '/api/tv', headers })).json()).toMatchObject({ tv: { host: '192.168.1.10' }, connection: 'unavailable' });
+    expect((await app.inject({ url: '/api/tv', headers })).json()).toMatchObject({ tv: { host: '192.168.1.10' }, connection: 'connecting', operation: { action: 'reconnect', status: 'running' } });
     expect(f.logs.join('')).not.toMatch(/192\.168\.1\.10|synthetic-key|synthetic raw error/);
   } finally { await app.close(); }
 });
@@ -215,7 +215,7 @@ test('missing cipher with stored TV fails instead of creating a replacement key'
   const f = await fixture();
   const database = await openDatabase({ dataDir: f.config.dataDir });
   const cipher = await loadClientKeyCipher({ directory: f.config.dataDir, hasStoredKey: false });
-  createTvRepository(database.sqlite).replace({ host: '192.168.1.10', identity: { model: 'Synthetic Model' }, encryptedClientKey: cipher.encrypt('synthetic-key') });
+  createTvRepository(database.sqlite).replace({ host: '192.168.1.10', identity: { model: 'Synthetic Model' }, macAddress: null, encryptedClientKey: cipher.encrypt('synthetic-key') });
   database.close();
   await unlink(join(f.config.dataDir, 'tv-master.key'));
   await expect(createApiRuntime(f.config, f.options)).rejects.toThrow('TV master key is missing or invalid');
@@ -240,7 +240,7 @@ test('failure after TV initialization cleans the partially started service befor
   const f = await fixture();
   const seed = await openDatabase({ dataDir: f.config.dataDir });
   const cipher = await loadClientKeyCipher({ directory: f.config.dataDir, hasStoredKey: false });
-  createTvRepository(seed.sqlite).replace({ host: '192.168.1.10', identity: { model: 'Synthetic Model' }, encryptedClientKey: cipher.encrypt('synthetic-key') });
+  createTvRepository(seed.sqlite).replace({ host: '192.168.1.10', identity: { model: 'Synthetic Model' }, macAddress: null, encryptedClientKey: cipher.encrypt('synthetic-key') });
   seed.close();
   const cleanup = barrier<void>();
   const enteredCleanup = barrier<void>();
@@ -283,4 +283,66 @@ test('shutdown preserves both TV and SQLite cleanup failures and safely reports 
   expect(logs.join('')).toMatch(/TypeError/);
   expect(logs.join('')).toMatch(/SyntaxError/);
   expect(logs.join('')).not.toMatch(/synthetic-secret|192\.168\.1\.10|synthetic database path/);
+});
+
+test('runtime shutdown cancels accepted power and awaits transport and cleanup before SQLite closes', async () => {
+  const f = await fixture(); const app = await createApiRuntime(f.config, f.options);
+  const headers = await authenticate(app, f.database(), f.config);
+  const send = barrier<void>(); const cleanup = barrier<void>(); let closing: Promise<void> | undefined;
+  try {
+    await app.inject({ method: 'POST', url: '/api/tv/operations', headers, payload: { action: 'pair', host: '192.168.1.10' } }); await succeed(f.adapters[0]!);
+    const adapter = f.adapters[0]!; adapter.powerResult = send.promise; adapter.disconnectResult = cleanup.promise;
+    const accepted = await app.inject({ method: 'POST', url: '/api/tv/power', headers, payload: { id: '00000000-0000-4000-8000-000000000001', action: 'power_off', confirm: true } });
+    expect(accepted.statusCode).toBe(202); expect(adapter.powerOffs).toBe(1);
+    let closed = false; closing = app.close().then(() => { closed = true; });
+    await new Promise<void>((resolve) => setImmediate(resolve)); expect(closed).toBe(false); expect(f.database().sqlite.open).toBe(true);
+    send.resolve(); await drain(); expect(adapter.closed).toBe(true); expect(closed).toBe(false); expect(f.database().sqlite.open).toBe(true);
+    cleanup.resolve(); await closing; expect(f.database().sqlite.open).toBe(false); expect(adapter.powerOffs).toBe(1);
+  } finally { send.resolve(); cleanup.resolve(); await (closing ?? app.close()); }
+});
+
+test('runtime logout waits for actual failed power cleanup, clears cookie and leaves session revoked with safe diagnostics', async () => {
+  const f = await fixture(); const app = await createApiRuntime(f.config, f.options);
+  const headers = await authenticate(app, f.database(), f.config);
+  const send = barrier<void>(); let logout: Promise<unknown> | undefined;
+  try {
+    await app.inject({ method: 'POST', url: '/api/tv/operations', headers, payload: { action: 'pair', host: '192.168.1.10' } }); await succeed(f.adapters[0]!);
+    const adapter = f.adapters[0]!; adapter.powerResult = send.promise;
+    adapter.disconnectResult = Promise.reject(new TypeError('synthetic cleanup secret')); void adapter.disconnectResult.catch(() => {});
+    expect((await app.inject({ method: 'POST', url: '/api/tv/power', headers, payload: { id: '00000000-0000-4000-8000-000000000001', action: 'power_off', confirm: true } })).statusCode).toBe(202);
+    let ended = false; const pending = app.inject({ method: 'POST', url: '/api/auth/logout', headers }).then((response) => { ended = true; return response; }); logout = pending;
+    await new Promise<void>((resolve) => setImmediate(resolve)); expect(ended).toBe(false);
+    expect((await app.inject({ url: '/api/auth/session', headers })).statusCode).toBe(401);
+    send.resolve(); const response = await pending;
+    expect(response.statusCode).toBe(500); expect(response.headers['set-cookie']).toMatch(/^remote_webos_session=; Max-Age=0;/);
+    expect(response.json()).toEqual({ code: 'INTERNAL_ERROR', message: 'Internal server error', requestId: response.headers['x-request-id'] });
+    expect(response.headers['cache-control']).toBe('no-store'); expect(response.body + f.logs.join('')).not.toMatch(/synthetic cleanup secret|synthetic-key|clientKey/);
+    const login = await app.inject({ method: 'POST', url: '/api/auth/login', headers: { origin: f.config.publicOrigin }, payload: { username: 'owner', password: 'synthetic password 123' } });
+    expect(login.statusCode).toBe(200); expect(createTvRepository(f.database().sqlite).hasStoredKey()).toBe(true);
+    expect(adapter.powerOffs).toBe(1);
+  } finally {
+    send.resolve(); await logout;
+    await expect(app.close()).rejects.toMatchObject({ code: 'CLEANUP_FAILED' }); expect(f.database().sqlite.open).toBe(false);
+  }
+});
+
+test('runtime shutdown waits for held power admission and denies sending before session storage closes', async () => {
+  const f = await fixture(); const app = await createApiRuntime(f.config, f.options);
+  const headers = await authenticate(app, f.database(), f.config);
+  await app.inject({ method: 'POST', url: '/api/tv/operations', headers, payload: { action: 'pair', host: '192.168.1.10' } }); await succeed(f.adapters[0]!);
+  const entered = barrier<void>(); const release = barrier<void>(); const createLimiter = app.createRateLimit.bind(app); let charges = 0;
+  vi.spyOn(app, 'createRateLimit').mockImplementation((options) => {
+    const limiter = createLimiter(options);
+    return async (request, callOptions) => {
+      if (callOptions?.increment === false) { entered.resolve(); await release.promise; } else charges++;
+      return limiter(request, callOptions);
+    };
+  });
+  const pending = app.inject({ method: 'POST', url: '/api/tv/power', headers, payload: { id: '00000000-0000-4000-8000-000000000001', action: 'power_off', confirm: true } });
+  await entered.promise; let closed = false; const closing = app.close().then(() => { closed = true; });
+  try {
+    await new Promise<void>((resolve) => setImmediate(resolve)); expect(closed).toBe(false); expect(f.database().sqlite.open).toBe(true);
+    release.resolve(); const response = await pending; expect(response.statusCode).toBe(409); expect(response.json()).toMatchObject({ code: 'SERVICE_CLOSED' });
+    expect(charges).toBe(0); expect(f.adapters[0]!.powerOffs).toBe(0); await closing; expect(f.database().sqlite.open).toBe(false);
+  } finally { release.resolve(); await pending; await closing; }
 });

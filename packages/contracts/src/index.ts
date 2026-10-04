@@ -2,3 +2,4 @@ export * from './tv.js';
 export * from './auth.js';
 export * from './tv-setup.js';
 export * from './tv-command.js';
+export * from './tv-power.js';

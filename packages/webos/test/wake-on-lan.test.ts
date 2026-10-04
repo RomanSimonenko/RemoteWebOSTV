@@ -67,6 +67,36 @@ function createDependencies(socket: FakeWakeSocket): WakeOnLanDependencies {
 }
 
 describe('sendWakeOnLan', () => {
+  test.each([true, false])('UDP close failure has distinct cleanup provenance after send failure %j', async (sendFails) => {
+    const socket = new FakeWakeSocket(); const cleanupCause = new Error('synthetic UDP cleanup'); socket.closeError = cleanupCause;
+    const primary = new Error('synthetic UDP send'); if (sendFails) socket.sendError = primary;
+    const captured = await sendWakeOnLan(['02:00:00:00:00:01'], new AbortController().signal, createDependencies(socket)).catch((cause: unknown) => cause);
+    expect(captured).toMatchObject({ delivery: 'unknown', cause: { name: 'WebOsCleanupError' } });
+    expect(((captured as Error).cause as AggregateError).errors).toEqual(sendFails ? [primary, cleanupCause] : [cleanupCause]);
+    expect(socket.packets).toHaveLength(sendFails ? 1 : 3);
+  });
+  test('empty and invalid MAC inputs are not_sent before creating UDP resources', async () => {
+    const socket = new FakeWakeSocket(); const dependencies = createDependencies(socket); const createSocket = vi.spyOn(dependencies, 'createSocket');
+    await expect(sendWakeOnLan([], new AbortController().signal, dependencies)).rejects.toMatchObject({ delivery: 'not_sent', code: 'UNSUPPORTED_CAPABILITY' });
+    await expect(sendWakeOnLan(['invalid'], new AbortController().signal, dependencies)).rejects.toMatchObject({ delivery: 'not_sent' });
+    expect(createSocket).not.toHaveBeenCalled();
+  });
+
+  test('a synchronous send throw in an asynchronous bind callback is owned and cleaned up', async () => {
+    const socket = new FakeWakeSocket(); let bound!: () => void;
+    socket.bind = (callback) => { bound = callback; }; const cause = new Error('synthetic send throw'); socket.send = () => { throw cause; };
+    const pending = sendWakeOnLan(['02:00:00:00:00:01'], new AbortController().signal, createDependencies(socket));
+    expect(() => bound()).not.toThrow(); expect(socket.closeRequested).toBe(true); socket.emitClose();
+    await expect(pending).rejects.toMatchObject({ delivery: 'unknown', cause });
+  });
+  test('UDP bind rejection is not_sent while send callback rejection is unknown and never retried', async () => {
+    const before = new FakeWakeSocket(); before.bind = () => { throw new Error('synthetic bind'); };
+    const preparing = sendWakeOnLan(['02:00:00:00:00:01'], new AbortController().signal, createDependencies(before)); before.emitClose();
+    await expect(preparing).rejects.toMatchObject({ delivery: 'not_sent', cause: expect.any(Error) }); expect(before.packets).toHaveLength(0);
+    const after = new FakeWakeSocket(); after.sendError = new Error('synthetic send');
+    const sending = sendWakeOnLan(['02:00:00:00:00:01'], new AbortController().signal, createDependencies(after)); after.emitClose();
+    await expect(sending).rejects.toMatchObject({ delivery: 'unknown', cause: after.sendError }); expect(after.packets).toHaveLength(1);
+  });
   test('does not create a socket for an already cancelled operation', async () => {
     const createSocket = vi.fn(() => new FakeWakeSocket());
     const controller = new AbortController();
@@ -165,7 +195,7 @@ describe('sendWakeOnLan', () => {
         new AbortController().signal,
         createDependencies(socket),
       ),
-    ).rejects.toBe(closeError);
+    ).rejects.toMatchObject({ delivery: 'unknown', cause: { name: 'WebOsCleanupError', cause: closeError } });
   });
 
   test('preserves an operational error when socket cleanup also fails', async () => {
@@ -186,11 +216,11 @@ describe('sendWakeOnLan', () => {
       captured = error;
     }
 
-    expect(captured).toBeInstanceOf(AggregateError);
-    expect((captured as AggregateError).errors).toEqual([
+    expect((captured as Error).cause).toBeInstanceOf(AggregateError);
+    expect(((captured as Error).cause as AggregateError).errors).toEqual([
       sendError,
       closeError,
     ]);
-    expect((captured as Error).cause).toBe(sendError);
+    expect(((captured as Error).cause as Error).cause).toBe(sendError);
   });
 });

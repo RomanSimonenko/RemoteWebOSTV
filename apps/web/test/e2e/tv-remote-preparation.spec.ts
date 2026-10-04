@@ -14,6 +14,7 @@ async function syntheticRemote(page: Page, origin: string) {
       '/api/auth/session': { username: 'synthetic', csrfToken: 'c'.repeat(43) },
       '/api/tv': { tv: { host: '192.168.1.20', identity: { model: 'Synthetic TV' } }, connection: 'available', operation: null },
       '/api/tv/remote': { enabled: true, reason: null },
+      '/api/tv/power': { mac: null, canPowerOff: true, canWake: false, operation: null },
     };
     if (pathname === '/api/tv/commands') {
       posts.push(route.request().postDataJSON() as { id: string; button: string });

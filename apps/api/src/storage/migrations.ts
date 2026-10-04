@@ -47,4 +47,8 @@ export const schemaMigrations: readonly Migration[] = [
     version: 2,
     up(sqlite) { sqlite.exec(tvConfigTableSql); },
   },
+  {
+    version: 3,
+    up(sqlite) { sqlite.exec('ALTER TABLE tv_config ADD COLUMN mac_address TEXT'); },
+  },
 ];

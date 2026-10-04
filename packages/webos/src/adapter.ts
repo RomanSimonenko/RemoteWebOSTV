@@ -29,5 +29,7 @@ export interface WebOsAdapter {
   listApps(signal: AbortSignal): Promise<readonly TvApp[]>;
   listInputs(signal: AbortSignal): Promise<readonly TvInput[]>;
   sendButton(button: TvButton, signal: AbortSignal): Promise<void>;
+  powerOff(signal: AbortSignal): Promise<void>;
+  wake(macAddresses: readonly string[], signal: AbortSignal): Promise<void>;
   disconnect(): Promise<void>;
 }

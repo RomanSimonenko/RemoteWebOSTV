@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { BasicTvButton, TvRemoteState, TvCommandResult } from '@remote-webos-tv/contracts';
 import { api, ApiFailure } from '../api.js';
+import { requestId } from '../requestId.js';
 
 interface Props { csrfToken: string; active: boolean; onSessionExpired(): void }
 interface Runtime { active: boolean; pending: boolean; command: AbortController | null; refresh(): void }
@@ -25,16 +26,6 @@ const keys: Readonly<Record<string, BasicTvButton>> = {
   ArrowUp: 'UP', ArrowDown: 'DOWN', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT', Enter: 'ENTER',
   Escape: 'BACK', Home: 'HOME', '+': 'VOLUME_UP', '-': 'VOLUME_DOWN', m: 'MUTE', M: 'MUTE',
 };
-
-// getRandomValues also works on supported HTTP LAN origins, where randomUUID
-// is unavailable. One activation owns one cryptographically random v4 UUID.
-function commandId(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
 
 export function Remote({ csrfToken, active, onSessionExpired }: Props) {
   const [state, setState] = useState<TvRemoteState | null>(null);
@@ -90,7 +81,7 @@ export function Remote({ csrfToken, active, onSessionExpired }: Props) {
     setBusy(true); setFeedback(null);
     try {
       let id: string;
-      try { id = commandId(); }
+      try { id = requestId(); }
       catch {
         // No API call has started: this failure proves the command was not sent.
         setFeedback({ text: 'Команда не отправлена. Не удалось подготовить идентификатор команды.', alert: true });

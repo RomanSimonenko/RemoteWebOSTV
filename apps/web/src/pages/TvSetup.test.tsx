@@ -13,7 +13,8 @@ async function mount() {
   // sequence and assertions scoped to the existing setup/status requests.
   const setupFetch = globalThis.fetch;
   vi.stubGlobal('fetch', (path: RequestInfo | URL, init?: RequestInit) => path === '/api/tv/remote'
-    ? Promise.resolve(response({ enabled: false, reason: 'UNSUPPORTED' })) : setupFetch(path, init));
+    ? Promise.resolve(response({ enabled: false, reason: 'UNSUPPORTED' })) : path === '/api/tv/power'
+    ? Promise.resolve(response({ mac: null, canPowerOff: false, canWake: false, operation: null })) : setupFetch(path, init));
   render(<TvSetup csrfToken={csrfToken} onSessionExpired={vi.fn()} />); await act(async () => {});
 }
 function submitHost(host: string) {
@@ -217,4 +218,47 @@ test('pairing uses neither browser storage nor logging and strict responses reje
   expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/tv', '/api/tv/operations']);
   expect(store).not.toHaveBeenCalled(); expect(log).not.toHaveBeenCalled(); expect(warn).not.toHaveBeenCalled(); expect(error).not.toHaveBeenCalled();
   vi.restoreAllMocks();
+});
+
+test('recovery shares canonical running state, blocks setup and uses the power cancellation route', async () => {
+  const power = { id: '00000000-0000-4000-8000-000000000001', action: 'wake', status: 'running', phase: 'connecting', delivery: 'sent', startedAt: 10000, deadlineAt: 70000 };
+  const expired = vi.fn();
+  const fetch = vi.fn(async (path: RequestInfo | URL) => {
+    if (path === '/api/tv') return response({ ...saved, connection: 'connecting', operation: null });
+    if (path === '/api/tv/remote') return response({ enabled: false, reason: 'BUSY' });
+    if (path === '/api/tv/power') return response({ mac: '02:00:00:00:00:01', canPowerOff: false, canWake: false, operation: power });
+    if (path === `/api/tv/power/${power.id}/cancel`) return response({ ...power, status: 'cancelled', phase: 'finished' });
+    throw new Error('Unexpected route');
+  }); vi.stubGlobal('fetch', fetch); render(<TvSetup csrfToken={csrfToken} onSessionExpired={expired} />); await act(async () => {});
+  const reconnect = screen.getByRole<HTMLButtonElement>('button', { name: 'Подключиться снова' });
+  expect(reconnect.disabled).toBe(true); fireEvent.click(reconnect);
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Изменить адрес' }).disabled).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Отменить' })).toBeNull();
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Вверх' }).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Отменить ожидание' })); await act(async () => {});
+  expect(fetch.mock.calls.map(([path]) => path).filter((path) => String(path).endsWith('/cancel'))).toEqual([`/api/tv/power/${power.id}/cancel`]);
+});
+
+test('server-owned automatic recovery disables setup and offers no unauthorized cancellation', async () => {
+  const power = { id: '00000000-0000-4000-8000-000000000001', action: 'recover', status: 'running', phase: 'connecting', delivery: 'not_sent', startedAt: 10000, deadlineAt: 70000 };
+  const fetch = vi.fn(async (path: RequestInfo | URL) => path === '/api/tv' ? response({ ...saved, connection: 'connecting', operation: null })
+    : path === '/api/tv/power' ? response({ mac: null, canPowerOff: false, canWake: false, operation: power })
+    : response({ enabled: false, reason: 'BUSY' })); vi.stubGlobal('fetch', fetch);
+  render(<TvSetup csrfToken={csrfToken} onSessionExpired={vi.fn()} />); await act(async () => {});
+  expect(screen.queryByRole('button', { name: 'Отменить ожидание' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Отменить' })).toBeNull();
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Подключиться снова' }).disabled).toBe(true);
+  submitHost('10.0.0.25'); await act(async () => {}); expect(fetch).toHaveBeenCalledTimes(3);
+});
+
+test('manual reconnect keeps its legacy cancel path alongside a previous completed power operation', async () => {
+  const power = { id: '00000000-0000-4000-8000-000000000001', action: 'recover', status: 'failed', phase: 'finished', delivery: 'not_sent', startedAt: 10000, deadlineAt: 70000, error: { code: 'RECOVERY_TIMEOUT', message: 'Synthetic diagnostic' } };
+  const fetch = vi.fn(async (path: RequestInfo | URL) => {
+    if (path === '/api/tv') return response({ ...saved, connection: 'connecting', operation: { ...operation, action: 'reconnect' } });
+    if (path === '/api/tv/power') return response({ mac: null, canPowerOff: false, canWake: false, operation: power });
+    if (path === '/api/tv/remote') return response({ enabled: false, reason: 'BUSY' });
+    return response({ ...operation, action: 'reconnect', status: 'cancelled' });
+  }); vi.stubGlobal('fetch', fetch); render(<TvSetup csrfToken={csrfToken} onSessionExpired={vi.fn()} />); await act(async () => {});
+  fireEvent.click(screen.getByRole('button', { name: 'Отменить' })); await act(async () => {});
+  expect(fetch.mock.calls.map(([path]) => path).filter((path) => String(path).endsWith('/cancel'))).toEqual(['/api/tv/operations/synthetic-operation/cancel']);
 });

@@ -132,16 +132,17 @@ test('unavailable TV and failed address change keep the saved identity through r
   const original = (await tv.status(page)).tv;
   expect(await competingBind(tv.unavailablePort)).toBe('EADDRINUSE');
   await tv.makeTvUnavailable();
-  await expect.poll(async () => (await tv.status(page)).connection).toBe('unavailable');
+  await tv.expireUnavailableRecovery(page);
   await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Нет соединения');
   await savedTv(page);
 
   await page.getByLabel('IP-адрес телевизора').fill(failedHost);
   await page.getByRole('button', { name: 'Изменить адрес', exact: true }).click();
-  await expect(page.getByRole('alert')).toHaveText('Телевизор недоступен по сети.');
+  await expect(page.getByRole('alert').filter({ hasText: /^Телевизор недоступен по сети\.$/ })).toBeVisible();
   expect((await tv.status(page)).tv).toEqual(original);
   expect(tv.policies.at(-1)).toEqual({ host: failedHost, prompt: false });
   await tv.restart();
+  await tv.expireUnavailableRecovery(page);
   await page.reload();
   await savedTv(page);
   await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Нет соединения');

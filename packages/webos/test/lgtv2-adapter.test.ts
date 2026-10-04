@@ -108,6 +108,27 @@ function pair(adapter: Lgtv2Adapter, signal = new AbortController().signal) {
 }
 
 describe('Lgtv2Adapter', () => {
+  test('power delivery is not_sent before SSAP and unknown after request failure', async () => {
+    const cause = new WebOsError('CONNECTION_LOST', 'synthetic ambiguous request');
+    const request = vi.fn(async (uri: string) => { if (uri === mockMutationUris.powerOff) throw cause; return responseForPairing(uri); });
+    const { adapter } = createUnitAdapter({ request });
+    await expect(adapter.powerOff(new AbortController().signal)).rejects.toMatchObject({ delivery: 'not_sent', code: 'CONNECTION_LOST' });
+    await pair(adapter);
+    request.mockClear();
+    await expect(adapter.powerOff(new AbortController().signal)).rejects.toMatchObject({ delivery: 'unknown', code: 'CONNECTION_LOST', cause });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  test('power request cancellation retains the raw request owner until it settles', async () => {
+    let reject!: (cause: unknown) => void;
+    const { adapter } = createUnitAdapter({ request: async (uri) => uri === mockMutationUris.powerOff
+      ? new Promise((_yes, no) => { reject = no; }) : responseForPairing(uri) }); await pair(adapter);
+    const controller = new AbortController(); const pending = adapter.powerOff(controller.signal);
+    let settled = false; void pending.then(() => { settled = true; }, () => { settled = true; });
+    controller.abort(); for (let turn = 0; turn < 10; turn++) await Promise.resolve(); expect(settled).toBe(false);
+    reject(new WebOsError('CONNECTION_LOST', 'synthetic cancelled send'));
+    await expect(pending).rejects.toMatchObject({ delivery: 'unknown' });
+  });
   test('classifies preparation failure as not_sent and send failure as unknown', async () => {
     const cause = new Error('synthetic failure');
     const preparing = createUnitAdapter({ getSocket: async () => { throw cause; } }); await pair(preparing.adapter);
@@ -772,6 +793,7 @@ describe('Lgtv2Adapter', () => {
     const captured = await pending;
 
     expect(captured).toMatchObject({ code: 'PAIRING_TIMEOUT' });
+    expect((captured as Error).cause).toMatchObject({ name: 'WebOsCleanupError' });
     expect((captured as Error).cause).toBeInstanceOf(AggregateError);
     expect(((captured as Error).cause as AggregateError).errors).toEqual([
       expect.objectContaining({ code: 'PAIRING_TIMEOUT' }),
