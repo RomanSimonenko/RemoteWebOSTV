@@ -25,3 +25,8 @@ export function createTvCommandLimiter(app: FastifyInstance) {
   const limiter = createAcceptedAttemptLimiter(app, { max: 10, timeWindow: 1000, key: 'tv-command-owner' });
   return (request: FastifyRequest, reply: FastifyReply, commandId: string) => limiter(request, reply, () => rejectTvCommand(commandId, 'RATE_LIMITED'));
 }
+
+export function createTvPowerLimiter(app: FastifyInstance) {
+  const limiter = createAcceptedAttemptLimiter(app, { max: 5, timeWindow: 60_000, key: 'tv-power-owner' });
+  return (request: FastifyRequest, reply: FastifyReply) => limiter(request, reply, () => ({ code: 'RATE_LIMITED', message: 'Too many requests', requestId: request.id }));
+}

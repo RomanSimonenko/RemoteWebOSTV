@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { tvPowerStateSchema } from '@remote-webos-tv/contracts';
+import { tvPowerOperationSchema, tvPowerStateSchema } from '@remote-webos-tv/contracts';
 import { Lgtv2Adapter, sendWakeOnLan, TvPowerSendError, WebOsError, type WakeSocket } from '@remote-webos-tv/webos';
 import { EventEmitter } from 'node:events';
 import { barrier, ControlledAdapter, drain, harness, pairing, snapshot, succeed } from './support/tv-harness.js';
@@ -12,6 +12,14 @@ async function connected() {
 }
 
 describe('owned TV power operations', () => {
+  test('power off returns a strict public operation without its request confirmation', async () => {
+    const h = await connected();
+    try {
+      const operation = h.service.startPower(off, 'owner');
+      expect(tvPowerOperationSchema.safeParse(operation).success).toBe(true);
+      expect(tvPowerStateSchema.safeParse(h.service.powerState()).success).toBe(true);
+    } finally { await h.service.close(); }
+  });
   test.each([true, false])('real UDP close failure stays unsafe after adapter disconnect succeeds: send failure %j', async (sendFails) => {
     const base = harness(true); base.repository.replace({ ...base.repository.load()!, macAddress: '02:00:00:00:00:01' });
     const packets: Buffer[] = []; const adapters: Lgtv2Adapter[] = [];

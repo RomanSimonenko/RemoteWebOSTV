@@ -84,8 +84,8 @@ export function registerAuthRoutes(app: FastifyInstance, { config, setup, sessio
   });
 
   app.post('/api/auth/logout', async (request, reply) => {
-    sessions.revoke(sessionCookie(request)!);
     reply.header('set-cookie', `remote_webos_session=; Max-Age=0; Path=/; HttpOnly; SameSite=Strict${config.secureCookies ? '; Secure' : ''}`);
+    await sessions.revoke(sessionCookie(request)!);
     return reply.code(204).send();
   });
   return (request) => authenticatedSessions.get(request);

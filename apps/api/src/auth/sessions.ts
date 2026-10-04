@@ -69,8 +69,8 @@ export interface AuthSessionService {
   login(username: string, password: string): Promise<{ readonly username: string; readonly token: string } | undefined>;
   authenticate(token: string | undefined): { readonly username: string; readonly csrfToken: string } | undefined;
   verifyCsrf(token: string, supplied: unknown): boolean;
-  revoke(token: string): void;
-  onRevoke(listener: (token: string) => void): () => void;
+  revoke(token: string): Promise<void>;
+  onRevoke(listener: (token: string) => void | Promise<void>): () => void;
 }
 
 export async function createAuthSessionService(input: {
@@ -84,7 +84,8 @@ export async function createAuthSessionService(input: {
   // The absent-user path still performs the same asynchronous password derivation.
   const dummyHash = await hashPassword('dummy password for absent owner', () => Buffer.alloc(16));
   const csrfFor = (token: string) => createHmac('sha256', masterKey).update('csrf:v1:').update(token).digest('base64url');
-  const revocationListeners = new Set<(token: string) => void>();
+  const revocationListeners = new Set<(token: string) => void | Promise<void>>();
+  const revocations = new Map<string, Promise<void>>();
   return {
     async login(username, password) {
       const owner = repository.getOwnerCredentials(username);
@@ -111,8 +112,25 @@ export async function createAuthSessionService(input: {
       return timingSafeEqual(Buffer.from(supplied, 'utf8'), Buffer.from(expected, 'utf8'));
     },
     revoke(token) {
-      repository.revokeSession(digest(token));
-      for (const listener of revocationListeners) listener(token);
+      const tokenHash = digest(token);
+      repository.revokeSession(tokenHash);
+      const existing = revocations.get(tokenHash);
+      if (existing) return existing;
+      const pending: Promise<void>[] = [];
+      // Revocation and command abort remain synchronous. One bad listener must
+      // not skip cancellation owned by another resource boundary.
+      for (const listener of revocationListeners) {
+        try { pending.push(Promise.resolve(listener(token))); }
+        catch (cause) { pending.push(Promise.reject(cause)); }
+      }
+      const cleanup = Promise.allSettled(pending).then((results) => {
+        const failures = results.filter((result) => result.status === 'rejected').map((result) => result.reason as unknown);
+        if (failures.length === 1) throw failures[0];
+        if (failures.length > 1) throw new AggregateError(failures, 'Session revocation cleanup failed');
+      });
+      revocations.set(tokenHash, cleanup);
+      void cleanup.then(() => { revocations.delete(tokenHash); }, () => { revocations.delete(tokenHash); });
+      return cleanup;
     },
     onRevoke(listener) {
       revocationListeners.add(listener);

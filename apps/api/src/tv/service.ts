@@ -384,7 +384,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     const startedAt = dependencies.now();
     const budget = input.action === 'power_off' ? 5_000 : recoveryTimeoutMs;
     const controller = new AbortController();
-    const operation: TvPowerOperation = { ...input, startedAt, deadlineAt: startedAt + budget, status: 'running', phase: input.action === 'recover' ? 'connecting' : 'sending', delivery: 'not_sent' };
+    const operation: TvPowerOperation = { id: input.id, action: input.action, startedAt, deadlineAt: startedAt + budget, status: 'running', phase: input.action === 'recover' ? 'connecting' : 'sending', delivery: 'not_sent' };
     const current: Power = { operation, owner };
     const timer = scheduler.setTimeout(() => controller.abort(budgetFailure(context)), budget);
     const context: Attempt = { operation: { id: input.id, action: 'reconnect', status: 'running', startedAt, deadlineAt: startedAt + budget }, power: current, owner, controller, timer, expiresAt: scheduler.now() + budget };
