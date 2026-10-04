@@ -1,6 +1,6 @@
 # Task 3 report: protected power API and session revocation
 
-Implementation is complete and automatically verified; independent controller review is pending. Base: `9422999`, branch: `codex/power-wol`.
+Implementation and review fix round 1 are automatically verified; independent controller re-review is pending. Initial base: `9422999`; fix base: `7313c75`; branch: `codex/power-wol`.
 
 ## Owning boundaries and changes
 
@@ -16,7 +16,7 @@ Implementation is complete and automatically verified; independent controller re
 
 Acceptance receipts are in memory, scoped to the authenticated initiating session, and capped at 100 accepted IDs. Capacity exhaustion returns 409 `POWER_RECEIPT_CAPACITY`; no accepted receipt is evicted. Same session + accepted ID + same strict payload returns the same operation without a new service start or rate charge. Reusing an accepted ID for another action returns 409. Strict validation fixes `confirm` to true for off, so action identifies every possible valid payload difference for a given ID.
 
-Acceptance is recorded synchronously before the asynchronous accepted charge: a failed/lost response cannot authorize a second send for that ID. A completed receipt is refreshed before another operation is accepted and before legacy status polling can replace it with automatic recovery. Identical UUIDs used by different sessions retain separate receipts. UUID possession does not authorize cancellation: foreign/unknown receipts return 403, and a running receipt is additionally checked by the service owner boundary. A completed older receipt can be read/cancelled idempotently without affecting a newer operation.
+Acceptance is recorded synchronously before the asynchronous accepted charge: a failed/lost response cannot authorize a second send for that ID. Terminal results are retained synchronously from the service's canonical `finish` boundary before current power state can be replaced; an internal completion subscription updates the existing receipt by initiating owner and ID. Identical UUIDs used by different sessions retain separate receipts. UUID possession does not authorize cancellation: foreign/unknown receipts return 403, and a running receipt is additionally checked by the service owner boundary. A completed older receipt can be read/cancelled idempotently without affecting a newer operation.
 
 Revocation removes that session's receipts and awaits `cancelOwnedPower` for its accepted power or authenticated manual reconnect. Another session's logout does not cancel it. Shutdown retains runtime ownership of transport work and disconnect cleanup, and drains held admission before SQLite closes. Request-response uncertainty never causes mutation retry or replay.
 
@@ -69,3 +69,20 @@ Receipt and revocation maps have explicit cleanup; accepted IDs remain protected
 No unresolved implementation blocker is known. Limits intentionally retained from the approved ruling/spec: 100 accepted operations require a new session for further IDs; receipts do not survive restart; automatic mutation retry remains forbidden. The existing observed-expiry authentication policy is unchanged; this task wires explicit revoke/logout. Real-TV power/WOL behavior and browser flow remain later validation obligations. The previously recorded live asset incident is outside this patch and still requires controller/user handling. Independent Task 3 review remains pending.
 
 `graft/` was preserved untracked and excluded from the commit. Its graph was used for function location; current source and installed limiter producer behavior were authoritative.
+
+## Review fix round 1 — terminal receipt replacement race
+
+Review Important: terminal receipt can be lost across asynchronous legacy status recovery. The original request-entry refresh did not cover a status handler held after that hook: wake completed while the handler waited, then the handler detected loss and replaced the service's current operation with automatic recovery. An accepted duplicate returned stale `running` indefinitely and owned cancellation returned 403. The earlier 266-test suite did not exercise that sequence; its success did not establish the missing retention guarantee.
+
+Added a deterministic full-API regression to `apps/api/test/tv-power-routes.test.ts`, using actual sessions and a preHandler barrier on GET `/api/tv`. It accepts wake, enters the delayed legacy request while wake is running, completes the connection, injects snapshot connection loss, releases the handler, and observes the new automatic recovery. It then verifies the original UUID's duplicate is succeeded/finished/sent, owned terminal cancellation remains idempotent 200, foreign cancellation remains 403, the new recovery operation and AbortSignal remain unchanged, and exactly one WOL adapter operation was sent. All imports/fixtures are repository-relative; no diagnostic script or machine path was committed.
+
+RED: `pnpm --filter @remote-webos-tv/api exec vitest run test/tv-power-routes.test.ts -t 'completed wake receipt'` exited 1 (session 79683): duplicate was `running`/`connecting` instead of `succeeded`/`finished`. Owned and foreign cancel responses were obtained before that failing assertion, matching the reproduced review boundary.
+
+Minimal owner fix:
+
+- `apps/api/src/tv/service.ts`: adds internal synchronous `onPowerFinished` subscription. Canonical `finish` publishes a copied terminal result together with the opaque internal owner, including subsequent terminal updates after cleanup reclassification. No second lifecycle state machine or service history store was added. Service close clears subscriptions after owned work settles, including cleanup failure.
+- `apps/api/src/tv/power-routes.ts`: subscription updates only an already accepted receipt for the matching authenticated owner and ID; server-symbol recovery owners are ignored. The global request hook, `currentReceipt` and timing-dependent terminal refresh were removed. Running duplicate phase projection is separate from terminal retention. Revocation still deletes the session's receipts without recreating them from a late completion, and app close unsubscribes and clears the receipt map.
+
+GREEN: same focused regression exited 0 (session 79271), one selected test passed. Covering `pnpm --filter @remote-webos-tv/api exec vitest run test/tv-power-routes.test.ts test/tv-power.test.ts test/tv-recovery.test.ts` exited 0 (session 93602): 49/49 passed, including existing receipt capacity, shared rate, session revoke, same-ID cross-session ownership, transport errors and recovery tests.
+
+Final `pnpm --filter @remote-webos-tv/api test` with approved temporary loopback mock-server permission exited 0 (session 69396): 23 files / 267 tests passed. `pnpm typecheck` and `git diff --check` exited 0 (session 83103), across all five workspace packages. No builds, live application changes, permanent-data mutations or real-TV actions were performed. The implementation addresses the one Important finding; independent scoped re-review remains pending.

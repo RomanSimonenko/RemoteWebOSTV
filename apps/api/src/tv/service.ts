@@ -33,6 +33,8 @@ export interface TvService {
   startPower(input: TvPowerRequest, owner: string): TvPowerOperation;
   cancelPower(id: string, owner: string): TvPowerOperation;
   cancelOwnedPower(owner: string): Promise<void>;
+  /** Internal synchronous retention of terminal results before state replacement. */
+  onPowerFinished(listener: (operation: TvPowerOperation, owner: string | symbol) => void): () => void;
   remoteState(): TvRemoteState;
   assertCanSendCommand(input: TvCommandRequest): TvCommandRequest;
   sendCommand(input: TvCommandRequest, signal: AbortSignal): Promise<TvCommandResult>;
@@ -84,6 +86,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
   let closed = false;
   let closing: Promise<void> | undefined;
   let unsafeCleanup: unknown;
+  const powerFinishedListeners = new Set<(operation: TvPowerOperation, owner: string | symbol) => void>();
 
   const view = (): TvStatusResponse => ({
     tv: saved ? { host: saved.host, identity: { ...saved.identity } } : null,
@@ -177,6 +180,10 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     context.operation = { ...context.operation, status, ...(projected ? { error: projected } : {}) };
     if (context.power) context.power.operation = { ...context.power.operation, status, phase: 'finished', ...(projected ? { error: projected } : {}) };
     if (status !== 'running') scheduler.clearTimeout(context.timer);
+    if (context.power && status !== 'running') {
+      const { operation, owner } = context.power;
+      for (const listener of powerFinishedListeners) listener({ ...operation, ...(operation.error ? { error: { ...operation.error } } : {}) }, owner);
+    }
   }
 
   async function run(context: Attempt, input: StartTvOperation, previous: StoredTv | null): Promise<void> {
@@ -573,10 +580,13 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       await cleanup?.promise;
       if (activeAdapter) await disconnect(activeAdapter);
       if (unsafeCleanup) throw unsafeCleanup;
-    })();
+    })().finally(() => { powerFinishedListeners.clear(); });
     return closing;
   }
-  return { assertCanStart, start, status, cancel, initialize, close, remoteState, assertCanSendCommand, sendCommand, powerState, setMac, assertCanStartPower, startPower, cancelPower, cancelOwnedPower };
+  return {
+    assertCanStart, start, status, cancel, initialize, close, remoteState, assertCanSendCommand, sendCommand, powerState, setMac, assertCanStartPower, startPower, cancelPower, cancelOwnedPower,
+    onPowerFinished(listener) { powerFinishedListeners.add(listener); return () => { powerFinishedListeners.delete(listener); }; },
+  };
 }
 
 function copyOperation(operation: TvOperation): TvOperation {

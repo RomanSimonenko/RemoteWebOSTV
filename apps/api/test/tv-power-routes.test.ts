@@ -4,13 +4,13 @@ import { join } from 'node:path';
 import { Writable } from 'node:stream';
 import { afterEach, expect, test, vi } from 'vitest';
 import { tvPowerOperationSchema, tvPowerStateSchema } from '@remote-webos-tv/contracts';
-import { TvPowerSendError } from '@remote-webos-tv/webos';
+import { TvPowerSendError, WebOsError } from '@remote-webos-tv/webos';
 import { buildApp } from '../src/app.js';
 import { openDatabase } from '../src/storage/database.js';
 import { createOwnerRepository } from '../src/auth/repository.js';
 import { createOwnerSetupService } from '../src/auth/service.js';
 import { createAuthSessionService } from '../src/auth/sessions.js';
-import { barrier, drain, harness, pairing, snapshot } from './support/tv-harness.js';
+import { barrier, drain, harness, pairing, snapshot, succeed } from './support/tv-harness.js';
 
 const origin = 'https://remote.example.test';
 const id = '00000000-0000-4000-8000-000000000001';
@@ -303,4 +303,35 @@ test('MAC mutation rechecks the authenticated session after asynchronous request
     await sessions.revoke(login.token); release.resolve();
     expect((await pending).statusCode).toBe(401); expect(h.writes).toEqual([]);
   } finally { release.resolve(); await pending; }
+});
+
+test('completed wake receipt survives delayed legacy status replacement without cancelling recovery or resending WOL', async () => {
+  const { app, h, headers, sessions, headersFor, post, cancel } = await fixture(false);
+  h.service.setMac('02:00:00:00:00:01');
+  const other = (await sessions.login('owner', 'synthetic password 123'))!;
+  const entered = barrier<void>(); const release = barrier<void>();
+  app.addHook('preHandler', async (request) => { if (request.routeOptions.url === '/api/tv') { entered.resolve(); await release.promise; } });
+  let pendingStatus: Promise<unknown> | undefined;
+  try {
+    expect((await post(wake)).statusCode).toBe(202);
+    pendingStatus = app.inject({ url: '/api/tv', headers }).then((response) => response); await entered.promise;
+    expect(h.service.powerState().operation).toMatchObject({ id, status: 'running' });
+    await succeed(h.adapters[1]!);
+    expect(h.service.powerState().operation).toMatchObject({ id, status: 'succeeded', delivery: 'sent' });
+    const loss = barrier<typeof snapshot>(); h.adapters[1]!.readResult = loss;
+    void loss.promise.catch(() => {}); loss.reject(new WebOsError('CONNECTION_LOST', 'synthetic connection loss'));
+    release.resolve(); await pendingStatus; await drain();
+    const recovery = h.service.powerState().operation!;
+    expect(recovery).toMatchObject({ action: 'recover', status: 'running' }); expect(recovery.id).not.toBe(id);
+    const recoveryRequest = await h.adapters[2]!.enteredPair.promise;
+    const duplicate = await post(wake);
+    const ownedCancel = await cancel();
+    const foreignCancel = await cancel(id, headersFor(other.token));
+    expect(duplicate.statusCode).toBe(202); expect(duplicate.json()).toMatchObject({ id, action: 'wake', status: 'succeeded', phase: 'finished', delivery: 'sent' });
+    expect(ownedCancel.statusCode).toBe(200); expect(ownedCancel.json()).toMatchObject({ id, action: 'wake', status: 'succeeded' });
+    expect((await cancel()).json()).toMatchObject({ id, status: 'succeeded' });
+    expect(foreignCancel.statusCode).toBe(403);
+    expect(h.service.powerState().operation).toEqual(recovery); expect(recoveryRequest.signal.aborted).toBe(false);
+    expect(h.adapters.flatMap((adapter) => adapter.wakes)).toHaveLength(1);
+  } finally { release.resolve(); await pendingStatus; }
 });
