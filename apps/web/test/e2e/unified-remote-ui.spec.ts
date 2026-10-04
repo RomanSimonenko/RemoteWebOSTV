@@ -124,6 +124,22 @@ for (const width of [320, 1280]) {
   }
 }
 
+for (const key of ['Enter', 'Space']) {
+  test(`keyboard help toggles with native ${key} without a TV command`, async ({ page }) => {
+    const { mutations } = await fixture(page);
+    const help = remote(page).locator('details');
+    const summary = help.locator('summary');
+    await summary.focus();
+    await expect(summary).toBeFocused();
+    await expect(help).toHaveJSProperty('open', false);
+    await page.keyboard.press(key);
+    await expect(help).toHaveJSProperty('open', true);
+    await page.keyboard.press(key);
+    await expect(help).toHaveJSProperty('open', false);
+    expect(mutations).toEqual([]);
+  });
+}
+
 test('native settings trap focus, block pointer and TV keys, then restore gear focus', async ({ page }) => {
   const { mutations } = await fixture(page);
   const gear = page.getByRole('button', { name: 'Настройки', exact: true });

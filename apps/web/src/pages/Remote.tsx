@@ -115,7 +115,7 @@ export function Remote({ csrfToken, active, onSessionExpired, interactionBlocked
   function keyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (interactionBlocked) return;
     const target = event.target as HTMLElement;
-    if (!event.currentTarget.contains(document.activeElement) || target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
+    if (!event.currentTarget.contains(document.activeElement) || target.closest('summary, input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
     const button = keys[event.key];
     if (!button) return;
     if (event.repeat || event.ctrlKey || event.altKey || event.metaKey) {

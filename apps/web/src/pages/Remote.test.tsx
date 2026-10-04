@@ -119,6 +119,14 @@ test('Enter on a command button belongs to the remote mapping, suppressing nativ
   await act(async () => {});
   expect(view.commands()).toHaveLength(1); expect(JSON.parse(view.commands()[0]![1]!.body as string).button).toBe('ENTER');
 });
+test.each(['Enter', ' ', 'ArrowUp', 'Home', 'Escape'])('keyboard help preserves native %s handling without sending a TV command', async (key) => {
+  const view = await mount();
+  const help = screen.getByText('Управление с клавиатуры', { selector: 'summary' }); help.focus();
+  const defaultAllowed = fireEvent.keyDown(help, { key });
+  await act(async () => {});
+  expect(view.commands()).toHaveLength(0);
+  expect(defaultAllowed).toBe(true);
+});
 test('repeat, modifiers, editable targets, outside focus and hidden document never send keyboard commands', async () => {
   const view = await mount(); const group = screen.getByRole('group', { name: 'Пульт' }); group.focus();
   for (const flags of [{ repeat: true }, { ctrlKey: true }, { altKey: true }, { metaKey: true }]) expect(fireEvent.keyDown(group, { key: 'ArrowUp', ...flags })).toBe(true);
