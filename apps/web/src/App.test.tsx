@@ -1,13 +1,20 @@
-import { afterEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App } from './App.js';
 
 const csrfToken = 'c'.repeat(43);
+beforeEach(() => {
+  Object.defineProperties(HTMLDialogElement.prototype, {
+    showModal: { configurable: true, value: vi.fn(function (this: HTMLDialogElement) { this.open = true; }) },
+    close: { configurable: true, value: vi.fn(function (this: HTMLDialogElement) { this.open = false; }) },
+  });
+});
 
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 function response(status: number, data?: unknown) {
@@ -74,7 +81,13 @@ test('authenticated reload reads TV status without starting a new pairing', asyn
     .mockResolvedValueOnce(response(200, { enabled: false, reason: 'UNAVAILABLE' }));
   vi.stubGlobal('fetch', fetch); render(<App />);
   expect(await screen.findByText('Synthetic TV')).toBeTruthy();
-  expect(screen.getByText('192.168.1.20')).toBeTruthy();
+  const gear = screen.getByRole('button', { name: 'Настройки' });
+  expect(gear.closest('header')).toBe(screen.getByRole('button', { name: 'Выйти' }).closest('header'));
+  expect(screen.queryByRole('textbox', { name: 'IP-адрес телевизора' })).toBeNull();
+  expect(screen.queryByRole('textbox', { name: 'MAC-адрес телевизора' })).toBeNull();
+  fireEvent.click(gear);
+  expect(screen.getByRole('textbox', { name: 'IP-адрес телевизора' })).toHaveProperty('value', '192.168.1.20');
+  expect(screen.getByRole('textbox', { name: 'MAC-адрес телевизора' })).toBeTruthy();
   expect(fetch.mock.calls.map(([path]) => path)).toEqual(['/api/setup/status', '/api/auth/session', '/api/tv', '/api/tv/power', '/api/tv/remote']);
 });
 

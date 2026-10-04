@@ -3,7 +3,7 @@ import type { BasicTvButton, TvRemoteState, TvCommandResult } from '@remote-webo
 import { api, ApiFailure } from '../api.js';
 import { requestId } from '../requestId.js';
 
-interface Props { csrfToken: string; active: boolean; onSessionExpired(): void }
+interface Props { csrfToken: string; active: boolean; onSessionExpired(): void; interactionBlocked?: boolean }
 interface Runtime { active: boolean; pending: boolean; command: AbortController | null; refresh(): void }
 const unknownMessage = 'Результат команды неизвестен. Автоматический повтор не выполняется';
 const reasons = {
@@ -27,7 +27,7 @@ const keys: Readonly<Record<string, BasicTvButton>> = {
   Escape: 'BACK', Home: 'HOME', '+': 'VOLUME_UP', '-': 'VOLUME_DOWN', m: 'MUTE', M: 'MUTE',
 };
 
-export function Remote({ csrfToken, active, onSessionExpired }: Props) {
+export function Remote({ csrfToken, active, onSessionExpired, interactionBlocked = false }: Props) {
   const [state, setState] = useState<TvRemoteState | null>(null);
   const [readError, setReadError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -76,7 +76,7 @@ export function Remote({ csrfToken, active, onSessionExpired }: Props) {
 
   async function send(button: BasicTvButton) {
     const current = runtime.current;
-    if (!active || !current?.active || current.pending || !state?.enabled || document.visibilityState === 'hidden') return;
+    if (interactionBlocked || !active || !current?.active || current.pending || !state?.enabled || document.visibilityState === 'hidden') return;
     current.pending = true; current.command = new AbortController();
     setBusy(true); setFeedback(null);
     try {
@@ -107,6 +107,7 @@ export function Remote({ csrfToken, active, onSessionExpired }: Props) {
   }
 
   function keyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (interactionBlocked) return;
     const target = event.target as HTMLElement;
     if (!event.currentTarget.contains(document.activeElement) || target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
     const button = keys[event.key];
@@ -122,7 +123,7 @@ export function Remote({ csrfToken, active, onSessionExpired }: Props) {
   }
 
   if (!active) return null;
-  const disabled = busy || !state?.enabled;
+  const disabled = interactionBlocked || busy || !state?.enabled;
   const explanation = readError || (state ? state.enabled ? '' : reasons[state.reason] : 'Проверяем доступность пульта…');
   return <div role="group" aria-label="Пульт" aria-describedby="remote-help" aria-busy={busy} tabIndex={0} className="remote" onKeyDown={keyDown}>
     <h2>Пульт</h2>

@@ -16,6 +16,19 @@ test('saved television exposes the browser remote beside its setup', async () =>
   expect(screen.getByRole('group', { name: 'Пульт' })).toBeTruthy();
 });
 
+test('settings block direct mouse and keyboard commands while retaining the capability read lifecycle', async () => {
+  vi.useFakeTimers();
+  const fetch = vi.fn(async (path: string) => response(ready)); vi.stubGlobal('fetch', fetch);
+  const view = render(<Remote csrfToken={csrfToken} active onSessionExpired={vi.fn()} />); await act(async () => {});
+  const remote = screen.getByRole('group', { name: 'Пульт' }); remote.focus();
+  view.rerender(<Remote csrfToken={csrfToken} active interactionBlocked onSessionExpired={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+  for (const key of ['Escape', 'Enter', 'ArrowUp']) fireEvent.keyDown(remote, { key });
+  expect(fetch.mock.calls.map(([path]) => path)).toEqual(['/api/tv/remote']);
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(fetch.mock.calls.map(([path]) => path)).toEqual(['/api/tv/remote', '/api/tv/remote']);
+});
+
 const csrfToken = 'c'.repeat(43);
 const saved = { tv: { host: '192.168.1.20', identity: { model: 'Synthetic TV' } }, connection: 'available', operation: null };
 const ready = { enabled: true, reason: null };
