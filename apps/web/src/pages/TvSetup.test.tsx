@@ -22,6 +22,37 @@ function submitHost(host: string) {
 }
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
+test('keeps refresh enabled during background reads and coalesces clicks without shortening the completion cooldown', async () => {
+  vi.useFakeTimers();
+  const initial = barrier<Response>();
+  const background = barrier<Response>();
+  const next = barrier<Response>();
+  const fetch = vi.fn().mockReturnValueOnce(initial.promise).mockReturnValueOnce(background.promise).mockReturnValueOnce(next.promise);
+  vi.stubGlobal('fetch', fetch);
+  await mount();
+  const refresh = screen.getByRole<HTMLButtonElement>('button', { name: 'Обновить статус' });
+  expect(refresh.disabled).toBe(true);
+  await act(async () => { initial.resolve(response(empty)); });
+  expect(refresh.disabled).toBe(false);
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(refresh.disabled).toBe(false);
+  fireEvent.click(refresh); fireEvent.click(refresh);
+  await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(refresh.disabled).toBe(false);
+  await act(async () => { background.resolve(response(empty)); });
+  fireEvent.click(refresh); fireEvent.click(refresh);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1999); });
+  expect(fetch).toHaveBeenCalledTimes(2);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(fetch).toHaveBeenCalledTimes(3);
+  expect(refresh.disabled).toBe(false);
+  await act(async () => { next.resolve(response(empty)); });
+  expect(refresh.disabled).toBe(false);
+  expect(screen.getByRole('status', { name: 'Соединение с телевизором' }).textContent).toBe('Введите IP-адрес телевизора');
+});
+
 test('validates literal private IPv4 and sends one protected pair request despite double submission', async () => {
   const pending = barrier<Response>();
   const fetch = vi.fn().mockResolvedValueOnce(response(empty)).mockReturnValueOnce(pending.promise);
