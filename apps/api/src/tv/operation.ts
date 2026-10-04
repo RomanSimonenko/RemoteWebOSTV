@@ -26,7 +26,8 @@ export class TvServiceError extends Error {
   }
 }
 
-function hasCleanupFailure(cause: unknown): boolean {
+/** Shared fail-closed classification for diagnostics, recovery and ownership. */
+export function hasCleanupFailure(cause: unknown): boolean {
   const visited = new Set<Error>();
   // Error causes come from external boundaries: neither cycles nor extreme depth
   // may turn safe diagnostic projection into another operation failure.

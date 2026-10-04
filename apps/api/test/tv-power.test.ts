@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { tvPowerStateSchema } from '@remote-webos-tv/contracts';
-import { TvPowerSendError, WebOsError } from '@remote-webos-tv/webos';
+import { Lgtv2Adapter, sendWakeOnLan, TvPowerSendError, WebOsError, type WakeSocket } from '@remote-webos-tv/webos';
+import { EventEmitter } from 'node:events';
 import { barrier, ControlledAdapter, drain, harness, pairing, snapshot, succeed } from './support/tv-harness.js';
 
 const id = '15e082b2-de7e-4d86-a049-19c7448264f1';
@@ -11,6 +12,29 @@ async function connected() {
 }
 
 describe('owned TV power operations', () => {
+  test.each([true, false])('real UDP close failure stays unsafe after adapter disconnect succeeds: send failure %j', async (sendFails) => {
+    const base = harness(true); base.repository.replace({ ...base.repository.load()!, macAddress: '02:00:00:00:00:01' });
+    const packets: Buffer[] = []; const adapters: Lgtv2Adapter[] = [];
+    const socket = Object.assign(new EventEmitter(), {
+      bind(callback: () => void) { callback(); }, setBroadcast() {},
+      send(packet: Buffer, _offset: number, _length: number, _port: number, _address: string, callback: (error?: Error | null) => void) {
+        packets.push(Buffer.from(packet)); callback(sendFails ? new WebOsError('CONNECTION_LOST', 'synthetic UDP send failure') : undefined);
+      }, close() { throw new Error('synthetic UDP close failure'); },
+    }) as WakeSocket;
+    const h = harness(true, { repository: base.repository, createAdapter(host, keyStore, requestTimeoutMs, allowPairingPrompt) {
+      const adapter = new Lgtv2Adapter({ host, keyStore, requestTimeoutMs, handshakeTimeoutMs: requestTimeoutMs, allowPairingPrompt, now: () => new Date(0) }, {
+        wake: (macs, signal) => sendWakeOnLan(macs, signal, { createSocket: () => socket, schedule(callback) { callback(); return undefined; }, clearSchedule() {} }),
+      }); adapters.push(adapter); return adapter;
+    } });
+    h.service.startPower(wake, 'owner'); await drain();
+    expect.soft(h.service.powerState().operation).toMatchObject({ status: 'failed', delivery: 'unknown', error: { code: sendFails ? 'CONNECTION_LOST_CLEANUP_FAILED' : 'UNKNOWN_CLEANUP_FAILED' } });
+    expect(packets).toHaveLength(sendFails ? 1 : 3);
+    await expect(adapters[0]!.disconnect()).resolves.toBeUndefined();
+    expect(() => h.service.startPower(wake, 'owner')).toThrowError(expect.objectContaining({ code: 'CLEANUP_FAILED' }));
+    expect(() => h.service.setMac(null)).toThrowError(expect.objectContaining({ code: 'CLEANUP_FAILED' }));
+    expect(() => h.service.start({ action: 'repair' })).toThrowError(expect.objectContaining({ code: 'CLEANUP_FAILED' }));
+    await expect(h.service.close()).rejects.toMatchObject({ code: 'CLEANUP_FAILED' }); await base.service.close();
+  });
   test('off cancelled before its worker preserves the verified connection and sends nothing', async () => {
     const h = await connected(); h.service.startPower(off, 'owner'); await h.service.cancelOwnedPower('owner');
     expect(h.adapters[0]!.powerOffs).toBe(0); expect(h.service.powerState()).toMatchObject({ canPowerOff: true, operation: { status: 'cancelled', delivery: 'not_sent' } });

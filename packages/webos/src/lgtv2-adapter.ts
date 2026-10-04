@@ -20,7 +20,7 @@ import type {
   WebOsAdapter,
 } from './adapter.js';
 import { toWebOsButton } from './buttons.js';
-import { TvButtonSendError, TvPowerSendError, WebOsError } from './errors.js';
+import { TvButtonSendError, TvPowerSendError, WebOsCleanupError, WebOsError } from './errors.js';
 import type { ClientKeyStore } from './key-store.js';
 import type {
   Lgtv2Client,
@@ -324,7 +324,8 @@ export class Lgtv2Adapter implements WebOsAdapter {
     } catch (cause) {
       // The actual UDP owner can prove a pre-send failure more precisely.
       if (cause instanceof TvPowerSendError) {
-        const error = mapLgtv2Error(cause.cause ?? cause, 'wake', true);
+        const source = cause.cause instanceof WebOsCleanupError ? cause.cause.cause : cause.cause ?? cause;
+        const error = mapLgtv2Error(source, 'wake', true);
         throw new TvPowerSendError(error.code, cause.delivery, error.message, { cause });
       }
       const error = mapLgtv2Error(cause, 'wake', true);
@@ -757,7 +758,7 @@ function withCleanupFailure(
   primary: WebOsError,
   cleanupCause: unknown,
 ): WebOsError {
-  const aggregate = new AggregateError(
+  const aggregate = new WebOsCleanupError(
     [primary, cleanupCause],
     'Pairing operation and client cleanup failed',
     { cause: primary },

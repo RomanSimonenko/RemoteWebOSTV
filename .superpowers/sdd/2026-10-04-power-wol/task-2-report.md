@@ -51,3 +51,28 @@ I incorrectly used `pnpm --filter '@remote-webos-tv/api...' build` when refreshi
 Self-review checked transport send counts, bounded deadlines, no automatic pairing prompts/WOL/command replay, old setup response shape, MAC/key preservation, owner isolation, legacy cancellation, late responses, cleanup barriers, public error redaction and narrow source scope. No known failing tests remain. Session logout/API power security wiring and browser display remain Tasks 3–4; real LAN broadcast, wake, actual standby state and physical display remain unverified until separately authorized hardware validation. A deliberately non-settling dependency keeps admission blocked and shutdown waiting, as required, rather than silently freeing ownership.
 
 The commit uses explicit task product/test/report paths and excludes untracked `graft/` and controller-owned planning documents. Independent review remains required before task acceptance.
+
+## Review fix round 1 (base `c8034c4`)
+
+Addressed only Important findings 1–2 from `task-2-review.md`; the controller's minor documentation correction remains separate. Inspected actual pairing and UDP error producers before changing their consumer. No new feature, route, UI, dependency, hardware interaction, build or live-server action was added in this round.
+
+Root cause: pairing cleanup preserved a transient top-level code and nested cleanup aggregate, but recovery classified only that top-level code. The adapter had already detached its failed client, so a later successful disconnect hid the unresolved resource safety evidence. UDP send-plus-close failure had a cleanup aggregate without persistent ownership classification; successful-burst-plus-close failure had only a plain close error and therefore lacked distinct cleanup provenance.
+
+The producer now marks both pairing and UDP cleanup failures with `WebOsCleanupError`, retaining the aggregate error list and original primary cause. UDP send-plus-close retains `[sendError, closeError]`; burst-success-plus-close retains `[closeError]`. The outer power send error still reports `unknown`, and the adapter maps the primary transport cause without dropping the marker. The existing safe projection's cleanup predicate is shared with recovery and service ownership: cleanup failures cannot retry and latch fail-closed admission even if a later adapter disconnect succeeds. Cancellation/deadline and late-owned failure paths preserve the same safe cleanup diagnostics. No successful later disconnect clears that latch; shutdown exposes `CLEANUP_FAILED`.
+
+Deterministic covering regressions use the real `Lgtv2Adapter` pairing producer and the real `sendWakeOnLan` producer with controlled synthetic clients/sockets, not hand-authored service error shapes. Pairing cleanup terminates recovery, creates no second adapter after cooldown, blocks reconnect/MAC mutation, and makes shutdown fail visibly. Both UDP paths verify explicit safe cleanup diagnostics, exactly one failed-send packet or the established three-packet successful burst, successful later adapter disconnect, blocked new wake/MAC/setup admission, and visible shutdown failure.
+
+### Round 1 RED / GREEN
+
+- `pnpm --filter @remote-webos-tv/api exec vitest run test/tv-recovery.test.ts test/tv-power.test.ts -t 'real pairing cleanup failure|real UDP close failure'`: RED exit 1, 3 failed / 26 skipped. Pairing incorrectly remained running; UDP cleanup diagnostics and admission were wrong. After the patch, GREEN 3/3.
+- `pnpm --filter @remote-webos-tv/api exec vitest run test/tv-power.test.ts -t 'real UDP close failure'`: additional RED exit 1, 2 failed / 15 skipped with soft diagnostic assertions demonstrating that new wake admission did not throw. Covered by the subsequent GREEN runs.
+- `pnpm --filter @remote-webos-tv/webos exec vitest run test/wake-on-lan.test.ts test/lgtv2-adapter.test.ts -t 'distinct cleanup provenance|primary pairing timeout'`: RED exit 1, 3 failed / 47 skipped; both UDP paths and pairing lacked the explicit producer marker. GREEN 3/3 after the patch.
+
+### Round 1 fresh verification and self-review
+
+- `pnpm --filter @remote-webos-tv/api exec vitest run test/tv-recovery.test.ts test/tv-power.test.ts test/tv-lifecycle.test.ts`: exit 0, recovery12 + power17 + lifecycle24 = 53/53. Repeated after the last test typing correction; still 53/53.
+- `pnpm --filter @remote-webos-tv/webos exec vitest run test/wake-on-lan.test.ts test/lgtv2-adapter.test.ts`: approved loopback escalation, exit 0, UDP11 + adapter39 = 50/50. A subsequent whitespace-only indentation correction does not change producer behavior.
+- `pnpm typecheck`: fresh exit 0 across all five packages. The preceding run identified only the new test's `emit` access absent from the intentionally narrower `Lgtv2Client` interface; the test now retains its owned `EventEmitter` before narrowing, with no production contract expansion.
+- `git diff --check`: exit 0 after the final correction. The complete workspace suite was not repeated in this narrowly scoped review round; the earlier 740-test checkpoint is historical evidence, not a new round 1 claim.
+
+Self-review traced primary error identity, aggregate contents, safe public diagnostics, retry denial, persistent unsafe ownership, late failures and shutdown visibility. No new unresolved implementation concern or failing check remains in this scope. The original operational incident and hardware-verification limitation above remain unchanged. Scoped independent re-review follows this checkpoint.

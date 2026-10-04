@@ -1,5 +1,6 @@
 import { WebOsError } from '@remote-webos-tv/webos';
 import type { TvScheduler } from './service.js';
+import { hasCleanupFailure } from './operation.js';
 
 /** Recovery policy only; the service owns every adapter, state and operation. */
 export function recoveryAttemptBudget(remainingMs: number): number {
@@ -11,7 +12,7 @@ export function recoveryCooldown(failedAttempts: number): number {
 }
 
 export function isTransientTvFailure(cause: unknown): boolean {
-  return cause instanceof WebOsError && ['NETWORK_UNREACHABLE', 'CONNECTION_LOST', 'PAIRING_TIMEOUT'].includes(cause.code);
+  return !hasCleanupFailure(cause) && cause instanceof WebOsError && ['NETWORK_UNREACHABLE', 'CONNECTION_LOST', 'PAIRING_TIMEOUT'].includes(cause.code);
 }
 
 export function waitForTv(scheduler: TvScheduler, delayMs: number, signal: AbortSignal): Promise<void> {

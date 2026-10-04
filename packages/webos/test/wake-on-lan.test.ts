@@ -67,6 +67,14 @@ function createDependencies(socket: FakeWakeSocket): WakeOnLanDependencies {
 }
 
 describe('sendWakeOnLan', () => {
+  test.each([true, false])('UDP close failure has distinct cleanup provenance after send failure %j', async (sendFails) => {
+    const socket = new FakeWakeSocket(); const cleanupCause = new Error('synthetic UDP cleanup'); socket.closeError = cleanupCause;
+    const primary = new Error('synthetic UDP send'); if (sendFails) socket.sendError = primary;
+    const captured = await sendWakeOnLan(['02:00:00:00:00:01'], new AbortController().signal, createDependencies(socket)).catch((cause: unknown) => cause);
+    expect(captured).toMatchObject({ delivery: 'unknown', cause: { name: 'WebOsCleanupError' } });
+    expect(((captured as Error).cause as AggregateError).errors).toEqual(sendFails ? [primary, cleanupCause] : [cleanupCause]);
+    expect(socket.packets).toHaveLength(sendFails ? 1 : 3);
+  });
   test('empty and invalid MAC inputs are not_sent before creating UDP resources', async () => {
     const socket = new FakeWakeSocket(); const dependencies = createDependencies(socket); const createSocket = vi.spyOn(dependencies, 'createSocket');
     await expect(sendWakeOnLan([], new AbortController().signal, dependencies)).rejects.toMatchObject({ delivery: 'not_sent', code: 'UNSUPPORTED_CAPABILITY' });
@@ -187,7 +195,7 @@ describe('sendWakeOnLan', () => {
         new AbortController().signal,
         createDependencies(socket),
       ),
-    ).rejects.toMatchObject({ delivery: 'unknown', cause: closeError });
+    ).rejects.toMatchObject({ delivery: 'unknown', cause: { name: 'WebOsCleanupError', cause: closeError } });
   });
 
   test('preserves an operational error when socket cleanup also fails', async () => {

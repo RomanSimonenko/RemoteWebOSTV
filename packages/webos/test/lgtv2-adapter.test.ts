@@ -793,6 +793,7 @@ describe('Lgtv2Adapter', () => {
     const captured = await pending;
 
     expect(captured).toMatchObject({ code: 'PAIRING_TIMEOUT' });
+    expect((captured as Error).cause).toMatchObject({ name: 'WebOsCleanupError' });
     expect((captured as Error).cause).toBeInstanceOf(AggregateError);
     expect(((captured as Error).cause as AggregateError).errors).toEqual([
       expect.objectContaining({ code: 'PAIRING_TIMEOUT' }),

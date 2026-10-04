@@ -1,6 +1,6 @@
 import dgram from 'node:dgram';
 
-import { TvPowerSendError, WebOsError } from './errors.js';
+import { TvPowerSendError, WebOsCleanupError, WebOsError } from './errors.js';
 
 const wakeAddress = '255.255.255.255';
 const wakePort = 9;
@@ -99,14 +99,11 @@ export async function sendWakeOnLan(
         } catch (closeError) {
           outcome = {
             status: 'error',
-            error:
-              nextOutcome.status === 'error'
-                ? new AggregateError(
-                    [nextOutcome.error, closeError],
-                    'Wake-on-LAN operation and socket cleanup failed',
-                    { cause: nextOutcome.error },
-                  )
-                : closeError,
+            error: new WebOsCleanupError(
+              nextOutcome.status === 'error' ? [nextOutcome.error, closeError] : [closeError],
+              'Wake-on-LAN socket cleanup failed',
+              { cause: nextOutcome.status === 'error' ? nextOutcome.error : closeError },
+            ),
           };
           settle();
         }

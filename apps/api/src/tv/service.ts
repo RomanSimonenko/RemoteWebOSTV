@@ -2,7 +2,7 @@ import { startTvOperationSchema, tvCommandRequestSchema, tvIdentitySchema, tvMac
 import { TvPowerSendError, WebOsError, type ClientKeyCipher, type ClientKeyStore, type EncryptedEnvelopeV1, type WebOsAdapter } from '@remote-webos-tv/webos';
 import type { StoredTv, TvRepository } from './repository.js';
 import { createStagingKeyStore } from './staging-key-store.js';
-import { abortable, cleanupFailure, failedConnection, projectTvError, TvServiceError, type PublicTvError } from './operation.js';
+import { abortable, cleanupFailure, failedConnection, hasCleanupFailure, projectTvError, TvServiceError, type PublicTvError } from './operation.js';
 import { executeTvCommand, rejectTvCommand, TvCommandAdmissionError, unknownTvCommand } from './commands.js';
 import { isTransientTvFailure, recoveryAttemptBudget, recoveryCooldown, waitForTv } from './recovery.js';
 
@@ -91,6 +91,10 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     operation: attempt && !attempt.power ? copyOperation(attempt.operation) : null,
     ...(error ? { error: { ...error } } : {}),
   });
+
+  function latchCleanupFailure(cause: unknown): void {
+    if (hasCleanupFailure(cause)) unsafeCleanup ??= new TvServiceError('CLEANUP_FAILED', 500, { cause });
+  }
 
   function disconnect(adapter: WebOsAdapter): Promise<void> {
     if (cleanup?.adapter === adapter) return cleanup.promise;
@@ -202,6 +206,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
           break;
         } catch (cause) {
           adapter = activeAdapter;
+          latchCleanupFailure(cause);
           if (input.action !== 'reconnect' || signal.aborted || !isTransientTvFailure(cause)) throw cause;
           context.lastFailure = cause;
           const pendingCleanup = adapter ? disconnect(adapter) : undefined;
@@ -219,6 +224,8 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       }
     } catch (cause) {
       const failure = signal.aborted ? signal.reason : cause;
+      latchCleanupFailure(cause);
+      if (signal.aborted && hasCleanupFailure(cause) && failure instanceof Error && failure !== cause) failure.cause = cause;
       const failureVersion = generation;
       const publishFailure = (reason: unknown) => {
         if (attempt !== context || generation !== failureVersion) return;
@@ -301,6 +308,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       // A new operation/close owns cleanup after its cancellation; the old probe cannot publish.
       if (!closed && generation === version) {
         const failure = controller.signal.aborted ? controller.signal.reason : cause;
+        latchCleanupFailure(failure);
         connection = failedConnection(failure); error = projectTvError(failure);
         recoverAfterProbe = !intentionalOff && isTransientTvFailure(failure);
         // GET resolves on its own budget. The service still owns and awaits this
@@ -461,6 +469,8 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       }
     } catch (cause) {
       const failure = signal.aborted ? signal.reason : cause;
+      latchCleanupFailure(cause);
+      if (signal.aborted && hasCleanupFailure(cause) && failure instanceof Error && failure !== cause) failure.cause = cause;
       if (cause instanceof TvPowerSendError && current.operation.delivery !== 'sent') current.operation = { ...current.operation, delivery: cause.delivery };
       if (current.operation.action === 'power_off' && current.operation.delivery !== 'not_sent') intentionalOff = true;
       if (attempt === context) {
@@ -473,8 +483,13 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       // Publication is bounded; transport and cleanup ownership are not released
       // by racing an AbortSignal. Late completion cannot rewrite the terminal result.
       if (pending) await pending.then(() => undefined, (lateCause: unknown) => {
+        latchCleanupFailure(lateCause);
         if (signal.aborted && failure instanceof Error && lateCause !== failure) failure.cause = lateCause;
       });
+      if (attempt === context && hasCleanupFailure(failure)) {
+        error = projectTvError(failure);
+        finish(context, context.operation.status === 'cancelled' ? 'cancelled' : 'failed', failure);
+      }
       if (adapter && observedSend && (current.operation.action === 'wake' || current.operation.delivery !== 'not_sent')) {
         try { await (ownedCleanup ?? disconnect(adapter)); }
         catch (cleanupCause) { if (attempt === context) { error = projectTvError(cleanupFailure(failure, cleanupCause)); finish(context, context.operation.status === 'cancelled' ? 'cancelled' : 'failed', cleanupFailure(failure, cleanupCause)); } }

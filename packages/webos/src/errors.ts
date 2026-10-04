@@ -52,6 +52,14 @@ export class WebOsError extends Error {
   }
 }
 
+/** Producer-owned evidence that a resource did not complete cleanup. */
+export class WebOsCleanupError extends AggregateError {
+  constructor(errors: readonly unknown[], message: string, options?: ErrorOptions) {
+    super(errors, message, options);
+    this.name = 'WebOsCleanupError';
+  }
+}
+
 /** Transport-owned evidence; consumers must never infer delivery from messages. */
 export class TvButtonSendError extends WebOsError {
   constructor(code: WebOsErrorCode, readonly delivery: 'not_sent' | 'unknown', message: string, options?: ErrorOptions) {

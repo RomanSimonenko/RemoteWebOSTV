@@ -1,8 +1,33 @@
 import { describe, expect, test } from 'vitest';
-import { WebOsError } from '@remote-webos-tv/webos';
+import { EventEmitter } from 'node:events';
+import { Lgtv2Adapter, WebOsError, type Lgtv2Client } from '@remote-webos-tv/webos';
 import { barrier, drain, harness, succeed } from './support/tv-harness.js';
 
 describe('bounded TV recovery', () => {
+  test('real pairing cleanup failure terminates recovery even when detached-client disconnect later succeeds', async () => {
+    const adapters: Lgtv2Adapter[] = []; let disconnects = 0;
+    const h = harness(true, { createAdapter(host, keyStore, requestTimeoutMs, allowPairingPrompt) {
+      const adapter = new Lgtv2Adapter({ host, keyStore, requestTimeoutMs, handshakeTimeoutMs: requestTimeoutMs, allowPairingPrompt, now: () => new Date(0) }, {
+        createClient() {
+          const emitter = new EventEmitter();
+          const client = Object.assign(emitter, {
+            connected: false, urls: [], request: async () => { throw new Error('Unexpected SSAP request'); },
+            getSocket: async () => { throw new Error('Unexpected pointer request'); }, wake: async () => undefined,
+            disconnect: async () => { disconnects++; throw new Error('synthetic client cleanup failure'); },
+          }) as Lgtv2Client;
+          queueMicrotask(() => emitter.emit('error', Object.assign(new Error('synthetic connection failure'), { code: 'ECONNRESET' })));
+          return client;
+        },
+      }); adapters.push(adapter); return adapter;
+    } });
+    h.service.start({ action: 'reconnect' }); await drain();
+    expect((await h.service.status()).operation).toMatchObject({ status: 'failed', error: { code: 'NETWORK_UNREACHABLE_CLEANUP_FAILED' } });
+    await expect(adapters[0]!.disconnect()).resolves.toBeUndefined(); expect(disconnects).toBe(1);
+    h.scheduler.advance(1_000); await drain(); expect(adapters).toHaveLength(1);
+    expect(() => h.service.start({ action: 'reconnect' })).toThrowError(expect.objectContaining({ code: 'CLEANUP_FAILED' }));
+    expect(() => h.service.setMac(null)).toThrowError(expect.objectContaining({ code: 'CLEANUP_FAILED' }));
+    await expect(h.service.close()).rejects.toMatchObject({ code: 'CLEANUP_FAILED' });
+  });
   test('recovery deadline retains the original transient cause on the owned attempt signal', async () => {
     const h = harness(true, { recoveryTimeoutMs: 2_000 }); h.service.start({ action: 'reconnect' }); await drain();
     const cause = new WebOsError('NETWORK_UNREACHABLE', 'synthetic root cause'); h.adapters[0]!.pairResult.reject(cause); await drain();
