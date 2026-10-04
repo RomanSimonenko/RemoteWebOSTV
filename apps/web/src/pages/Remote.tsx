@@ -26,6 +26,16 @@ const keys: Readonly<Record<string, BasicTvButton>> = {
   Escape: 'BACK', Home: 'HOME', '+': 'VOLUME_UP', '-': 'VOLUME_DOWN', m: 'MUTE', M: 'MUTE',
 };
 
+// getRandomValues also works on supported HTTP LAN origins, where randomUUID
+// is unavailable. One activation owns one cryptographically random v4 UUID.
+function commandId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 export function Remote({ csrfToken, active, onSessionExpired }: Props) {
   const [state, setState] = useState<TvRemoteState | null>(null);
   const [readError, setReadError] = useState('');
@@ -79,7 +89,14 @@ export function Remote({ csrfToken, active, onSessionExpired }: Props) {
     current.pending = true; current.command = new AbortController();
     setBusy(true); setFeedback(null);
     try {
-      const result: TvCommandResult = await api.sendCommand({ id: crypto.randomUUID(), button }, csrfToken, current.command.signal);
+      let id: string;
+      try { id = commandId(); }
+      catch {
+        // No API call has started: this failure proves the command was not sent.
+        setFeedback({ text: 'Команда не отправлена. Не удалось подготовить идентификатор команды.', alert: true });
+        return;
+      }
+      const result: TvCommandResult = await api.sendCommand({ id, button }, csrfToken, current.command.signal);
       if (!current.active) return;
       setFeedback({ text: result.outcome === 'sent' ? 'Команда отправлена' : result.outcome === 'unknown' ? unknownMessage : rejectionMessages[result.error.code], alert: result.outcome !== 'sent' });
     } catch (cause) {

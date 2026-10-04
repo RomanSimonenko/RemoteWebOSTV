@@ -37,6 +37,43 @@ async function mount(command = (input: { id: string; button: string }) => Promis
   return { ...view, fetch, commands: () => fetch.mock.calls.filter(([path]) => path === '/api/tv/commands'), reads: () => fetch.mock.calls.filter(([path]) => path === '/api/tv/remote') };
 }
 const buttons = [['Вверх', 'UP'], ['Вниз', 'DOWN'], ['Влево', 'LEFT'], ['Вправо', 'RIGHT'], ['OK', 'ENTER'], ['Назад', 'BACK'], ['Домой', 'HOME'], ['Громкость +', 'VOLUME_UP'], ['Громкость −', 'VOLUME_DOWN'], ['Без звука', 'MUTE']];
+test.each([true, false])('cryptographic command IDs are valid and distinct with secureContext=%s', async (secureContext) => {
+  let allocations = 0;
+  vi.stubGlobal('isSecureContext', secureContext);
+  vi.stubGlobal('crypto', {
+    ...(secureContext ? { randomUUID: () => '11111111-1111-4111-8111-111111111111' } : {}),
+    getRandomValues: (bytes: Uint8Array) => bytes.fill(allocations++ === 0 ? 255 : 0),
+  });
+  const view = await mount();
+  for (const label of ['Вверх', 'OK']) {
+    fireEvent.click(screen.getByRole('button', { name: label })); await act(async () => {});
+    expect(within(screen.getByRole('group', { name: 'Пульт' })).getByRole('status').textContent).toBe('Команда отправлена');
+  }
+  expect(view.commands().map(([, init]) => JSON.parse(init!.body as string))).toEqual([
+    { id: 'ffffffff-ffff-4fff-bfff-ffffffffffff', button: 'UP' },
+    { id: '00000000-0000-4000-8000-000000000000', button: 'ENTER' },
+  ]);
+  expect(allocations).toBe(2);
+});
+test('entropy failure is explicitly not sent, posts nothing and permits only a fresh activation after recovery', async () => {
+  vi.useFakeTimers();
+  const entropy = vi.fn(() => { throw new Error('synthetic entropy failure'); });
+  vi.stubGlobal('crypto', { getRandomValues: entropy });
+  const view = await mount();
+  fireEvent.click(screen.getByRole('button', { name: 'Вверх' })); await act(async () => {});
+  expect(view.commands()).toHaveLength(0);
+  expect(screen.getByRole('alert').textContent).toContain('Команда не отправлена');
+  expect(screen.getByRole('alert').textContent).toContain('идентификатор');
+  expect(screen.queryByText(unknown)).toBeNull();
+  expect(screen.queryByText('synthetic entropy failure')).toBeNull();
+  expect((screen.getByRole('button', { name: 'Вверх' }) as HTMLButtonElement).disabled).toBe(false);
+  await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+  expect(view.commands()).toHaveLength(0);
+  vi.stubGlobal('crypto', { getRandomValues: (bytes: Uint8Array) => bytes.fill(0) });
+  fireEvent.click(screen.getByRole('button', { name: 'Вверх' })); await act(async () => {});
+  expect(view.commands()).toHaveLength(1);
+  expect(within(screen.getByRole('group', { name: 'Пульт' })).getByRole('status').textContent).toBe('Команда отправлена');
+});
 test.each(buttons)('click %s sends one protected correlated %s command', async (label, button) => {
   const view = await mount();
   fireEvent.click(screen.getByRole('button', { name: label })); await act(async () => {});
