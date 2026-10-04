@@ -34,7 +34,7 @@
 - [ ] Получить актуальную `origin/main`, создать `codex/unified-remote-ui` от слитой версии; перенести только согласованные документы и очистку отслеживания. Не переписывать историю старой ветки.
 - [ ] Зафиксировать исходные результаты web-тестов. Подготовить независимую копию для сборки и браузерных тестов, сохранив работающий сервер и данные.
 
-## Задача 1: одна кнопка питания
+## Task 1: одна кнопка питания
 
 **Files:** `apps/web/src/pages/PowerControls.tsx`, `PowerControls.test.tsx`.
 
@@ -46,7 +46,7 @@
 - [ ] Проверить тестами, что смена target не перезапускает чтение питания и не прерывает принятую операцию; сохранить все прежние сценарии MAC и неизвестного результата.
 - [ ] Повторить узкий тест и web typecheck; проверить diff; отдельный коммит и независимое ревью.
 
-## Задача 2: шапка и модальные настройки
+## Task 2: шапка и модальные настройки
 
 **Files:** создать `apps/web/src/components/SettingsDialog.tsx` и `SettingsDialog.test.tsx`; изменить `pages/Home.tsx`, `pages/TvSetup.tsx`, `pages/Remote.tsx`, `pages/TvSetup.test.tsx`, `pages/Remote.test.tsx`, `App.test.tsx`.
 
@@ -59,7 +59,7 @@
 - [ ] Добавить X, доступное имя, восстановление фокуса на шестерёнку. Сохранить канонические блокировки мутаций; в `Remote.send` и обработчике клавиатуры проверять `interactionBlocked`, не используя `active=false` для модальности.
 - [ ] Проверить существующие истечение сессии, logout, failed logout, первое сопряжение, reconnect и MAC-сохранение; все web-тесты и typecheck. Проверить diff; отдельный коммит и ревью.
 
-## Задача 3: компактная компоновка и браузерная приёмка
+## Task 3: компактная компоновка и браузерная приёмка
 
 **Files:** `apps/web/src/style.css`, `App.tsx`, `pages/Remote.tsx`, `pages/PowerControls.tsx`, `pages/TvSetup.tsx`, при необходимости классы в `Login.tsx` и `Setup.tsx`; создать `apps/web/test/e2e/unified-remote-ui.spec.ts`; адаптировать селекторы существующих `tv-power.spec.ts`, `tv-pairing.spec.ts`, `tv-remote.spec.ts` без удаления проверок поведения.
 
