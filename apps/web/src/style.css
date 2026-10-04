@@ -12,3 +12,6 @@ button { border: 0; border-radius: 8px; padding: 13px 20px; background: #79bdff;
 button:disabled { opacity: .65; cursor: wait; }
 :focus-visible { outline: 3px solid #ffd66b; outline-offset: 3px; }
 .error { color: #ffd0d0; }
+.remote { margin-top: 28px; padding-top: 16px; border-top: 1px solid #8a9eb3; }
+.remote-buttons { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-areas: ". UP ." "LEFT ENTER RIGHT" ". DOWN ." "BACK HOME MUTE" "VOLUME_DOWN . VOLUME_UP"; gap: 8px; }
+.remote-buttons button { padding: 12px 8px; }

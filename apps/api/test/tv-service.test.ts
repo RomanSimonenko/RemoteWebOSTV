@@ -10,6 +10,23 @@ import { createStagingKeyStore } from '../src/tv/staging-key-store.js';
 import { harness, succeed, drain, pairing, snapshot, barrier, ControlledScheduler } from './support/tv-harness.js';
 
 describe('TV service persistence and projection', () => {
+  test('all ten browser commands reach mock-TV through the current real adapter once', async () => {
+    const fixture = await protocolFixture('success'); const service = createTvService(fixture.dependencies);
+    const id = '15e082b2-de7e-4d86-a049-19c7448264f1'; const signal = new AbortController().signal;
+    try {
+      service.start({ action: 'pair', host: '192.168.1.10' }); await fixture.committed.promise; await drain();
+      for (const button of ['UP', 'DOWN', 'LEFT', 'RIGHT', 'ENTER', 'BACK', 'HOME', 'VOLUME_UP', 'VOLUME_DOWN', 'MUTE'] as const) {
+        expect(await service.sendCommand({ id, button }, signal)).toEqual({ id, outcome: 'sent' });
+      }
+      await fixture.mock.waitForPointerFrameCount(10);
+      expect(fixture.mock.pointerFrames).toEqual([
+        'type:button\nname:UP\n\n', 'type:button\nname:DOWN\n\n', 'type:button\nname:LEFT\n\n', 'type:button\nname:RIGHT\n\n', 'type:button\nname:ENTER\n\n',
+        'type:button\nname:BACK\n\n', 'type:button\nname:HOME\n\n', 'type:button\nname:VOLUMEUP\n\n', 'type:button\nname:VOLUMEDOWN\n\n', 'type:button\nname:MUTE\n\n',
+      ]);
+      expect(fixture.mock.pairingPromptCount).toBe(1);
+    } finally { await service.close(); await fixture.mock.stop(); fixture.sql.close(); }
+  });
+
   test('safe projection terminates on cyclic and deeply nested error causes', () => {
     const cyclic = new WebOsError('NETWORK_UNREACHABLE', 'private cyclic detail'); cyclic.cause = cyclic;
     let deep: Error = new TvServiceError('CLEANUP_FAILED');

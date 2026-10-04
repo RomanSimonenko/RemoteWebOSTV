@@ -7,6 +7,7 @@ const pollInterval = 2000;
 /** One read at a time. Manual refresh shares the same completion-based cooldown. */
 export function useTvStatus(onSessionExpired: () => void) {
   const [snapshot, setSnapshot] = useState<{ status: TvStatusResponse | null; readVersion: number }>({ status: null, readVersion: 0 });
+  // Only the initial read blocks the UI; background reads share inFlight below.
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const expired = useRef(onSessionExpired);
@@ -29,7 +30,6 @@ export function useTvStatus(onSessionExpired: () => void) {
       inFlight = true;
       const readVersion = ++startedReads.current;
       controller = new AbortController();
-      setLoading(true);
       try {
         const next = await api.tvStatus(controller.signal);
         if (!active) return;

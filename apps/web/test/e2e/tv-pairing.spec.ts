@@ -34,7 +34,7 @@ async function pairSuccessfully(page: Page, tv: TvFixture) {
   expect((await tv.status(page)).tv).toBeNull();
   tv.promptGate.release();
   await savedTv(page);
-  await expect(page.getByRole('status')).toHaveText('Подключён');
+  await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Подключён');
 }
 
 test('saved TV survives browser reload, logout/login and API restart without a new prompt or exposed secrets', async ({ page, tv }) => {
@@ -66,7 +66,7 @@ test('saved TV survives browser reload, logout/login and API restart without a n
   await tv.restart();
   await page.reload();
   await savedTv(page);
-  await expect(page.getByRole('status')).toHaveText('Подключён');
+  await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Подключён');
   expect((await tv.status(page)).tv).toEqual(first.tv);
   expect(tv.promptCount).toBe(1);
   expect(tv.policies).toEqual([{ host: tvHost, prompt: true }, { host: tvHost, prompt: false }]);
@@ -133,7 +133,7 @@ test('unavailable TV and failed address change keep the saved identity through r
   expect(await competingBind(tv.unavailablePort)).toBe('EADDRINUSE');
   await tv.makeTvUnavailable();
   await expect.poll(async () => (await tv.status(page)).connection).toBe('unavailable');
-  await expect(page.getByRole('status')).toHaveText('Нет соединения');
+  await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Нет соединения');
   await savedTv(page);
 
   await page.getByLabel('IP-адрес телевизора').fill(failedHost);
@@ -144,7 +144,7 @@ test('unavailable TV and failed address change keep the saved identity through r
   await tv.restart();
   await page.reload();
   await savedTv(page);
-  await expect(page.getByRole('status')).toHaveText('Нет соединения');
+  await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Нет соединения');
   expect((await tv.status(page)).tv).toEqual(original);
   expect(tv.promptCount).toBe(1);
   expect(await competingBind(tv.unavailablePort)).toBe('EADDRINUSE');
@@ -160,13 +160,13 @@ test('revoked saved key requires explicit repair and reload never starts another
   await tv.restart();
   await page.reload();
   await savedTv(page);
-  await expect(page.getByRole('status')).toHaveText('Ошибка авторизации');
+  await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Ошибка авторизации');
   await expect(page.getByRole('alert')).toHaveText('Телевизор не принял сохранённую авторизацию.');
   expect((await tv.status(page)).tv).toEqual(original);
   expect(tv.promptCount).toBe(1);
   expect(tv.policies.at(-1)).toEqual({ host: tvHost, prompt: false });
   await page.reload();
-  await expect(page.getByRole('status')).toHaveText('Ошибка авторизации');
+  await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Ошибка авторизации');
   expect(tv.policies).toHaveLength(2);
 
   const permission = gate();
@@ -177,7 +177,7 @@ test('revoked saved key requires explicit repair and reload never starts another
     await expect(page.getByText('Подтвердите доступ на экране телевизора.')).toBeVisible();
     expect(tv.policies.at(-1)).toEqual({ host: tvHost, prompt: true });
     permission.release();
-    await expect(page.getByRole('status')).toHaveText('Подключён');
+    await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Подключён');
     expect((await tv.status(page)).tv).toEqual(original);
     expect(tv.promptCount).toBe(2);
   } finally { permission.release(); }

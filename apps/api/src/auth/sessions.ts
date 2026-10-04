@@ -70,6 +70,7 @@ export interface AuthSessionService {
   authenticate(token: string | undefined): { readonly username: string; readonly csrfToken: string } | undefined;
   verifyCsrf(token: string, supplied: unknown): boolean;
   revoke(token: string): void;
+  onRevoke(listener: (token: string) => void): () => void;
 }
 
 export async function createAuthSessionService(input: {
@@ -83,6 +84,7 @@ export async function createAuthSessionService(input: {
   // The absent-user path still performs the same asynchronous password derivation.
   const dummyHash = await hashPassword('dummy password for absent owner', () => Buffer.alloc(16));
   const csrfFor = (token: string) => createHmac('sha256', masterKey).update('csrf:v1:').update(token).digest('base64url');
+  const revocationListeners = new Set<(token: string) => void>();
   return {
     async login(username, password) {
       const owner = repository.getOwnerCredentials(username);
@@ -108,6 +110,13 @@ export async function createAuthSessionService(input: {
       const expected = csrfFor(token);
       return timingSafeEqual(Buffer.from(supplied, 'utf8'), Buffer.from(expected, 'utf8'));
     },
-    revoke(token) { repository.revokeSession(digest(token)); },
+    revoke(token) {
+      repository.revokeSession(digest(token));
+      for (const listener of revocationListeners) listener(token);
+    },
+    onRevoke(listener) {
+      revocationListeners.add(listener);
+      return () => { revocationListeners.delete(listener); };
+    },
   };
 }

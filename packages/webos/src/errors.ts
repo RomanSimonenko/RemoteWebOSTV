@@ -51,3 +51,11 @@ export class WebOsError extends Error {
       : { ...diagnostic, operationId };
   }
 }
+
+/** Transport-owned evidence; consumers must never infer delivery from messages. */
+export class TvButtonSendError extends WebOsError {
+  constructor(code: WebOsErrorCode, readonly delivery: 'not_sent' | 'unknown', message: string, options?: ErrorOptions) {
+    super(code, message, options);
+    this.name = 'TvButtonSendError';
+  }
+}

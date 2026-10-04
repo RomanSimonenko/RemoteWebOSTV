@@ -1,10 +1,12 @@
-import { startTvOperationSchema, tvIdentitySchema, tvSnapshotSchema, type StartTvOperation, type TvConnectionState, type TvOperation, type TvStatusResponse } from '@remote-webos-tv/contracts';
+import { startTvOperationSchema, tvCommandRequestSchema, tvIdentitySchema, tvSnapshotSchema, type StartTvOperation, type TvCommandRequest, type TvCommandResult, type TvConnectionState, type TvOperation, type TvRemoteState, type TvStatusResponse } from '@remote-webos-tv/contracts';
 import { WebOsError, type ClientKeyCipher, type ClientKeyStore, type EncryptedEnvelopeV1, type WebOsAdapter } from '@remote-webos-tv/webos';
 import type { StoredTv, TvRepository } from './repository.js';
 import { createStagingKeyStore } from './staging-key-store.js';
 import { abortable, cleanupFailure, failedConnection, projectTvError, TvServiceError, type PublicTvError } from './operation.js';
+import { executeTvCommand, rejectTvCommand, TvCommandAdmissionError, unknownTvCommand } from './commands.js';
 
 export { TvServiceError, projectTvError } from './operation.js';
+export { TvCommandAdmissionError } from './commands.js';
 export interface TvScheduler {
   /** Monotonic milliseconds, independent of the epoch clock used by the UI. */
   now(): number;
@@ -23,6 +25,9 @@ export interface TvServiceDependencies {
   readonly scheduler: TvScheduler;
 }
 export interface TvService {
+  remoteState(): TvRemoteState;
+  assertCanSendCommand(input: TvCommandRequest): TvCommandRequest;
+  sendCommand(input: TvCommandRequest, signal: AbortSignal): Promise<TvCommandResult>;
   assertCanStart(input: StartTvOperation): StartTvOperation;
   start(input: StartTvOperation): TvOperation;
   status(): Promise<TvStatusResponse>;
@@ -33,6 +38,7 @@ export interface TvService {
 
 const operationBudgetMs = 60_000;
 const statusBudgetMs = 5_000;
+const commandBudgetMs = 5_000;
 interface Attempt {
   operation: TvOperation;
   readonly controller: AbortController;
@@ -41,6 +47,7 @@ interface Attempt {
 }
 interface Probe { readonly controller: AbortController; readonly promise: Promise<void> }
 interface Cleanup { readonly adapter: WebOsAdapter; readonly promise: Promise<void> }
+interface Command { readonly controller: AbortController; readonly promise: Promise<TvCommandResult> }
 
 export function createTvService(dependencies: TvServiceDependencies): TvService {
   const { repository, cipher, scheduler } = dependencies;
@@ -52,6 +59,8 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
   let activeAdapter: WebOsAdapter | undefined;
   let probe: Probe | undefined;
   let cleanup: Cleanup | undefined;
+  let command: Command | undefined;
+  let remoteCapability: { readonly generation: number; readonly pointer: boolean } | undefined;
   let generation = 0;
   let initialized = false;
   let closed = false;
@@ -67,7 +76,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
 
   function disconnect(adapter: WebOsAdapter): Promise<void> {
     if (cleanup?.adapter === adapter) return cleanup.promise;
-    if (activeAdapter === adapter) activeAdapter = undefined;
+    if (activeAdapter === adapter) { activeAdapter = undefined; remoteCapability = undefined; }
     const pending = Promise.resolve().then(() => adapter.disconnect()).catch((cause: unknown) => {
       unsafeCleanup = new TvServiceError('CLEANUP_FAILED', 500, { cause });
       throw unsafeCleanup;
@@ -130,6 +139,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       }
       context.operation = { ...context.operation, status: 'succeeded' };
       connection = 'available'; error = undefined;
+      remoteCapability = { generation, pointer: snapshot.capabilities.pointer === true };
     } catch (cause) {
       const failure = signal.aborted ? signal.reason : cause;
       const failureVersion = generation;
@@ -156,7 +166,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
   function assertCanStart(input: StartTvOperation): StartTvOperation {
     if (closed) throw new TvServiceError('SERVICE_CLOSED', 409);
     if (unsafeCleanup) throw new TvServiceError('CLEANUP_FAILED', 409, { cause: unsafeCleanup });
-    if (work || cleanup) throw new TvServiceError('OPERATION_CONFLICT', 409);
+    if (work || cleanup || command) throw new TvServiceError('OPERATION_CONFLICT', 409);
     const parsed = startTvOperationSchema.safeParse(input);
     if (!parsed.success) throw new TvServiceError('INVALID_REQUEST', 400);
     input = parsed.data;
@@ -172,6 +182,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     const timer = scheduler.setTimeout(() => controller.abort(new WebOsError('PAIRING_TIMEOUT', 'TV operation budget expired')), operationBudgetMs);
     const context: Attempt = { operation, controller, timer, expiresAt: scheduler.now() + operationBudgetMs };
     attempt = context; generation++;
+    remoteCapability = undefined;
     connection = input.action === 'pair' || input.action === 'repair' ? 'pairing' : 'connecting';
     error = undefined;
     probe?.controller.abort(new TvServiceError('CANCELLED'));
@@ -198,7 +209,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       if (scheduler.now() >= expiresAt) controller.abort(new WebOsError('CONNECTION_LOST', 'TV status read budget expired'));
       if (controller.signal.aborted) throw controller.signal.reason;
       if (!tvSnapshotSchema.safeParse(snapshot).success || snapshot.connection !== 'available') throw new WebOsError('INVALID_TV_RESPONSE', 'Snapshot did not confirm availability');
-      if (!closed && generation === version) { connection = 'available'; error = undefined; }
+      if (!closed && generation === version) { connection = 'available'; error = undefined; remoteCapability = { generation: version, pointer: snapshot.capabilities.pointer === true }; }
     } catch (cause) {
       // A new operation/close owns cleanup after its cancellation; the old probe cannot publish.
       if (!closed && generation === version) {
@@ -214,7 +225,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
   }
 
   async function status(): Promise<TvStatusResponse> {
-    if (!closed && !work && activeAdapter) {
+    if (!closed && !work && !command && activeAdapter) {
       if (!probe) {
         const controller = new AbortController();
         const pending = readStatus(activeAdapter, controller, generation);
@@ -224,6 +235,64 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       await probe.promise;
     }
     return view();
+  }
+
+  function remoteState(): TvRemoteState {
+    // A probe can disconnect the adapter on failure, so it owns the same gate.
+    if (work || cleanup || command || probe) return { enabled: false, reason: 'BUSY' };
+    if (closed || unsafeCleanup || connection !== 'available' || !activeAdapter || remoteCapability?.generation !== generation) return { enabled: false, reason: 'UNAVAILABLE' };
+    if (remoteCapability.pointer !== true) return { enabled: false, reason: 'UNSUPPORTED' };
+    return { enabled: true, reason: null };
+  }
+
+  function assertCanSendCommand(input: TvCommandRequest): TvCommandRequest {
+    const parsed = tvCommandRequestSchema.safeParse(input);
+    if (!parsed.success) throw new TvServiceError('INVALID_REQUEST', 400);
+    const state = remoteState();
+    if (!state.enabled) throw new TvCommandAdmissionError(state.reason === 'BUSY' ? 'TV_BUSY' : state.reason === 'UNSUPPORTED' ? 'UNSUPPORTED_CAPABILITY' : 'TV_UNAVAILABLE');
+    return parsed.data;
+  }
+
+  async function sendCommand(input: TvCommandRequest, signal: AbortSignal): Promise<TvCommandResult> {
+    try { input = assertCanSendCommand(input); }
+    catch (cause) {
+      if (cause instanceof TvCommandAdmissionError) return rejectTvCommand(input.id, cause.code);
+      throw cause;
+    }
+    const adapter = activeAdapter!;
+    const version = generation;
+    const controller = new AbortController();
+    const expiresAt = scheduler.now() + commandBudgetMs;
+    const abort = () => controller.abort(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+    const expire = () => controller.abort(new WebOsError('CONNECTION_LOST', 'TV command budget expired'));
+    const timer = scheduler.setTimeout(expire, commandBudgetMs);
+    let started = false;
+    // Acquire ownership synchronously; cancellation before this worker runs is
+    // proven not_sent. Once adapter work starts, an unsettled cancellation is unknown.
+    const pending = Promise.resolve().then(async () => {
+      if (closed || version !== generation || controller.signal.aborted) return rejectTvCommand(input.id, 'COMMAND_NOT_SENT');
+      if (scheduler.now() >= expiresAt) { expire(); return rejectTvCommand(input.id, 'COMMAND_NOT_SENT'); }
+      started = true;
+      const result = await executeTvCommand(input, adapter, controller.signal);
+      if (scheduler.now() >= expiresAt && !controller.signal.aborted) expire();
+      if (controller.signal.aborted && result.outcome === 'sent') return unknownTvCommand(input.id);
+      if (!closed && version === generation && result.outcome === 'rejected' && result.error.code === 'UNSUPPORTED_CAPABILITY') remoteCapability = { generation: version, pointer: false };
+      return result;
+    });
+    const current: Command = { controller, promise: pending.finally(() => {
+      scheduler.clearTimeout(timer); signal.removeEventListener('abort', abort);
+      if (command === current) command = undefined;
+    }) };
+    command = current;
+    // Cancellation bounds the caller, but cannot release adapter ownership while
+    // an implementation ignoring AbortSignal still has unfinished work.
+    try { return await abortable(current.promise, controller.signal); }
+    catch (cause) {
+      if (!controller.signal.aborted) throw cause;
+      return started ? unknownTvCommand(input.id) : rejectTvCommand(input.id, 'COMMAND_NOT_SENT');
+    }
   }
 
   async function initialize(): Promise<void> {
@@ -237,7 +306,9 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     closed = true; generation++;
     if (attempt?.operation.status === 'running') cancel(attempt.operation.id);
     probe?.controller.abort(new TvServiceError('CANCELLED'));
+    command?.controller.abort(new TvServiceError('CANCELLED'));
     closing = (async () => {
+      await command?.promise;
       await work; await probe?.promise;
       await cleanup?.promise;
       if (activeAdapter) await disconnect(activeAdapter);
@@ -245,7 +316,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     })();
     return closing;
   }
-  return { assertCanStart, start, status, cancel, initialize, close };
+  return { assertCanStart, start, status, cancel, initialize, close, remoteState, assertCanSendCommand, sendCommand };
 }
 
 function copyOperation(operation: TvOperation): TvOperation {

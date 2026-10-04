@@ -1,20 +1,30 @@
-import { apiErrorSchema, loginResponseSchema, sessionResponseSchema, setupStatusSchema, tvStatusResponseSchema, tvOperationSchema, type LoginRequest, type SetupRequest, type StartTvOperation, type TvOperation, type TvStatusResponse } from '@remote-webos-tv/contracts';
+import { apiErrorSchema, loginResponseSchema, sessionResponseSchema, setupStatusSchema, tvStatusResponseSchema, tvOperationSchema, tvCommandResultSchema, tvRemoteStateSchema, type LoginRequest, type SetupRequest, type StartTvOperation, type TvOperation, type TvStatusResponse, type TvCommandRequest, type TvCommandResult, type TvRemoteState } from '@remote-webos-tv/contracts';
 
 export class ApiFailure extends Error {
   constructor(readonly status: number, readonly code: string) { super('API request failed'); }
+  get commandRejectedBeforeDispatch(): boolean { return validatedCommandRejections.has(this); }
 }
+// Status/code alone (including a manually constructed ApiFailure) cannot prove
+// delivery. Only this module's validated command error response can mark it.
+const validatedCommandRejections = new WeakSet<ApiFailure>();
 
-async function request(path: string, init?: RequestInit): Promise<Response> {
+async function request(path: string, init?: RequestInit, resultStatuses: readonly number[] = []): Promise<Response> {
   let response: Response;
   try { response = await fetch(`/api${path}`, { credentials: 'same-origin', cache: 'no-store', ...init }); }
   catch { throw new ApiFailure(0, 'NETWORK_ERROR'); }
-  if (!response.ok) {
+  if (!response.ok && !resultStatuses.includes(response.status)) {
     let code = 'UNEXPECTED_ERROR';
+    let commandRejected = false;
     try {
       const parsed = apiErrorSchema.safeParse(await response.json());
-      if (parsed.success) code = parsed.data.code;
+      if (parsed.success) {
+        code = parsed.data.code;
+        commandRejected = path === '/tv/commands' && ((response.status === 400 && code === 'BAD_REQUEST') || (response.status === 403 && code === 'FORBIDDEN'));
+      }
     } catch { /* Malformed responses remain generic API failures. */ }
-    throw new ApiFailure(response.status, code);
+    const failure = new ApiFailure(response.status, code);
+    if (commandRejected) validatedCommandRejections.add(failure);
+    throw failure;
   }
   return response;
 }
@@ -39,6 +49,20 @@ export const api = {
   },
   async cancelTvOperation(id: string, csrfToken: string, signal?: AbortSignal) {
     return await parsed(await request(`/tv/operations/${encodeURIComponent(id)}/cancel`, { method: 'POST', headers: { 'x-csrf-token': csrfToken }, signal: signal ?? null }), tvOperationSchema) as TvOperation;
+  },
+  async remoteState(signal?: AbortSignal): Promise<TvRemoteState> {
+    return parsed(await request('/tv/remote', { signal: signal ?? null }), tvRemoteStateSchema);
+  },
+  async sendCommand(input: TvCommandRequest, csrfToken: string, signal?: AbortSignal): Promise<TvCommandResult> {
+    // Only this route carries a command result on these non-success statuses.
+    // Auth/schema errors continue through the shared API-error handling.
+    const response = await request('/tv/commands', { method: 'POST', headers: { ...jsonHeaders, 'x-csrf-token': csrfToken }, body: JSON.stringify(input), signal: signal ?? null }, [409, 422, 429, 503, 504]);
+    const result = await parsed(response, tvCommandResultSchema);
+    const expectedStatus = result.outcome === 'sent' ? 200 : result.outcome === 'unknown' ? 504 : {
+      TV_UNAVAILABLE: 409, TV_BUSY: 409, UNSUPPORTED_CAPABILITY: 422, COMMAND_NOT_SENT: 503, RATE_LIMITED: 429,
+    }[result.error.code];
+    if (result.id !== input.id || response.status !== expectedStatus) throw new ApiFailure(response.status, 'INVALID_RESPONSE');
+    return result;
   },
 };
 

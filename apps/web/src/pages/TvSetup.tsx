@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { startTvOperationSchema, type StartTvOperation, type TvConnectionState, type TvOperation, type SavedTvView } from '@remote-webos-tv/contracts';
 import { api, ApiFailure, friendlyError } from '../api.js';
 import { useTvStatus } from '../useTvStatus.js';
+import { Remote } from './Remote.js';
 
 interface Props { csrfToken: string; onSessionExpired(): void }
 const connections: Record<TvConnectionState, string> = {
@@ -79,7 +80,7 @@ export function TvSetup({ csrfToken, onSessionExpired }: Props) {
   return <section>
     <h1>{tv ? 'Телевизор' : 'Телевизор ещё не настроен'}</h1>
     {tv && <><p>{tv.identity.model}</p><p>{tv.host}</p></>}
-    <p role="status" aria-live="polite">{error ? 'Статус неизвестен' : progress || (status ? connections[status.connection] : 'Загрузка статуса…')}</p>
+    <p role="status" aria-label="Соединение с телевизором" aria-live="polite">{error ? 'Статус неизвестен' : progress || (status ? connections[status.connection] : 'Загрузка статуса…')}</p>
     {diagnostic && <p ref={alert} tabIndex={-1} role="alert" className="error">{diagnostic}</p>}
     {running && <div>
       {(operation.action === 'pair' || operation.action === 'repair') && <p>Подтвердите доступ на экране телевизора.</p>}
@@ -98,5 +99,6 @@ export function TvSetup({ csrfToken, onSessionExpired }: Props) {
       </div>}
     </>}
     <button type="button" disabled={loading} onClick={refresh}>Обновить статус</button>
+    {tv && <Remote csrfToken={csrfToken} active onSessionExpired={onSessionExpired} />}
   </section>;
 }

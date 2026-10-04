@@ -20,7 +20,7 @@ import type {
   WebOsAdapter,
 } from './adapter.js';
 import { toWebOsButton } from './buttons.js';
-import { WebOsError } from './errors.js';
+import { TvButtonSendError, WebOsError } from './errors.js';
 import type { ClientKeyStore } from './key-store.js';
 import type {
   Lgtv2Client,
@@ -103,12 +103,14 @@ export class Lgtv2Adapter implements WebOsAdapter {
   readonly #dependencies: Lgtv2AdapterDependencies;
   #client: Lgtv2Client | undefined;
   #pointerSocket: Lgtv2SpecializedSocket | undefined;
+  #pointerAcquisition: { readonly client: Lgtv2Client; readonly promise: Promise<Lgtv2SpecializedSocket> } | undefined;
   #identity: TvIdentity | undefined;
   #capabilities: MutableCapabilities | undefined;
   #transport: TvTransport | undefined;
   #pairingPromise: Promise<PairingResult> | undefined;
   #cancelPairing: (() => void) | undefined;
   #disconnectPromise: Promise<void> | undefined;
+  #pointerCleanupFailure: WebOsError | undefined;
 
   constructor(
     options: Lgtv2AdapterOptions,
@@ -166,8 +168,32 @@ export class Lgtv2Adapter implements WebOsAdapter {
     const pointerSocket = await this.#execute(
       'pointer',
       signal,
-      () => client.getSocket(uris.pointer),
+      () => {
+        // lgtv2 caches only completed sockets. Keep one raw acquisition per
+        // client across eager caller cancellation to prevent late cache overwrite.
+        if (this.#pointerAcquisition?.client === client) return this.#pointerAcquisition.promise;
+        const pending = client.getSocket(uris.pointer).then((socket) => {
+          if (this.#client !== client) {
+            // Only a stale client's socket is ours to close here; cancellation
+            // alone must not close a cache shared with a later caller.
+            try { socket.close(); }
+            catch (cause) {
+              this.#pointerCleanupFailure = new WebOsError('CONNECTION_LOST', 'Unable to close a stale pointer socket', { cause });
+              throw this.#pointerCleanupFailure;
+            }
+            throw new WebOsError('CONNECTION_LOST', 'Pointer belongs to a replaced client');
+          }
+          return socket;
+        });
+        const acquisition = { client, promise: pending.finally(() => {
+          if (this.#pointerAcquisition === acquisition) this.#pointerAcquisition = undefined;
+        }) };
+        this.#pointerAcquisition = acquisition;
+        return acquisition.promise;
+      },
     );
+    throwIfAborted(signal);
+    if (this.#client !== client) throw new WebOsError('CONNECTION_LOST', 'Pointer belongs to a replaced client');
     if (
       pointerSocket.ws &&
       pointerSocket.ws.readyState !== webSocketOpenState
@@ -202,14 +228,20 @@ export class Lgtv2Adapter implements WebOsAdapter {
   }
 
   async sendButton(button: TvButton, signal: AbortSignal): Promise<void> {
-    const pointerSocket = await this.#getPointerSocket(signal);
-    await this.#execute(
-      'button',
-      signal,
-      async () => {
-        pointerSocket.send('button', { name: toWebOsButton(button) });
-      },
-    );
+    let delivery: 'not_sent' | 'unknown' = 'not_sent';
+    try {
+      const pointerSocket = await this.#getPointerSocket(signal);
+      const name = toWebOsButton(button);
+      await this.#execute('button', signal, async () => {
+        // No await between cancellation check and the transport boundary.
+        throwIfAborted(signal);
+        delivery = 'unknown';
+        pointerSocket.send('button', { name });
+      });
+    } catch (cause) {
+      const error = mapLgtv2Error(cause, 'button', true);
+      throw new TvButtonSendError(error.code, delivery, error.message, { cause: error });
+    }
   }
 
   async setVolume(volume: number, signal: AbortSignal): Promise<void> {
@@ -534,6 +566,7 @@ export class Lgtv2Adapter implements WebOsAdapter {
       if (client) {
         await client.disconnect();
       }
+      if (this.#pointerCleanupFailure) throw this.#pointerCleanupFailure;
     })();
     let trackedOperation: Promise<void>;
     trackedOperation = operation.finally(() => {

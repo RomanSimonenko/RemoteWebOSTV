@@ -8,12 +8,50 @@ const saved = { tv: { host: '192.168.1.20', identity: { model: 'Synthetic TV' } 
 const operation = { id: 'synthetic-operation', action: 'pair', status: 'running', startedAt: 10000, deadlineAt: 70000 };
 function response(data: unknown, status = 200) { return new Response(JSON.stringify(data), { status }); }
 function barrier<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
-async function mount() { render(<TvSetup csrfToken={csrfToken} onSessionExpired={vi.fn()} />); await act(async () => {}); }
+async function mount() {
+  // Capability reads belong to the remote; keep this suite's controlled
+  // sequence and assertions scoped to the existing setup/status requests.
+  const setupFetch = globalThis.fetch;
+  vi.stubGlobal('fetch', (path: RequestInfo | URL, init?: RequestInit) => path === '/api/tv/remote'
+    ? Promise.resolve(response({ enabled: false, reason: 'UNSUPPORTED' })) : setupFetch(path, init));
+  render(<TvSetup csrfToken={csrfToken} onSessionExpired={vi.fn()} />); await act(async () => {});
+}
 function submitHost(host: string) {
   fireEvent.change(screen.getByLabelText('IP-адрес телевизора'), { target: { value: host } });
   fireEvent.submit(screen.getByLabelText('IP-адрес телевизора').closest('form')!);
 }
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+test('keeps refresh enabled during background reads and coalesces clicks without shortening the completion cooldown', async () => {
+  vi.useFakeTimers();
+  const initial = barrier<Response>();
+  const background = barrier<Response>();
+  const next = barrier<Response>();
+  const fetch = vi.fn().mockReturnValueOnce(initial.promise).mockReturnValueOnce(background.promise).mockReturnValueOnce(next.promise);
+  vi.stubGlobal('fetch', fetch);
+  await mount();
+  const refresh = screen.getByRole<HTMLButtonElement>('button', { name: 'Обновить статус' });
+  expect(refresh.disabled).toBe(true);
+  await act(async () => { initial.resolve(response(empty)); });
+  expect(refresh.disabled).toBe(false);
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(refresh.disabled).toBe(false);
+  fireEvent.click(refresh); fireEvent.click(refresh);
+  await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(refresh.disabled).toBe(false);
+  await act(async () => { background.resolve(response(empty)); });
+  fireEvent.click(refresh); fireEvent.click(refresh);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1999); });
+  expect(fetch).toHaveBeenCalledTimes(2);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(fetch).toHaveBeenCalledTimes(3);
+  expect(refresh.disabled).toBe(false);
+  await act(async () => { next.resolve(response(empty)); });
+  expect(refresh.disabled).toBe(false);
+  expect(screen.getByRole('status', { name: 'Соединение с телевизором' }).textContent).toBe('Введите IP-адрес телевизора');
+});
 
 test('validates literal private IPv4 and sends one protected pair request despite double submission', async () => {
   const pending = barrier<Response>();
@@ -31,7 +69,7 @@ test('validates literal private IPv4 and sends one protected pair request despit
   expect(fetch.mock.calls[1]).toEqual(['/api/tv/operations', expect.objectContaining({ method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken }, body: '{"action":"pair","host":"192.168.1.20"}' })]);
   await act(async () => { pending.resolve(response(operation, 202)); });
   expect(screen.getByText('Подтвердите доступ на экране телевизора.')).toBeTruthy();
-  expect(screen.getByRole('status').textContent).toBe('Сопряжение');
+  expect(screen.getByRole('status', { name: 'Соединение с телевизором' }).textContent).toBe('Сопряжение');
 });
 
 test('restores server deadline on reload, keeps an expired operation running until server completion and explicitly cancels', async () => {
