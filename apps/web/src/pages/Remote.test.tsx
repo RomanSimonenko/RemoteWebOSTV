@@ -9,6 +9,7 @@ afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 test('saved television exposes the browser remote beside its setup', async () => {
   vi.stubGlobal('fetch', vi.fn(async (path: string) => new Response(JSON.stringify(path === '/api/tv'
     ? { tv: { host: '192.168.1.20', identity: { model: 'Synthetic TV' } }, connection: 'available', operation: null }
+    : path === '/api/tv/power' ? { mac: null, canPowerOff: false, canWake: false, operation: null }
     : { enabled: true, reason: null }), { status: 200 })));
   render(<Home username="alice" csrfToken={'c'.repeat(43)} tvActive busy={false} error={null} onLogout={vi.fn()} onSessionExpired={vi.fn()} />);
   await act(async () => {});
@@ -28,6 +29,7 @@ async function mount(command = (input: { id: string; button: string }) => Promis
   const fetch = vi.fn((path: string, init?: RequestInit) => {
     if (path === '/api/tv') return Promise.resolve(response(saved));
     if (path === '/api/tv/remote') return state();
+    if (path === '/api/tv/power') return Promise.resolve(response({ mac: null, canPowerOff: false, canWake: false, operation: null }));
     if (path === '/api/tv/commands') return command(JSON.parse(init!.body as string));
     throw new Error('Unexpected test route');
   });
@@ -232,6 +234,7 @@ test('App logout removes pending remote, then a late unauthorized command cannot
       case '/api/auth/logout': return Promise.resolve(new Response(null, { status: 204 }));
       case '/api/tv': return Promise.resolve(response(saved));
       case '/api/tv/remote': return Promise.resolve(response(ready));
+      case '/api/tv/power': return Promise.resolve(response({ mac: null, canPowerOff: false, canWake: false, operation: null }));
       case '/api/tv/commands': return pending.promise;
       default: throw new Error('Unexpected test route');
     }
