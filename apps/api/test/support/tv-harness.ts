@@ -48,6 +48,10 @@ export class ControlledAdapter implements WebOsAdapter {
   readonly sent: TvButton[] = [];
   readonly enteredSend = barrier<AbortSignal>();
   sendResult: Promise<void> = Promise.resolve();
+  powerOffs = 0;
+  powerResult: Promise<void> = Promise.resolve();
+  readonly wakes: string[][] = [];
+  wakeResult: Promise<void> = Promise.resolve();
   pairs = 0;
   closed = false;
   constructor(readonly staging: ClientKeyStore) {}
@@ -62,6 +66,8 @@ export class ControlledAdapter implements WebOsAdapter {
   async listApps() { return []; }
   async listInputs() { return []; }
   async sendButton(button: TvButton, signal: AbortSignal) { this.sent.push(button); this.enteredSend.resolve(signal); await this.sendResult; }
+  async powerOff() { this.powerOffs++; await this.powerResult; }
+  async wake(macs: readonly string[]) { this.wakes.push([...macs]); await this.wakeResult; }
 }
 
 export function harness(saved = false, overrides: Partial<TvServiceDependencies> = {}) {

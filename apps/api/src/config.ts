@@ -8,6 +8,7 @@ export interface AppConfig {
   readonly publicOrigin: string;
   readonly secureCookies: boolean;
   readonly trustedProxy: readonly string[];
+  readonly recoveryTimeoutMs?: number;
 }
 
 export class AppConfigError extends Error {
@@ -40,6 +41,10 @@ function parseTrustedProxy(value: string | undefined): string[] {
 }
 
 export function loadConfig(env: Environment): AppConfig {
+  const recoveryValue = env.REMOTE_WEBOS_RECOVERY_TIMEOUT_MS;
+  if (recoveryValue !== undefined && (!/^\d+$/.test(recoveryValue) || Number(recoveryValue) < 1_000 || Number(recoveryValue) > 300_000)) {
+    throw new AppConfigError('REMOTE_WEBOS_RECOVERY_TIMEOUT_MS must be an integer from 1000 to 300000');
+  }
   const dataDir = required(env, 'REMOTE_WEBOS_DATA_DIR');
   if (!isAbsolute(dataDir)) throw new AppConfigError('REMOTE_WEBOS_DATA_DIR must be an absolute path');
 
@@ -74,5 +79,6 @@ export function loadConfig(env: Environment): AppConfig {
     publicOrigin,
     secureCookies: secureCookiesValue === undefined ? parsedOrigin.protocol === 'https:' : secureCookiesValue === 'true',
     trustedProxy: parseTrustedProxy(env.REMOTE_WEBOS_TRUSTED_PROXY),
+    recoveryTimeoutMs: recoveryValue === undefined ? 60_000 : Number(recoveryValue),
   };
 }

@@ -10,6 +10,12 @@ const validEnv = {
 };
 
 describe('API configuration', () => {
+  test.each(['0', '999', '300001', '1.5', '-1', 'abc', '', '1000ms'])('rejects invalid recovery budget %j', (value) => {
+    expect(() => loadConfig({ ...validEnv, REMOTE_WEBOS_RECOVERY_TIMEOUT_MS: value })).toThrow(/REMOTE_WEBOS_RECOVERY_TIMEOUT_MS/);
+  });
+  test.each([['1000', 1000], ['300000', 300000], [undefined, 60000]] as const)('loads recovery budget %j', (value, expected) => {
+    expect(loadConfig({ ...validEnv, REMOTE_WEBOS_RECOVERY_TIMEOUT_MS: value }).recoveryTimeoutMs).toBe(expected);
+  });
   test('loads explicit binding and security configuration', () => {
     expect(loadConfig(validEnv)).toEqual({
       dataDir: '/synthetic/data',
@@ -18,6 +24,7 @@ describe('API configuration', () => {
       publicOrigin: 'https://remote.example.test',
       secureCookies: true,
       trustedProxy: [],
+      recoveryTimeoutMs: 60_000,
     });
   });
 

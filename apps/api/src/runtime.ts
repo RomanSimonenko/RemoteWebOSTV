@@ -50,6 +50,7 @@ export async function createApiRuntime(config: AppConfig, options: {
     tv = createTvService({
       repository: tvRepository, cipher, now, newId: options.newId ?? randomUUID,
       scheduler: options.scheduler ?? runtimeScheduler,
+      recoveryTimeoutMs: config.recoveryTimeoutMs ?? 60_000,
       createAdapter: options.createAdapter ?? ((host, keyStore, requestTimeoutMs, allowPairingPrompt) => new Lgtv2Adapter({
         host, keyStore, requestTimeoutMs, handshakeTimeoutMs: requestTimeoutMs, allowPairingPrompt, now: () => new Date(now()),
       })),

@@ -20,7 +20,7 @@ import type {
   WebOsAdapter,
 } from './adapter.js';
 import { toWebOsButton } from './buttons.js';
-import { TvButtonSendError, WebOsError } from './errors.js';
+import { TvButtonSendError, TvPowerSendError, WebOsError } from './errors.js';
 import type { ClientKeyStore } from './key-store.js';
 import type {
   Lgtv2Client,
@@ -296,24 +296,40 @@ export class Lgtv2Adapter implements WebOsAdapter {
   }
 
   async powerOff(signal: AbortSignal): Promise<void> {
-    const client = this.#requireClient();
-    await this.#execute(
-      'power-off',
-      signal,
-      () => client.request(uris.powerOff),
-    );
+    let delivery: 'not_sent' | 'unknown' = 'not_sent';
+    try {
+      const client = this.#requireClient();
+      await this.#execute('power-off', signal, () => {
+        throwIfAborted(signal);
+        delivery = 'unknown';
+        return client.request(uris.powerOff);
+      }, 'owner');
+    } catch (cause) {
+      const error = mapLgtv2Error(cause, 'power-off', true);
+      throw new TvPowerSendError(error.code, delivery, error.message, { cause: error });
+    }
   }
 
   async wake(
     macAddresses: readonly string[],
     signal: AbortSignal,
   ): Promise<void> {
-    await this.#execute(
-      'wake',
-      signal,
-      () => this.#dependencies.wake(macAddresses, signal),
-      'owner',
-    );
+    let delivery: 'not_sent' | 'unknown' = 'not_sent';
+    try {
+      await this.#execute('wake', signal, () => {
+        throwIfAborted(signal);
+        delivery = 'unknown';
+        return this.#dependencies.wake(macAddresses, signal);
+      }, 'owner');
+    } catch (cause) {
+      // The actual UDP owner can prove a pre-send failure more precisely.
+      if (cause instanceof TvPowerSendError) {
+        const error = mapLgtv2Error(cause.cause ?? cause, 'wake', true);
+        throw new TvPowerSendError(error.code, cause.delivery, error.message, { cause });
+      }
+      const error = mapLgtv2Error(cause, 'wake', true);
+      throw new TvPowerSendError(error.code, delivery, error.message, { cause: error });
+    }
   }
 
   async disconnect(): Promise<void> {

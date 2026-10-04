@@ -78,7 +78,7 @@ test('runtime migrates existing owner storage, persists TV, and reconnects witho
     expect(response.body).not.toMatch(/synthetic-key|encrypted|clientKey|master/);
     f.adapters[1]!.pairResult.reject(new WebOsError('NETWORK_UNREACHABLE', 'synthetic raw error'));
     await drain();
-    expect((await app.inject({ url: '/api/tv', headers })).json()).toMatchObject({ tv: { host: '192.168.1.10' }, connection: 'unavailable' });
+    expect((await app.inject({ url: '/api/tv', headers })).json()).toMatchObject({ tv: { host: '192.168.1.10' }, connection: 'connecting', operation: { action: 'reconnect', status: 'running' } });
     expect(f.logs.join('')).not.toMatch(/192\.168\.1\.10|synthetic-key|synthetic raw error/);
   } finally { await app.close(); }
 });

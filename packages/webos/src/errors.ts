@@ -59,3 +59,11 @@ export class TvButtonSendError extends WebOsError {
     this.name = 'TvButtonSendError';
   }
 }
+
+/** SSAP/UDP-owned evidence, independent of the caller's timeout or cancellation. */
+export class TvPowerSendError extends WebOsError {
+  constructor(code: WebOsErrorCode, readonly delivery: 'not_sent' | 'unknown', message: string, options?: ErrorOptions) {
+    super(code, message, options);
+    this.name = 'TvPowerSendError';
+  }
+}

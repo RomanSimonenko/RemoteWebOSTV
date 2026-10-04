@@ -147,9 +147,10 @@ describe('TV lifecycle barriers', () => {
     const first = h.service.status(); const second = h.service.status(); await drain();
     expect(adapter.reads).toBe(2); h.scheduler.advance(5_000); await drain();
     const statuses = await Promise.all([first, second]);
-    expect(statuses.map((status) => status.connection)).toEqual(['unavailable', 'unavailable']);
+    expect(statuses.map((status) => status.connection)).toEqual(['unavailable', 'connecting']);
+    expect(h.service.powerState().operation).toMatchObject({ action: 'recover', status: 'running' });
     expect(adapter.closed).toBe(true); expect(h.writes).toEqual([]); expect(adapter.pairs).toBe(1);
-    adapter.readResult.resolve(snapshot); await drain(); expect((await h.service.status()).connection).toBe('unavailable'); await h.service.close();
+    adapter.readResult.resolve(snapshot); await drain(); expect((await h.service.status()).connection).toBe('connecting'); await h.service.close();
   });
 
   test('a replacement aborts an old status probe and late data cannot overwrite runtime state', async () => {
@@ -176,7 +177,10 @@ describe('TV lifecycle barriers', () => {
     const reading = h.service.status(); await drain();
     old.readResult.reject(new WebOsError('CONNECTION_LOST', 'private')); await drain();
     expect(() => h.service.start({ action: 'repair' })).toThrowError(expect.objectContaining({ statusCode: 409 }));
-    cleanup.resolve(); await reading; await drain(); h.service.start({ action: 'repair' }); await drain();
+    cleanup.resolve(); await reading; await drain();
+    expect(h.service.powerState().operation?.action).toBe('recover');
+    await succeed(h.adapters[1]!);
+    h.service.start({ action: 'repair' }); await drain();
     expect((await h.service.status()).connection).toBe('pairing');
     await h.service.close();
   });
