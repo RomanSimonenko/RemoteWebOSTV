@@ -83,11 +83,11 @@ export function PowerControls({ csrfToken, active, onSessionExpired, onStateChan
     <p>Отправка сигнала не гарантирует включение. Сервер должен находиться в сети телевизора; WOL зависит от модели и настроек питания.</p>
     <button type="button" disabled={loading} onClick={refresh}>Обновить статус питания</button>
   </>;
-  return <div role="group" aria-label="Питание телевизора" aria-busy={busy}>
-    <h2>Питание телевизора</h2>
-    {!settingsOpen && activity}
-    <button ref={powerButton} type="button" disabled={powerDisabled} onClick={() => { if (powerDisabled) return; if (powerAction === 'power_off') setConfirming(true); else if (powerAction === 'wake') start('wake'); }}>{powerAction === 'power_off' ? 'Выключить ТВ' : powerAction === 'wake' ? 'Включить ТВ' : 'Питание ТВ'}</button>
-    {confirming && <div role="dialog" aria-label="Выключить телевизор?" aria-describedby="power-confirm-help">
+  return <div className="power-controls" role="group" aria-label="Питание телевизора" aria-busy={busy}>
+    <h2 className="visually-hidden">Питание телевизора</h2>
+    <div className={settingsOpen ? 'reserved-activity' : undefined} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{activity}</div>
+    <button className="power-button" ref={powerButton} type="button" aria-label={powerAction === 'power_off' ? 'Выключить ТВ' : powerAction === 'wake' ? 'Включить ТВ' : 'Питание ТВ'} title={powerAction === 'power_off' ? 'Выключить ТВ' : powerAction === 'wake' ? 'Включить ТВ' : 'Питание ТВ'} disabled={powerDisabled} onClick={() => { if (powerDisabled) return; if (powerAction === 'power_off') setConfirming(true); else if (powerAction === 'wake') start('wake'); }}><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2v10M6.3 5.7a8 8 0 1 0 11.4 0" /></svg></button>
+    {confirming && <div className="power-confirmation" role="dialog" aria-label="Выключить телевизор?" aria-describedby="power-confirm-help">
       <p id="power-confirm-help">Выключить телевизор? Потеря соединения не подтверждает фактическое выключение.</p>
       <button ref={confirmation} type="button" disabled={powerDisabled} onClick={() => { setConfirming(false); start('power_off'); }}>Подтвердить выключение</button>
       <button type="button" onClick={() => { setConfirming(false); powerButton.current?.focus(); }}>Не выключать</button>

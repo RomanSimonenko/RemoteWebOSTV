@@ -1,17 +1,66 @@
-:root { font-family: system-ui, sans-serif; color: #f4f5f7; background: #151c28; }
+:root { font-family: system-ui, sans-serif; color: #f1f5f8; background: #10171d; color-scheme: dark; font-synthesis: none; }
 * { box-sizing: border-box; }
-body { margin: 0; min-height: 100vh; }
-.shell { width: min(100%, 460px); margin: 0 auto; padding: 48px 24px; }
-.eyebrow { color: #a8c9ec; letter-spacing: .08em; text-transform: uppercase; font-size: .8rem; }
-h1 { font-size: 2rem; line-height: 1.2; }
-p { line-height: 1.5; }
-form { display: grid; gap: 18px; margin-top: 28px; }
-label { display: grid; gap: 8px; font-weight: 600; }
-input { width: 100%; border: 1px solid #8a9eb3; border-radius: 8px; padding: 12px; font: inherit; color: #111; background: #fff; }
-button { border: 0; border-radius: 8px; padding: 13px 20px; background: #79bdff; color: #102039; font: inherit; font-weight: 700; cursor: pointer; }
-button:disabled { opacity: .65; cursor: wait; }
-:focus-visible { outline: 3px solid #ffd66b; outline-offset: 3px; }
-.error { color: #ffd0d0; }
-.remote { margin-top: 28px; padding-top: 16px; border-top: 1px solid #8a9eb3; }
-.remote-buttons { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-areas: ". UP ." "LEFT ENTER RIGHT" ". DOWN ." "BACK HOME MUTE" "VOLUME_DOWN . VOLUME_UP"; gap: 8px; }
-.remote-buttons button { padding: 12px 8px; }
+body { margin: 0; min-width: 320px; min-height: 100vh; background: radial-gradient(ellipse at top, #1c2a33, #10171d 65%); }
+.shell { width: 100%; max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; }
+.app-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid #32414a; }
+.eyebrow { margin: 0; font-size: 1rem; font-weight: 700; letter-spacing: -.02em; }
+.header-actions { display: flex; flex-shrink: 0; align-items: center; gap: 8px; }
+.header-actions button { min-height: 42px; padding: 8px 12px; font-size: .85rem; }
+.header-actions button[aria-label="Настройки"] { width: 42px; font-size: 1.4rem; padding: 0; }
+.session-caption { margin: 12px 0 20px; text-align: center; color: #a8b6bf; font-size: .75rem; }
+h1 { font-size: 1.65rem; line-height: 1.2; margin: 0 0 8px; letter-spacing: -.03em; }
+h2 { font-size: 1.2rem; margin: 0; }
+p { line-height: 1.5; margin: 12px 0; overflow-wrap: anywhere; }
+.tv-card, .form-card { width: 100%; max-width: 400px; margin: 24px auto 0; padding: 24px; border: 1px solid #33424b; border-radius: 22px; background: linear-gradient(150deg, #202b32, #182127); box-shadow: 0 20px 60px #0004; position: relative; }
+.form-card { max-width: 440px; }
+.tv-summary { min-height: 88px; padding-right: 76px; }
+.tv-model { margin: 0 0 8px; color: #a8b6bf; font-size: .9rem; }
+.connection-status { display: inline-block; margin: 0; padding: 4px 9px; border-radius: 12px; background: #303d46; color: #c3d0d9; font-size: .8rem; }
+.connection-status[data-connection="available"] { background: #124f38; color: #75ebba; }
+form { display: grid; gap: 14px; margin-top: 20px; }
+label { display: grid; gap: 8px; font-size: .9rem; font-weight: 600; }
+input { min-width: 0; width: 100%; border: 1px solid #526674; border-radius: 10px; padding: 12px; font: inherit; color: #f1f5f8; background: #10191f; }
+button { border: 1px solid #42525d; border-radius: 14px; min-height: 44px; padding: 12px 16px; background: linear-gradient(150deg, #303c45, #232d35); color: #f1f5f8; font: inherit; font-weight: 600; cursor: pointer; overflow-wrap: anywhere; }
+button:hover:not(:disabled) { background: #374953; border-color: #83bdce; }
+button:active:not(:disabled) { background: #1b4b59; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+:focus-visible { outline: 3px solid #71defa; outline-offset: 3px; }
+.error { color: #ffb4b4; }
+.reserved-activity { visibility: hidden; }
+.power-controls > div > p:empty { display: none; }
+.power-controls p { font-size: .85rem; }
+.power-button { position: absolute; top: 24px; right: 24px; border-radius: 50%; width: 62px; height: 62px; padding: 17px; background: linear-gradient(150deg, #ff555d, #db303e); border-color: #ff666c; box-shadow: 0 6px 20px #d52b3628; }
+.power-button:hover:not(:disabled) { background: #ef4852; border-color: #ff9ba1; }
+svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+.power-button svg { width: 100%; height: 100%; stroke-width: 2.5; }
+.power-confirmation { margin: 14px 0; padding: 14px; border: 1px solid #c76870; border-radius: 14px; background: #34242b; }
+.power-confirmation button { width: 100%; margin-top: 8px; }
+.remote { margin-top: 18px; padding-top: 18px; border-top: 1px solid #39474f; }
+.remote-buttons { display: grid; gap: 8px; }
+.remote-buttons button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 10px 4px; min-width: 0; }
+.remote-buttons span { font-size: .75rem; line-height: 1.25; }
+.d-pad { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(3, 64px); grid-template-areas: ". UP ." "LEFT ENTER RIGHT" ". DOWN ."; }
+.d-pad .ok-button { border: 2px solid #39cdea; border-radius: 50%; font-size: 1.2rem; }
+.home-back { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "HOME BACK"; margin-top: 16px; }
+.volume { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-areas: "VOLUME_DOWN MUTE VOLUME_UP"; margin-top: 16px; padding-top: 16px; border-top: 1px solid #39474f; }
+.remote > p[role="status"] { min-height: 1.5em; margin: 12px 0 0; font-size: .8rem; color: #9fc7d5; }
+.keyboard-help { font-size: .75rem; color: #a8b6bf; margin-top: 8px; }
+.keyboard-help summary { cursor: pointer; padding: 4px 0; }
+.settings-dialog { width: min(520px, calc(100% - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 24px; border: 1px solid #526674; border-radius: 20px; background: #1b272f; color: #f1f5f8; overflow-y: auto; box-shadow: 0 24px 80px #0008; }
+.settings-dialog::backdrop { background: #060c13ba; backdrop-filter: blur(4px); }
+.settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+.settings-heading h2 { min-width: 0; }
+.settings-heading button { width: 44px; padding: 0; font-size: 1.5rem; flex-shrink: 0; }
+.settings-dialog p { font-size: .85rem; }
+.settings-dialog form + div { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.settings-dialog > button { margin-top: 12px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+@media (max-width: 400px) {
+  .shell { padding: 16px 12px 28px; }
+  .eyebrow { max-width: 140px; font-size: .9rem; }
+  .tv-card, .form-card { padding: 18px; border-radius: 18px; }
+  .tv-summary { padding-right: 66px; }
+  .tv-summary h1 { font-size: 1.4rem; }
+  .power-button { top: 18px; right: 18px; width: 56px; height: 56px; padding: 15px; }
+  .settings-dialog { padding: 18px; }
+}

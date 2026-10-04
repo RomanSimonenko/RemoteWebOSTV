@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { TvSetup } from './TvSetup.js';
 import { Home } from './Home.js';
 
@@ -77,7 +77,7 @@ test('validates literal private IPv4 and sends one protected pair request despit
   expect(fetch).toHaveBeenCalledTimes(2);
   expect(fetch.mock.calls[1]).toEqual(['/api/tv/operations', expect.objectContaining({ method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken }, body: '{"action":"pair","host":"192.168.1.20"}' })]);
   await act(async () => { pending.resolve(response(operation, 202)); });
-  expect(screen.getByText('Подтвердите доступ на экране телевизора.')).toBeTruthy();
+  expect(within(screen.getByRole('dialog', { name: 'Настройки телевизора' })).getByText('Подтвердите доступ на экране телевизора.')).toBeTruthy();
   expect(screen.getByRole('status', { name: 'Соединение с телевизором' }).textContent).toBe('Сопряжение');
 });
 
@@ -87,11 +87,11 @@ test('restores server deadline on reload, keeps an expired operation running unt
     .mockResolvedValueOnce(response({ ...operation, status: 'cancelled', error: { code: 'CANCELLED', message: 'Операция отменена.' } }));
   vi.stubGlobal('fetch', fetch);
   await mount();
-  expect(screen.getByText('Осталось: 5 с')).toBeTruthy();
+  expect(within(screen.getByRole('dialog', { name: 'Настройки телевизора' })).getByText('Осталось: 5 с')).toBeTruthy();
   expect(fetch).toHaveBeenCalledTimes(1);
   vi.setSystemTime(72000);
   await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
-  expect(screen.getByText('Осталось: 0 с')).toBeTruthy();
+  expect(within(screen.getByRole('dialog', { name: 'Настройки телевизора' })).getByText('Осталось: 0 с')).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Отменить' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Отменить' }));
   await act(async () => {});
@@ -208,8 +208,8 @@ test.each(['running', 'cancelled'])('a fresh snapshot replaces accepted %s opera
   await act(async () => {});
   // A ends and a second authenticated tab starts B before this tab sees A's terminal snapshot.
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
-  expect(screen.getByText('Осталось: 48 с')).toBeTruthy();
-  expect(screen.getByText('Подтвердите доступ на экране телевизора.')).toBeTruthy();
+  expect(within(screen.getByRole('dialog', { name: 'Настройки телевизора' })).getByText('Осталось: 48 с')).toBeTruthy();
+  expect(within(screen.getByRole('dialog', { name: 'Настройки телевизора' })).getByText('Подтвердите доступ на экране телевизора.')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Отменить' })); await act(async () => {});
   expect(fetch.mock.calls[3]?.[0]).toBe('/api/tv/operations/a-opaque-new-operation/cancel');
 });
@@ -280,7 +280,7 @@ test('background connection and power diagnostics leave focus in active settings
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
   await act(async () => { tvRead.resolve(response({ ...saved, error: { code: 'CONNECTION_LOST', message: 'Синтетическая потеря соединения.' } })); powerRead.resolve(response({ code: 'STORAGE_FAILED', message: 'Synthetic', requestId: 'synthetic' }, 503)); });
   expect(document.activeElement).toBe(input);
-  expect(screen.getByRole('dialog', { name: 'Настройки телевизора' }).contains(screen.getByText('Синтетическая потеря соединения.'))).toBe(true);
+  expect(within(screen.getByRole('dialog', { name: 'Настройки телевизора' })).getByText('Синтетическая потеря соединения.')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Закрыть настройки' }));
   expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Настройки' }));
 });

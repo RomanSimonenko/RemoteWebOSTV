@@ -16,7 +16,7 @@ afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.resto
 test('the single power button opens power-off confirmation without dispatching a command', async () => {
   const fetch = vi.fn().mockResolvedValue(response(off)); vi.stubGlobal('fetch', fetch); await mount();
   const buttons = screen.getAllByRole('button', { name: /^(Выключить ТВ|Включить ТВ|Питание ТВ)$/ });
-  expect(buttons).toHaveLength(1); expect(buttons[0]?.textContent).toBe('Выключить ТВ');
+  expect(buttons).toHaveLength(1); expect(buttons[0]?.getAttribute('aria-label')).toBe('Выключить ТВ');
   fireEvent.click(buttons[0]!);
   expect(screen.getByRole('dialog', { name: 'Выключить телевизор?' })).toBeTruthy();
   expect(fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);

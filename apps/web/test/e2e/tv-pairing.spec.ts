@@ -25,7 +25,9 @@ async function startPair(page: Page, tv: TvFixture) {
 async function savedTv(page: Page) {
   await expect(page.getByRole('heading', { name: 'Телевизор', exact: true })).toBeVisible();
   await expect(page.getByText('43UP76906LE', { exact: true })).toBeVisible();
-  await expect(page.getByText(tvHost, { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Настройки телевизора', exact: true }).getByText(`Сохранённый IP: ${tvHost}`, { exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
 }
 
 async function pairSuccessfully(page: Page, tv: TvFixture) {
@@ -136,9 +138,11 @@ test('unavailable TV and failed address change keep the saved identity through r
   await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Нет соединения');
   await savedTv(page);
 
+  await page.getByRole('button', { name: 'Настройки', exact: true }).click();
   await page.getByLabel('IP-адрес телевизора').fill(failedHost);
   await page.getByRole('button', { name: 'Изменить адрес', exact: true }).click();
   await expect(page.getByRole('alert').filter({ hasText: /^Телевизор недоступен по сети\.$/ })).toBeVisible();
+  await page.keyboard.press('Escape');
   expect((await tv.status(page)).tv).toEqual(original);
   expect(tv.policies.at(-1)).toEqual({ host: failedHost, prompt: false });
   await tv.restart();
@@ -173,9 +177,11 @@ test('revoked saved key requires explicit repair and reload never starts another
   const permission = gate();
   await tv.replaceTv({ kind: 'deferred-pairing', gate: permission.promise });
   try {
+    await page.getByRole('button', { name: 'Настройки', exact: true }).click();
     await page.getByRole('button', { name: 'Повторить сопряжение', exact: true }).click();
     await tv.tv.waitForRequestCount(1);
-    await expect(page.getByText('Подтвердите доступ на экране телевизора.')).toBeVisible();
+    await expect(page.getByRole('dialog', { name: 'Настройки телевизора', exact: true }).getByText('Подтвердите доступ на экране телевизора.')).toBeVisible();
+    await page.keyboard.press('Escape');
     expect(tv.policies.at(-1)).toEqual({ host: tvHost, prompt: true });
     permission.release();
     await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Подключён');

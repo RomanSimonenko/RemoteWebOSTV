@@ -18,7 +18,7 @@ export function Setup({ busy, error, onSubmit }: Props) {
     setValidationError('');
     onSubmit(parsed.data);
   }
-  return <section>
+  return <section className="form-card">
     <h1>Первичная настройка</h1>
     <p>Введите одноразовый токен из терминала и создайте владельца.</p>
     <form onSubmit={submit}>

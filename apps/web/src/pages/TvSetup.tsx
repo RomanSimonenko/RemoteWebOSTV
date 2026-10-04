@@ -106,10 +106,12 @@ export function TvSetup({ csrfToken, onSessionExpired, settingsOpen, onCloseSett
     </div>}
   </>;
   return <section className="tv-card">
-    <h1>{tv ? 'Телевизор' : 'Телевизор ещё не настроен'}</h1>
-    {tv && <p>{tv.identity.model}</p>}
-    <p role="status" aria-label="Соединение с телевизором" aria-live="polite">{connectionText}</p>
-    {!settingsOpen && activity}
+    <div className={tv ? 'tv-summary' : undefined}>
+      <h1>{tv ? 'Телевизор' : 'Телевизор ещё не настроен'}</h1>
+      {tv && <p className="tv-model">{tv.identity.model}</p>}
+      <p className="connection-status" data-connection={error ? 'unknown' : status?.connection} role="status" aria-label="Соединение с телевизором" aria-live="polite">{connectionText}</p>
+    </div>
+    <div className={settingsOpen ? 'reserved-activity' : undefined} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{activity}</div>
     {!tv && <>{addressForm}<button type="button" disabled={loading} onClick={refresh}>Обновить статус</button></>}
     {tv && <PowerControls csrfToken={csrfToken} active settingsOpen={settingsOpen} settingsTarget={settingsTarget} {...(onConfirmationChange ? { onConfirmationChange } : {})} onSessionExpired={onSessionExpired} onStateChange={setPowerState} />}
     {tv && <Remote csrfToken={csrfToken} active interactionBlocked={settingsOpen} onSessionExpired={onSessionExpired} />}

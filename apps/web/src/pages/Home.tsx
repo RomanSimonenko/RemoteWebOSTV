@@ -15,7 +15,7 @@ export function Home({ username, csrfToken, tvActive, busy, error, onLogout, onS
         <button type="button" disabled={busy} onClick={onLogout}>{busy ? 'Выход…' : 'Выйти'}</button>
       </div>
     </header>
-    <p>Вы вошли как {username}.</p>
+    <p className="session-caption">Вы вошли как {username}.</p>
     {tvActive && <TvSetup csrfToken={csrfToken} settingsOpen={settingsOpen} onCloseSettings={() => setSettingsOpen(false)} onConfirmationChange={setConfirmingPower} onSessionExpired={onSessionExpired} />}
     {error}
   </section>;

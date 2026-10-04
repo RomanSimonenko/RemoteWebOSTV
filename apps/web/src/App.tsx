@@ -60,8 +60,8 @@ export function App() {
   const error = message ? <p ref={errorRef} tabIndex={-1} role="alert" className="error">{message}</p> : null;
   return <main className="shell">
     {view !== 'home' && <header><p className="eyebrow">Remote WebOS TV</p></header>}
-    {view === 'loading' && <p role="status">Загрузка…</p>}
-    {view === 'error' && <section><h1>Не удалось загрузить приложение</h1>{error}<button type="button" onClick={() => window.location.reload()}>Повторить</button></section>}
+    {view === 'loading' && <p className="form-card" role="status">Загрузка…</p>}
+    {view === 'error' && <section className="form-card"><h1>Не удалось загрузить приложение</h1>{error}<button type="button" onClick={() => window.location.reload()}>Повторить</button></section>}
     {view === 'setup' && <Setup busy={busy} error={error} onSubmit={(input) => submit(async () => {
       await api.setup(input);
       setView('login');

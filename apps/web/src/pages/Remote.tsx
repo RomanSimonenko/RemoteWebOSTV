@@ -20,8 +20,14 @@ const rejectionMessages = {
 };
 const buttons: ReadonlyArray<readonly [BasicTvButton, string]> = [
   ['UP', 'Вверх'], ['LEFT', 'Влево'], ['ENTER', 'OK'], ['RIGHT', 'Вправо'], ['DOWN', 'Вниз'],
-  ['BACK', 'Назад'], ['HOME', 'Домой'], ['VOLUME_UP', 'Громкость +'], ['VOLUME_DOWN', 'Громкость −'], ['MUTE', 'Без звука'],
+  ['HOME', 'Домой'], ['BACK', 'Назад'], ['VOLUME_DOWN', 'Громкость −'], ['MUTE', 'Без звука'], ['VOLUME_UP', 'Громкость +'],
 ];
+const iconPaths: Partial<Record<BasicTvButton, string>> = {
+  UP: 'm6 15 6-6 6 6', DOWN: 'm6 9 6 6 6-6', LEFT: 'm15 6-6 6 6 6', RIGHT: 'm9 6 6 6-6 6',
+  HOME: 'm3 11 9-8 9 8M6 9v12h12V9', BACK: 'm9 5-6 6 6 6M3 11h11a6 6 0 0 1 0 12',
+  VOLUME_DOWN: 'M3 10h4l5-4v12l-5-4H3zM16 12h6', VOLUME_UP: 'M3 10h4l5-4v12l-5-4H3zM16 12h6M19 9v6',
+  MUTE: 'M3 10h4l5-4v12l-5-4H3zM17 9l5 6M22 9l-5 6',
+};
 const keys: Readonly<Record<string, BasicTvButton>> = {
   ArrowUp: 'UP', ArrowDown: 'DOWN', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT', Enter: 'ENTER',
   Escape: 'BACK', Home: 'HOME', '+': 'VOLUME_UP', '-': 'VOLUME_DOWN', m: 'MUTE', M: 'MUTE',
@@ -125,12 +131,18 @@ export function Remote({ csrfToken, active, onSessionExpired, interactionBlocked
   if (!active) return null;
   const disabled = interactionBlocked || busy || !state?.enabled;
   const explanation = readError || (state ? state.enabled ? '' : reasons[state.reason] : 'Проверяем доступность пульта…');
+  const controls = (entries: typeof buttons) => entries.map(([button, label]) => <button type="button" key={button} aria-label={label} className={button === 'ENTER' ? 'ok-button' : undefined} style={{ gridArea: button }} disabled={disabled} onClick={() => void send(button)}>
+    {iconPaths[button] && <svg aria-hidden="true" viewBox="0 0 24 24"><path d={iconPaths[button]} /></svg>}
+    {button === 'ENTER' ? 'OK' : !['UP', 'DOWN', 'LEFT', 'RIGHT'].includes(button) && <span>{label}</span>}
+  </button>);
   return <div role="group" aria-label="Пульт" aria-describedby="remote-help" aria-busy={busy} tabIndex={0} className="remote" onKeyDown={keyDown}>
-    <h2>Пульт</h2>
-    <p id="remote-help">Клавиатура при фокусе на пульте: стрелки, Enter — OK, Escape — назад, Home — домой, +/− — громкость, M — без звука.</p>
+    <h2 className="visually-hidden">Пульт</h2>
     {explanation && <p>{explanation}</p>}
-    <div className="remote-buttons">{buttons.map(([button, label]) => <button type="button" key={button} style={{ gridArea: button }} disabled={disabled} onClick={() => void send(button)}>{label}</button>)}</div>
+    <div role="group" aria-label="Навигация" className="remote-buttons d-pad">{controls(buttons.slice(0, 5))}</div>
+    <div role="group" aria-label="Домой и назад" className="remote-buttons home-back">{controls(buttons.slice(5, 7))}</div>
+    <div role="group" aria-label="Громкость" className="remote-buttons volume">{controls(buttons.slice(7))}</div>
     <p role="status" aria-live="polite">{busy ? 'Отправляем команду…' : feedback && !feedback.alert ? feedback.text : ''}</p>
     {feedback?.alert && <p role="alert" className="error">{feedback.text}</p>}
+    <details className="keyboard-help"><summary>Управление с клавиатуры</summary><p id="remote-help">Клавиатура при фокусе на пульте: стрелки, Enter — OK, Escape — назад, Home — домой, +/− — громкость, M — без звука.</p></details>
   </div>;
 }
