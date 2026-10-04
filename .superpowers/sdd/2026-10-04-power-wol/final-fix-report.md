@@ -50,3 +50,7 @@ Fresh `cmp` checks confirmed staging adapter source and installed lgtv2 producer
 3. Keep the current requirement and hold publication until a documented upstream/vendor key-only registration contract and compatible producer are supplied. Validate that path before implementation through actual wire samples, revoked/valid/missing key cases, explicit repair and adjacent cancellation/fallback cleanup. Hardware scope would need separate authorization.
 
 No choice was made on the user's behalf. The Important review item remains unresolved; the branch must not be presented as satisfying zero automatic pairing prompts. There is no source patch to review or deploy from this wave.
+
+## Subsequent user decision — 2026-10-04
+
+After this investigation, the user explicitly accepted option 1: retain bounded saved-key recovery and document that a revoked key may cause a TV access prompt before the adapter rejects the prompt-requiring response. The spec and acceptance criteria now require rejection/no replacement-key save/no automatic retry after that response, not a guarantee of zero displayed prompts for revoked keys. This is a user-approved requirement adjustment, not a production fix. The controller removes the publication blocker for this finding; separate merge authorization and GitHub workflow remain required. The NEEDS_CONTEXT verdict above records the original investigation checkpoint.
