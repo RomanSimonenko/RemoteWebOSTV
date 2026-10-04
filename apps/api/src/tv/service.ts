@@ -101,7 +101,11 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
 
   function disconnect(adapter: WebOsAdapter): Promise<void> {
     if (cleanup?.adapter === adapter) return cleanup.promise;
-    if (activeAdapter === adapter) { activeAdapter = undefined; remoteCapability = undefined; }
+    if (activeAdapter === adapter) {
+      activeAdapter = undefined; remoteCapability = undefined;
+      // Disposing the owned connection cannot prove physical TV power state.
+      if (connection === 'available') connection = 'unavailable';
+    }
     const pending = Promise.resolve().then(() => adapter.disconnect()).catch((cause: unknown) => {
       unsafeCleanup = new TvServiceError('CLEANUP_FAILED', 500, { cause });
       throw unsafeCleanup;

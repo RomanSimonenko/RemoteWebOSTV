@@ -39,12 +39,17 @@ describe('TV lifecycle barriers', () => {
     } finally { cleanup.resolve(); await h.service.close(); }
   });
 
-  test('replacement timeout publishes even while disconnecting the previous adapter', async () => {
+  test.each([
+    ['repair', 'pairing'],
+    ['reconnect', 'connecting'],
+  ] as const)('replacement %s preserves its connection phase while disconnecting the previous adapter', async (action, connection) => {
     const h = harness(true); h.service.start({ action: 'reconnect' }); await drain(); await succeed(h.adapters[0]!);
     const cleanup = barrier<void>(); h.adapters[0]!.disconnectResult = cleanup.promise;
-    h.service.start({ action: 'repair' }); await drain(); h.scheduler.advance(60_000); await drain();
+    h.service.start({ action }); await drain();
     try {
-      expect((await h.service.status()).operation).toMatchObject({ status: 'failed', error: { code: 'PAIRING_TIMEOUT' } });
+      expect((await h.service.status()).connection).toBe(connection);
+      h.scheduler.advance(60_000); await drain();
+      expect((await h.service.status()).operation).toMatchObject({ status: 'failed', error: { code: action === 'reconnect' ? 'RECOVERY_TIMEOUT' : 'PAIRING_TIMEOUT' } });
       expect(h.adapters).toHaveLength(1); expect(h.writes).toEqual([]);
       expect(() => h.service.start({ action: 'reconnect' })).toThrowError(expect.objectContaining({ statusCode: 409 }));
     } finally { cleanup.resolve(); await h.service.close(); }

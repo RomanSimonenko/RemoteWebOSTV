@@ -46,6 +46,7 @@ describe('owned TV power operations', () => {
   test('off cancelled before its worker preserves the verified connection and sends nothing', async () => {
     const h = await connected(); h.service.startPower(off, 'owner'); await h.service.cancelOwnedPower('owner');
     expect(h.adapters[0]!.powerOffs).toBe(0); expect(h.service.powerState()).toMatchObject({ canPowerOff: true, operation: { status: 'cancelled', delivery: 'not_sent' } });
+    expect(h.adapters[0]!.closed).toBe(false); expect((await h.service.status()).connection).toBe('available');
     expect(h.service.remoteState()).toEqual({ enabled: true, reason: null }); await h.service.close();
   });
 
@@ -79,10 +80,14 @@ describe('owned TV power operations', () => {
     await f.service.close(); await base.service.close();
   });
 
-  test.each(['AUTHORIZATION_FAILED', 'INVALID_TV_RESPONSE'] as const)('off observation %s is failure and never physical-off success', async (code) => {
-    const h = await connected(); h.adapters[0]!.readResult = barrier(); h.service.startPower(off, 'owner'); await drain();
+  test.each([
+    ['AUTHORIZATION_FAILED', 'authorization_error'],
+    ['INVALID_TV_RESPONSE', 'compatibility_error'],
+  ] as const)('off observation %s is failure and never physical-off success', async (code, connection) => {
+    const h = await connected(); h.service.setMac('02:00:00:00:00:01'); h.adapters[0]!.readResult = barrier(); h.service.startPower(off, 'owner'); await drain();
     h.adapters[0]!.readResult.reject(new WebOsError(code, 'synthetic')); await drain();
     expect(h.service.powerState().operation).toMatchObject({ status: 'failed', delivery: 'sent', error: { code } });
+    expect((await h.service.status()).connection).toBe(connection); expect(h.service.powerState().canWake).toBe(false);
     h.scheduler.advance(60_000); await h.service.status(); await drain(); expect(h.adapters).toHaveLength(1); await h.service.close();
   });
 
@@ -156,15 +161,46 @@ describe('owned TV power operations', () => {
     h.service.start({ action: 'reconnect' }); await drain(); await succeed(h.adapters[1]!); await h.service.close();
   });
 
-  test('power off available probes use one second cooldown and expire unconfirmed at five seconds', async () => {
-    const h = await connected(); const adapter = h.adapters[0]!;
-    h.service.startPower(off, 'owner'); await drain(); expect(adapter.reads).toBe(2);
-    h.scheduler.advance(999); await drain(); expect(adapter.reads).toBe(2);
-    h.scheduler.advance(1); await drain(); expect(adapter.reads).toBe(3);
-    h.scheduler.advance(4_000); await drain();
-    expect(h.service.powerState().operation).toMatchObject({ status: 'failed', delivery: 'sent', error: { code: 'POWER_OFF_UNCONFIRMED' } });
-    expect((await h.service.status()).connection).toBe('available');
-    expect(adapter.powerOffs).toBe(1); await h.service.close();
+  test('unconfirmed off disposes the connection and admits explicit wake only after cleanup settles', async () => {
+    const h = await connected(); h.service.setMac('02:00:00:00:00:01'); const adapter = h.adapters[0]!;
+    const cleanup = barrier<void>(); adapter.disconnectResult = cleanup.promise;
+    try {
+      h.service.startPower(off, 'owner'); await drain(); expect(adapter.reads).toBe(2);
+      h.scheduler.advance(999); await drain(); expect(adapter.reads).toBe(2);
+      h.scheduler.advance(1); await drain(); expect(adapter.reads).toBe(3);
+      h.scheduler.advance(4_000); await drain();
+      expect(h.service.powerState().operation).toMatchObject({ status: 'failed', delivery: 'sent', phase: 'finished', error: { code: 'POWER_OFF_UNCONFIRMED' } });
+      expect((await h.service.status()).connection).toBe('unavailable');
+      expect(adapter.closed).toBe(true); expect(h.service.powerState()).toMatchObject({ canPowerOff: false, canWake: false });
+      expect(h.service.remoteState()).toEqual({ enabled: false, reason: 'BUSY' });
+      expect(() => h.service.startPower(wake, 'owner')).toThrowError(expect.objectContaining({ code: 'OPERATION_CONFLICT' }));
+      cleanup.resolve(); await drain();
+      expect(h.service.powerState()).toMatchObject({ canPowerOff: false, canWake: true, operation: { status: 'failed', delivery: 'sent', error: { code: 'POWER_OFF_UNCONFIRMED' } } });
+      expect(h.service.remoteState()).toEqual({ enabled: false, reason: 'UNAVAILABLE' });
+      h.scheduler.advance(60_000);
+      for (let poll = 0; poll < 3; poll++) expect((await h.service.status()).connection).toBe('unavailable');
+      await drain(); expect(h.adapters).toHaveLength(1); expect(adapter.powerOffs).toBe(1); expect(adapter.wakes).toEqual([]); expect(adapter.reads).toBe(3);
+      h.service.startPower(wake, 'owner');
+      expect(() => h.service.startPower(wake, 'owner')).toThrowError(expect.objectContaining({ code: 'OPERATION_CONFLICT' }));
+      await drain(); expect(h.adapters[1]!.wakes).toEqual([['02:00:00:00:00:01']]);
+      await succeed(h.adapters[2]!);
+      expect(h.service.powerState().operation).toMatchObject({ action: 'wake', status: 'succeeded', delivery: 'sent' });
+      expect((await h.service.status()).connection).toBe('available');
+    } finally { cleanup.resolve(); await h.service.close(); }
+  });
+
+  test('unconfirmed off cleanup failure disables wake and retains the unconfirmed result', async () => {
+    const h = await connected(); h.service.setMac('02:00:00:00:00:01'); const adapter = h.adapters[0]!;
+    const cleanup = barrier<void>(); adapter.disconnectResult = cleanup.promise;
+    try {
+      h.service.startPower(off, 'owner'); await drain(); h.scheduler.advance(5_000); await drain();
+      cleanup.reject(new Error('synthetic cleanup failure')); await drain();
+      expect((await h.service.status()).connection).toBe('unavailable');
+      expect(h.service.powerState()).toMatchObject({ canPowerOff: false, canWake: false, operation: { status: 'failed', delivery: 'sent', error: { code: 'POWER_OFF_UNCONFIRMED_CLEANUP_FAILED' } } });
+      expect(h.service.remoteState()).toEqual({ enabled: false, reason: 'UNAVAILABLE' });
+      expect(() => h.service.startPower(wake, 'owner')).toThrowError(expect.objectContaining({ code: 'CLEANUP_FAILED' }));
+      h.scheduler.advance(60_000); await h.service.status(); await drain(); expect(h.adapters).toHaveLength(1); expect(adapter.wakes).toEqual([]);
+    } finally { cleanup.resolve(); await expect(h.service.close()).rejects.toMatchObject({ code: 'CLEANUP_FAILED' }); }
   });
 
   test('ambiguous off cancellation publishes unknown but retains ownership until send and cleanup settle', async () => {
@@ -182,11 +218,13 @@ describe('owned TV power operations', () => {
   });
 
   test('off timeout without ACK is unknown and late completion cannot publish success', async () => {
-    const h = await connected(); const adapter = h.adapters[0]!; const pending = barrier<void>(); adapter.powerResult = pending.promise;
+    const h = await connected(); h.service.setMac('02:00:00:00:00:01'); const adapter = h.adapters[0]!; const pending = barrier<void>(); adapter.powerResult = pending.promise;
     h.service.startPower(off, 'owner'); await drain(); h.scheduler.advance(5_000); await drain();
     expect(h.service.powerState().operation).toMatchObject({ status: 'failed', delivery: 'unknown' });
     expect(() => h.service.setMac(null)).toThrowError(expect.objectContaining({ code: 'OPERATION_CONFLICT' }));
     pending.resolve(); await drain(); expect(h.service.powerState().operation?.status).toBe('failed');
+    expect((await h.service.status()).connection).toBe('unavailable');
+    expect(h.service.powerState()).toMatchObject({ canWake: true, operation: { status: 'failed', delivery: 'unknown', error: { code: 'POWER_OFF_UNCONFIRMED' } } });
     h.scheduler.advance(60_000); await h.service.status(); await drain(); expect(adapter.powerOffs).toBe(1); expect(h.adapters).toHaveLength(1); await h.service.close();
   });
 
