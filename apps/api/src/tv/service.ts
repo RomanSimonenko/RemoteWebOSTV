@@ -133,16 +133,15 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       }
       // Model/version fields cannot prove physical identity after an address change.
       // Invalid discovery is absence of WOL configuration, not a registration failure.
+      // Ordinary reconnect preserves an explicit clear as well as a configured MAC.
       const macAddress = input.action === 'change_address' || identityChanged
-        ? discoveredMac : previous?.macAddress ?? discoveredMac;
-      const replaceRegistration = input.action !== 'reconnect' || initialKey !== result.clientKey || identityChanged;
-      if (replaceRegistration || macAddress !== previous?.macAddress) {
-        let encryptedClientKey = previous?.encryptedClientKey;
-        if (replaceRegistration) {
-          try { encryptedClientKey = await abortable(Promise.resolve(cipher.encrypt(result.clientKey)), signal); }
-          catch (cause) { if (signal.aborted) throw signal.reason; if (cause instanceof WebOsError) throw cause; throw new WebOsError('KEY_STORE_WRITE_FAILED', 'Unable to encrypt the registered key', { cause }); }
-        }
-        const replacement: StoredTv = { host, identity: identity.data, encryptedClientKey: encryptedClientKey!, macAddress };
+        ? discoveredMac
+        : input.action === 'reconnect' ? previous!.macAddress : previous?.macAddress ?? discoveredMac;
+      if (input.action !== 'reconnect' || initialKey !== result.clientKey || identityChanged) {
+        let encryptedClientKey: EncryptedEnvelopeV1;
+        try { encryptedClientKey = await abortable(Promise.resolve(cipher.encrypt(result.clientKey)), signal); }
+        catch (cause) { if (signal.aborted) throw signal.reason; if (cause instanceof WebOsError) throw cause; throw new WebOsError('KEY_STORE_WRITE_FAILED', 'Unable to encrypt the registered key', { cause }); }
+        const replacement: StoredTv = { host, identity: identity.data, encryptedClientKey, macAddress };
         check(context);
         // Synchronous replace is the commit point: no await between check and commit.
         try { repository.replace(replacement); }
