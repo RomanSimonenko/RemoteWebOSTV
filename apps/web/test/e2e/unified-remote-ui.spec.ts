@@ -12,6 +12,7 @@ const settings = (page: Page) => page.getByRole('dialog', { name: 'Настро�
 // Full API/SQLite/adapter contracts remain covered by the existing TV fixture specs.
 async function fixture(page: Page, mode = 'idle') {
   await page.clock.install({ time: new Date('2026-10-04T12:00:00Z') });
+  await page.clock.pauseAt(new Date('2026-10-04T12:00:01Z'));
   const now = Date.parse('2026-10-04T12:00:00Z');
   const status: { -readonly [Key in keyof TvStatusResponse]: TvStatusResponse[Key] } = { tv: { host: '192.168.50.20', identity: { model: 'Synthetic TV' } }, connection: 'available', operation: null };
   const power: { -readonly [Key in keyof TvPowerState]: TvPowerState[Key] } = { mac: '02:00:00:00:00:03', canPowerOff: true, canWake: false, operation: null };
