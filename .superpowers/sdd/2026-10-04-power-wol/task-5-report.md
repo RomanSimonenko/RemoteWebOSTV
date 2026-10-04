@@ -58,3 +58,31 @@ Final executable/test file hashes at0e7b435:
 No production bypass environment or public mock flag; WOL injection stays below real adapter boundary. Auth/Origin/CSRF/SQLite paths remain real. Only synthetic TV/account/MAC identifiers appear. No permanent keys/database read, live server8080 interaction, real TV command, restart or worktree build occurred. Existing user graft and SDD evidence preserved. No external message/push/PR.
 
 Transport delivery does not prove physical effect; loopback does not prove LAN broadcast. Real hardware/live update, account preservation, pairing/no new prompt and physical off/wake must be validated by controller/user separately. Whole-branch independent review is controller-owned. Existing clean checkout dist/typecheck bootstrapping gap remains a disclosed operational limitation.
+
+## Task 5 review fix round 1
+
+Review BASE `ca4c7d5`; one Important lifecycle finding and one Minor synchronization finding addressed. Controller's intervening `f08c24f` is documentation-only manual checkpoint, separate from this test-only correction. Controller owns manual results and the independently discovered service state defect; this round changes no production code, live app/data or TV behavior. Earlier hardware-pending statements describe the automatic phase and are not acceptance of later manual work.
+
+The original receiver awaited a promise with no timeout/error rejection, and binding preceded protected cleanup. A two-packet burst could leave that promise and socket alive after Vitest timeout. Extracted its existing lifecycle into a local test helper and added deterministic assertions before fixing: controlled receive deadline, explicit receiver error, and error before listening. RED session72436:3/3 failed as expected (deadline not scheduled twice; receiver not closed after binding failure once); real loopback case excluded from this RED filter. Test-owned emergency cleanup releases controlled receivers without concealing any asserted result.
+
+The helper now owns binding, send, reception and cleanup within a1500ms receive deadline. Error events reject with the original cause; missing packets reject with the exact received count. Success requires both three packets and sender completion. Finally clears deadline/listeners, aborts the owned sender, waits for send/receiver close, and preserves additional cleanup errors. An explicit ERR_SOCKET_DGRAM_NOT_RUNNING branch recognizes that failed binding can leave no active socket to close. Three controlled lifecycle tests use emitted events and a manually expired deadline, without natural packet loss or sleeps. The fourth test still receives actual UDP loopback packets and verifies literal bytes and sender close.
+
+Other-session logout now awaits that page's `Вход` heading before asserting the initiating wake signal remains un-aborted. Focused E2E still verifies forbidden foreign cancel, foreign logout isolation and initiating logout cleanup.
+
+Fresh staging checks:
+
+| Check | Session | Result |
+| --- | --- | --- |
+| env pnpm_config_verify_deps_before_run=false pnpm --filter @remote-webos-tv/webos exec vitest run test/wake-on-lan.integration.test.ts |60093|4/4pass,208ms; exit0 |
+| env -u NO_COLOR pnpm_config_verify_deps_before_run=false pnpm --filter @remote-webos-tv/web test:e2e tv-power.spec.ts -g 'another session cannot cancel wake' |25802|1/1pass,7.1s; exit0 |
+| env pnpm_config_verify_deps_before_run=false pnpm typecheck |43631|all five workspace projects; exit0 |
+| git diff --check in original worktree |fresh before correction commit|exit0 |
+
+No full unit/Chromium rerun or build was needed: only these two test files changed, and production artifacts remain identical to the accepted staged build. Results above do not replace the earlier810/23 checkpoint evidence with an invented new full-suite count. Source edits used apply_patch in the original; two test files were explicitly copied into the same isolated staging directory before execution. The production snapshot at0e7b435 equals ca4c7d5/f08c24f production (those later differences are documentation only). Exact source hashes matched before and after checks:
+
+- packages/webos/test/wake-on-lan.integration.test.ts: `13bfc16733ea9edef72cb0b3f0870a2397d8f3c680ffe491b187204419f8f833`.
+- apps/web/test/e2e/tv-power.spec.ts: `d43457887071172c61590f91c0457bd5415a7b29d80c92fa6e0f63417e635139`.
+
+Aggregate tracked source manifest for apps, packages, package.json, pnpm-lock.yaml, pnpm-workspace.yaml and tsconfig.base.json also matches original/staging after checks: `f06c9dc48533ccd94d972df1d8d31de78bd1adb54498d87d78480790491e2d04`, using the same per-file shasum pipeline as above. Documentation-only controller changes are outside that executable-source manifest.
+
+Self-review: correction stays in the owning test lifecycle; all timeout/error/success paths free receiver listeners and deadline, sender cleanup is awaited and secondary errors remain visible. Logout observation is an actual UI/auth completion barrier. No production bypass, private identifier, network destination outside loopback, dependency change, source build, worktree dist write, permanent-data read/write or hardware command. Both review findings are implemented and narrowly verified; independent scoped re-review remains controller-owned.
