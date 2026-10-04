@@ -85,6 +85,33 @@ test('moving MAC settings between targets keeps one power read and the accepted 
   } finally { view.unmount(); first.remove(); second.remove(); }
 });
 
+test('new power diagnostics focus the retained background alert after settings close', async () => {
+  vi.useFakeTimers();
+  const target = document.createElement('div'); document.body.append(target);
+  let detail = 'Первая синтетическая ошибка питания.';
+  vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(response({ ...wake, operation: { ...operation, status: 'failed', phase: 'finished', error: { code: 'SYNTHETIC_FAILURE', message: detail } } }))));
+  const onSessionExpired = vi.fn();
+  const presentation = (settingsOpen: boolean) => <><button type="button">Настройки</button><PowerControls csrfToken={csrfToken} active settingsTarget={target} settingsOpen={settingsOpen} onSessionExpired={onSessionExpired} /></>;
+  const view = render(presentation(false));
+  try {
+    await act(async () => {});
+    expect(document.activeElement).toBe(screen.getByRole('alert'));
+    view.rerender(presentation(true));
+    const input = within(target).getByLabelText('MAC-адрес телевизора'); input.focus();
+    detail = 'Ошибка обновилась внутри настроек.';
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(document.activeElement).toBe(input);
+    expect(within(target).getByRole('alert').textContent).toBe(detail);
+    view.rerender(presentation(false));
+    const opener = screen.getByRole('button', { name: 'Настройки' }); opener.focus();
+    detail = 'Новая ошибка после закрытия настроек.';
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toBe(detail);
+    expect(document.activeElement).toBe(alert);
+  } finally { view.unmount(); target.remove(); }
+});
+
 test('cancelling explicit power-off confirmation sends no mutation', async () => {
   const fetch = vi.fn().mockResolvedValue(response(off)); vi.stubGlobal('fetch', fetch); await mount();
   fireEvent.click(screen.getByRole('button', { name: 'Выключить ТВ' }));

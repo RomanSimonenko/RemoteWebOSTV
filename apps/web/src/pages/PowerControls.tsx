@@ -64,16 +64,18 @@ export function PowerControls({ csrfToken, active, onSessionExpired, onStateChan
 
   if (!active) return null;
   const unavailable = !state?.mac ? 'Для включения сохраните MAC-адрес телевизора в настройках.' : 'Питание сейчас недоступно. Обновите статус.';
-  const activity = <>
+  // Only the retained background diagnostic owns autofocus; modal teardown
+  // must not clear its ref while the background paragraph remains mounted.
+  const activity = (withFocusRef: boolean) => <>
     <p role="status" aria-label="Питание телевизора" aria-live="polite">{error ? 'Статус питания неизвестен' : loading ? 'Загрузка статуса питания…' : operation && (running || operation.status === 'succeeded') ? progress(operation) : busy ? 'Выполняется запрос…' : !powerAction && !diagnostic ? unavailable : ''}</p>
-    {diagnostic && <p ref={alert} tabIndex={-1} role="alert" className="error">{diagnostic}</p>}
+    {diagnostic && <p ref={withFocusRef ? alert : undefined} tabIndex={-1} role="alert" className="error">{diagnostic}</p>}
     {running && <div>
       <p>Осталось: {Math.max(0, Math.ceil((operation.deadlineAt - now) / 1000))} с</p>
       {operation.action !== 'recover' && <button type="button" disabled={busy} onClick={() => cancel(operation.id)}>Отменить ожидание</button>}
     </div>}
   </>;
   const settings = <>
-    {settingsOpen && activity}
+    {settingsOpen && activity(false)}
     <form onSubmit={(event) => { event.preventDefault(); saveMac(mac.trim() || null); }} noValidate>
       <label>MAC-адрес телевизора<input autoComplete="off" value={mac} disabled={disabled} onChange={(event) => setMac(event.target.value)} /></label>
       <button type="submit" disabled={disabled}>Сохранить MAC</button>
@@ -85,7 +87,7 @@ export function PowerControls({ csrfToken, active, onSessionExpired, onStateChan
   </>;
   return <div className="power-controls" role="group" aria-label="Питание телевизора" aria-busy={busy}>
     <h2 className="visually-hidden">Питание телевизора</h2>
-    <div className={settingsOpen ? 'reserved-activity' : undefined} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{activity}</div>
+    <div className={settingsOpen ? 'reserved-activity' : undefined} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{activity(true)}</div>
     <button className="power-button" ref={powerButton} type="button" aria-label={powerAction === 'power_off' ? 'Выключить ТВ' : powerAction === 'wake' ? 'Включить ТВ' : 'Питание ТВ'} title={powerAction === 'power_off' ? 'Выключить ТВ' : powerAction === 'wake' ? 'Включить ТВ' : 'Питание ТВ'} disabled={powerDisabled} onClick={() => { if (powerDisabled) return; if (powerAction === 'power_off') setConfirming(true); else if (powerAction === 'wake') start('wake'); }}><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2v10M6.3 5.7a8 8 0 1 0 11.4 0" /></svg></button>
     {confirming && <div className="power-confirmation" role="dialog" aria-label="Выключить телевизор?" aria-describedby="power-confirm-help">
       <p id="power-confirm-help">Выключить телевизор? Потеря соединения не подтверждает фактическое выключение.</p>

@@ -86,8 +86,10 @@ export function TvSetup({ csrfToken, onSessionExpired, settingsOpen, onCloseSett
   }
 
   const connectionText = error ? 'Статус неизвестен' : progress || (status ? connections[status.connection] : 'Загрузка статуса…');
-  const activity = <>
-    {diagnostic && <p ref={alert} tabIndex={-1} role="alert" className="error">{diagnostic}</p>}
+  // Keep autofocus ownership on the retained background diagnostic, separate
+  // from the modal copy that unmounts when settings close.
+  const activity = (withFocusRef: boolean) => <>
+    {diagnostic && <p ref={withFocusRef ? alert : undefined} tabIndex={-1} role="alert" className="error">{diagnostic}</p>}
     {running && !powerRunning && <div>
       {(operation.action === 'pair' || operation.action === 'repair') && <p>Подтвердите доступ на экране телевизора.</p>}
       <p>Осталось: {Math.max(0, Math.ceil((operation.deadlineAt - now) / 1000))} с</p>
@@ -111,12 +113,12 @@ export function TvSetup({ csrfToken, onSessionExpired, settingsOpen, onCloseSett
       {tv && <p className="tv-model">{tv.identity.model}</p>}
       <p className="connection-status" data-connection={error ? 'unknown' : status?.connection} role="status" aria-label="Соединение с телевизором" aria-live="polite">{connectionText}</p>
     </div>
-    <div className={settingsOpen ? 'reserved-activity' : undefined} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{activity}</div>
+    <div className={settingsOpen ? 'reserved-activity' : undefined} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{activity(true)}</div>
     {!tv && <>{addressForm}<button type="button" disabled={loading} onClick={refresh}>Обновить статус</button></>}
     {tv && <PowerControls csrfToken={csrfToken} active settingsOpen={settingsOpen} settingsTarget={settingsTarget} {...(onConfirmationChange ? { onConfirmationChange } : {})} onSessionExpired={onSessionExpired} onStateChange={setPowerState} />}
     {tv && <Remote csrfToken={csrfToken} active interactionBlocked={settingsOpen} onSessionExpired={onSessionExpired} />}
     <SettingsDialog open={settingsOpen} onClose={onCloseSettings}>
-      {settingsOpen && activity}
+      {settingsOpen && activity(false)}
       {tv ? <><p>Текущий телевизор: {tv.identity.model}</p><p>Соединение: {connectionText}</p><p>Сохранённый IP: {tv.host}</p>{addressForm}
         <button type="button" disabled={loading} onClick={refresh}>Обновить статус</button>
       </> : <p>Добавьте телевизор на основном экране.</p>}

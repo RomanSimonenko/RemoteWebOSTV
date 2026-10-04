@@ -285,6 +285,31 @@ test('background connection and power diagnostics leave focus in active settings
   expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Настройки' }));
 });
 
+test('new connection diagnostics focus the retained background alert after settings close', async () => {
+  vi.useFakeTimers();
+  let detail = 'Первая синтетическая ошибка соединения.';
+  vi.stubGlobal('fetch', vi.fn((path: RequestInfo | URL) => Promise.resolve(response(path === '/api/tv'
+    ? { ...saved, error: { code: 'SYNTHETIC_FAILURE', message: detail } }
+    : path === '/api/tv/power' ? { mac: null, canPowerOff: true, canWake: false, operation: null }
+    : { enabled: true, reason: null }))));
+  render(<Home username="synthetic-owner" csrfToken={csrfToken} tvActive busy={false} error={null} onLogout={vi.fn()} onSessionExpired={vi.fn()} />);
+  await act(async () => {});
+  expect(document.activeElement).toBe(screen.getByRole('alert'));
+  const gear = screen.getByRole('button', { name: 'Настройки' }); fireEvent.click(gear);
+  const input = screen.getByRole('textbox', { name: 'IP-адрес телевизора' }); input.focus();
+  detail = 'Ошибка обновилась внутри настроек.';
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(document.activeElement).toBe(input);
+  expect(within(screen.getByRole('dialog', { name: 'Настройки телевизора' })).getByRole('alert').textContent).toBe(detail);
+  fireEvent.click(screen.getByRole('button', { name: 'Закрыть настройки' }));
+  expect(document.activeElement).toBe(gear);
+  detail = 'Новая ошибка после закрытия настроек.';
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  const alert = screen.getByRole('alert');
+  expect(alert.textContent).toBe(detail);
+  expect(document.activeElement).toBe(alert);
+});
+
 test('losing power-off eligibility dismisses confirmation and unlocks settings', async () => {
   vi.useFakeTimers(); let powerReads = 0;
   vi.stubGlobal('fetch', vi.fn((path: RequestInfo | URL) => Promise.resolve(response(path === '/api/tv' ? saved : path === '/api/tv/power'
