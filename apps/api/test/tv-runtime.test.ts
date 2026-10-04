@@ -215,7 +215,7 @@ test('missing cipher with stored TV fails instead of creating a replacement key'
   const f = await fixture();
   const database = await openDatabase({ dataDir: f.config.dataDir });
   const cipher = await loadClientKeyCipher({ directory: f.config.dataDir, hasStoredKey: false });
-  createTvRepository(database.sqlite).replace({ host: '192.168.1.10', identity: { model: 'Synthetic Model' }, encryptedClientKey: cipher.encrypt('synthetic-key') });
+  createTvRepository(database.sqlite).replace({ host: '192.168.1.10', identity: { model: 'Synthetic Model' }, macAddress: null, encryptedClientKey: cipher.encrypt('synthetic-key') });
   database.close();
   await unlink(join(f.config.dataDir, 'tv-master.key'));
   await expect(createApiRuntime(f.config, f.options)).rejects.toThrow('TV master key is missing or invalid');
@@ -240,7 +240,7 @@ test('failure after TV initialization cleans the partially started service befor
   const f = await fixture();
   const seed = await openDatabase({ dataDir: f.config.dataDir });
   const cipher = await loadClientKeyCipher({ directory: f.config.dataDir, hasStoredKey: false });
-  createTvRepository(seed.sqlite).replace({ host: '192.168.1.10', identity: { model: 'Synthetic Model' }, encryptedClientKey: cipher.encrypt('synthetic-key') });
+  createTvRepository(seed.sqlite).replace({ host: '192.168.1.10', identity: { model: 'Synthetic Model' }, macAddress: null, encryptedClientKey: cipher.encrypt('synthetic-key') });
   seed.close();
   const cleanup = barrier<void>();
   const enteredCleanup = barrier<void>();

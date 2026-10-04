@@ -5,11 +5,81 @@ import Database from 'better-sqlite3';
 import { createTvService, type TvServiceDependencies } from '../src/tv/service.js';
 import { projectTvError, TvServiceError } from '../src/tv/operation.js';
 import { createTvRepository } from '../src/tv/repository.js';
-import { tvConfigTableSql } from '../src/storage/migrations.js';
+import { tvConfigTableSql, schemaMigrations } from '../src/storage/migrations.js';
 import { createStagingKeyStore } from '../src/tv/staging-key-store.js';
 import { harness, succeed, drain, pairing, snapshot, barrier, ControlledScheduler } from './support/tv-harness.js';
 
 describe('TV service persistence and projection', () => {
+  test('MAC discovery commits the first valid unicast address after snapshot succeeds', async () => {
+    const h = harness(); h.service.start({ action: 'pair', host: '192.168.1.10' }); await drain();
+    const adapter = h.adapters[0]!;
+    adapter.pairResult.resolve({ ...pairing, macAddresses: ['invalid', '01:00:00:00:00:01', '00:00:00:00:00:00', 'FF:FF:FF:FF:FF:FF', '02-ab-cd-ef-00-01', '02:00:00:00:00:02'] });
+    await adapter.enteredRead.promise;
+    expect(h.repository.load()).toBeNull();
+    adapter.readResult.resolve(snapshot); await drain();
+    expect(h.repository.load()?.macAddress).toBe('02:AB:CD:EF:00:01');
+    const status = await h.service.status();
+    expect(status.operation?.status).toBe('succeeded');
+    expect(tvStatusResponseSchema.safeParse(status).success).toBe(true);
+    expect(JSON.stringify(status)).not.toContain('macAddress');
+    expect(JSON.stringify(status)).not.toContain('02:AB:CD:EF:00:01');
+    await h.service.close();
+  });
+
+  test.each([{ macAddresses: [] }, { macAddresses: ['invalid', '01:00:00:00:00:01', 'FF:FF:FF:FF:FF:FF', '00:00:00:00:00:00'] }])('MAC discovery absence does not fail pairing: %j', async ({ macAddresses }) => {
+    const h = harness(); h.service.start({ action: 'pair', host: '192.168.1.10' }); await drain();
+    const adapter = h.adapters[0]!; adapter.pairResult.resolve({ ...pairing, macAddresses });
+    await adapter.enteredRead.promise; adapter.readResult.resolve(snapshot); await drain();
+    expect(h.repository.load()?.macAddress).toBeNull();
+    expect((await h.service.status()).operation?.status).toBe('succeeded');
+    await h.service.close();
+  });
+
+  test.each(['reconnect', 'repair'] as const)('MAC saved manually survives %s and registered key replacement', async (action) => {
+    const base = harness(true);
+    base.repository.replace({ ...base.repository.load()!, macAddress: '02:AB:CD:EF:00:01' });
+    const h = harness(true, { repository: base.repository });
+    h.service.start({ action }); await drain();
+    const adapter = h.adapters[0]!;
+    adapter.pairResult.resolve({ ...pairing, clientKey: 'synthetic-new-key', macAddresses: ['02:00:00:00:00:02'] });
+    await adapter.enteredRead.promise; adapter.readResult.resolve(snapshot); await drain();
+    expect(base.repository.load()?.macAddress).toBe('02:AB:CD:EF:00:01');
+    expect(h.cipher.decrypt(base.repository.load()!.encryptedClientKey)).toBe('synthetic-new-key');
+    await h.service.close(); await base.service.close();
+  });
+
+  test.each([{ macAddresses: ['02:00:00:00:00:02'], expected: '02:00:00:00:00:02' }, { macAddresses: [], expected: null }])('MAC change_address discards the old physical address even when model matches: %j', async ({ macAddresses, expected }) => {
+    const base = harness(true); base.repository.replace({ ...base.repository.load()!, macAddress: '02:AB:CD:EF:00:01' });
+    const h = harness(true, { repository: base.repository });
+    h.service.start({ action: 'change_address', host: '192.168.1.11' }); await drain();
+    const adapter = h.adapters[0]!; adapter.pairResult.resolve({ ...pairing, macAddresses });
+    await adapter.enteredRead.promise; adapter.readResult.resolve(snapshot); await drain();
+    expect(base.repository.load()?.macAddress).toBe(expected);
+    await h.service.close(); await base.service.close();
+  });
+
+  test('MAC changed identity cannot retain the old address on reconnect', async () => {
+    const base = harness(true); base.repository.replace({ ...base.repository.load()!, macAddress: '02:AB:CD:EF:00:01' });
+    const h = harness(true, { repository: base.repository });
+    h.service.start({ action: 'reconnect' }); await drain();
+    const adapter = h.adapters[0]!;
+    adapter.pairResult.resolve({ ...pairing, identity: { model: 'Synthetic Replacement' }, macAddresses: [] });
+    await adapter.enteredRead.promise; adapter.readResult.resolve(snapshot); await drain();
+    expect(base.repository.load()?.macAddress).toBeNull();
+    await h.service.close(); await base.service.close();
+  });
+
+  test('MAC discovered on unchanged reconnect is committed while preserving encrypted key', async () => {
+    const h = harness(true); const key = h.repository.load()!.encryptedClientKey;
+    h.service.start({ action: 'reconnect' }); await drain();
+    const adapter = h.adapters[0]!;
+    adapter.pairResult.resolve({ ...pairing, macAddresses: ['02:00:00:00:00:02'] });
+    await adapter.enteredRead.promise; adapter.readResult.resolve(snapshot); await drain();
+    expect(h.repository.load()?.macAddress).toBe('02:00:00:00:00:02');
+    expect(h.repository.load()?.encryptedClientKey).toEqual(key);
+    expect(h.writes).toHaveLength(1);
+    await h.service.close();
+  });
   test('all ten browser commands reach mock-TV through the current real adapter once', async () => {
     const fixture = await protocolFixture('success'); const service = createTvService(fixture.dependencies);
     const id = '15e082b2-de7e-4d86-a049-19c7448264f1'; const signal = new AbortController().signal;
@@ -126,9 +196,11 @@ describe('TV service persistence and projection', () => {
       expect((await service.status()).connection).toBe('available');
       expect(fixture.mock.pairingPromptCount).toBe(1);
       expect(fixture.cipher.decrypt(fixture.repository.load()!.encryptedClientKey)).toBe('synthetic-mock-client-key');
+      expect(fixture.repository.load()?.macAddress).toBe('02:00:00:00:00:01');
       await service.close(); fixture.resetRead();
       service = createTvService(fixture.dependencies); await service.initialize(); await fixture.readFinished.promise; await drain();
       expect((await service.status()).connection).toBe('available'); expect(fixture.mock.pairingPromptCount).toBe(1);
+      expect(fixture.repository.load()?.macAddress).toBe('02:00:00:00:00:01');
       expect(fixture.sql.prepare('SELECT count(*) AS count FROM tv_config').get()).toEqual({ count: 1 });
     } finally { await service.close(); await fixture.mock.stop(); fixture.sql.close(); }
   });
@@ -169,6 +241,7 @@ async function protocolFixture(scenario: 'success' | 'identity-loss') {
   const mock = new MockWebOsTv({ scenario: scenario === 'success' ? { kind: 'success' } : { kind: 'close-before-response', uri: 'ssap://system/getSystemInfo' } });
   await mock.start();
   const sql = new Database(':memory:'); sql.exec(tvConfigTableSql);
+  schemaMigrations[2]!.up(sql);
   const repository = createTvRepository(sql);
   const cipher = createClientKeyCipher(Buffer.alloc(32, 7));
   const committed = barrier<void>(); const staged = barrier<void>();

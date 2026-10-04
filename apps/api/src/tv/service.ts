@@ -1,4 +1,4 @@
-import { startTvOperationSchema, tvCommandRequestSchema, tvIdentitySchema, tvSnapshotSchema, type StartTvOperation, type TvCommandRequest, type TvCommandResult, type TvConnectionState, type TvOperation, type TvRemoteState, type TvStatusResponse } from '@remote-webos-tv/contracts';
+import { startTvOperationSchema, tvCommandRequestSchema, tvIdentitySchema, tvMacAddressSchema, tvSnapshotSchema, type StartTvOperation, type TvCommandRequest, type TvCommandResult, type TvConnectionState, type TvOperation, type TvRemoteState, type TvStatusResponse } from '@remote-webos-tv/contracts';
 import { WebOsError, type ClientKeyCipher, type ClientKeyStore, type EncryptedEnvelopeV1, type WebOsAdapter } from '@remote-webos-tv/webos';
 import type { StoredTv, TvRepository } from './repository.js';
 import { createStagingKeyStore } from './staging-key-store.js';
@@ -126,11 +126,23 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       const identityChanged = previous?.identity.model !== identity.data.model
         || previous.identity.platformVersion !== identity.data.platformVersion
         || previous.identity.firmwareVersion !== identity.data.firmwareVersion;
-      if (input.action !== 'reconnect' || initialKey !== result.clientKey || identityChanged) {
-        let encryptedClientKey: EncryptedEnvelopeV1;
-        try { encryptedClientKey = await abortable(Promise.resolve(cipher.encrypt(result.clientKey)), signal); }
-        catch (cause) { if (signal.aborted) throw signal.reason; if (cause instanceof WebOsError) throw cause; throw new WebOsError('KEY_STORE_WRITE_FAILED', 'Unable to encrypt the registered key', { cause }); }
-        const replacement: StoredTv = { host, identity: identity.data, encryptedClientKey };
+      let discoveredMac: string | null = null;
+      for (const candidate of result.macAddresses) {
+        const parsed = tvMacAddressSchema.safeParse(candidate);
+        if (parsed.success) { discoveredMac = parsed.data; break; }
+      }
+      // Model/version fields cannot prove physical identity after an address change.
+      // Invalid discovery is absence of WOL configuration, not a registration failure.
+      const macAddress = input.action === 'change_address' || identityChanged
+        ? discoveredMac : previous?.macAddress ?? discoveredMac;
+      const replaceRegistration = input.action !== 'reconnect' || initialKey !== result.clientKey || identityChanged;
+      if (replaceRegistration || macAddress !== previous?.macAddress) {
+        let encryptedClientKey = previous?.encryptedClientKey;
+        if (replaceRegistration) {
+          try { encryptedClientKey = await abortable(Promise.resolve(cipher.encrypt(result.clientKey)), signal); }
+          catch (cause) { if (signal.aborted) throw signal.reason; if (cause instanceof WebOsError) throw cause; throw new WebOsError('KEY_STORE_WRITE_FAILED', 'Unable to encrypt the registered key', { cause }); }
+        }
+        const replacement: StoredTv = { host, identity: identity.data, encryptedClientKey: encryptedClientKey!, macAddress };
         check(context);
         // Synchronous replace is the commit point: no await between check and commit.
         try { repository.replace(replacement); }

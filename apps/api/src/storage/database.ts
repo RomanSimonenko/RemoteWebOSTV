@@ -75,6 +75,14 @@ function migrationVersion(sqlite: Database.Database, latestVersion: number): num
     if (savedTvSql !== tvConfigTableSql && !extendsTvTable) throw new StorageStartupError('STORAGE_SCHEMA_INVALID');
     try {
       sqlite.prepare('SELECT id, host, identity_json, encrypted_client_key_json FROM tv_config LIMIT 0');
+      if (version >= 3) {
+        sqlite.prepare('SELECT mac_address FROM tv_config LIMIT 0');
+        const columns = sqlite.pragma('table_info(tv_config)') as { name: string; type: string; notnull: number; dflt_value: unknown }[];
+        const mac = columns.find((column) => column.name === 'mac_address');
+        if (mac?.type !== 'TEXT' || mac.notnull !== 0 || mac.dflt_value !== null) {
+          throw new StorageStartupError('STORAGE_SCHEMA_INVALID');
+        }
+      }
     } catch (cause) { throw new StorageStartupError('STORAGE_SCHEMA_INVALID', cause); }
   }
   return version;

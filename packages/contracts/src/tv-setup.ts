@@ -15,14 +15,14 @@ export const localTvHostSchema = z.string().trim().refine((host) => {
 export const tvActionSchema = z.enum(['pair', 'reconnect', 'change_address', 'repair']);
 export type TvAction = z.infer<typeof tvActionSchema>;
 
-const publicTvErrorSchema = z.strictObject({
+export const publicTvErrorSchema = z.strictObject({
   code: z.string().trim().min(1).max(64),
   message: z.string().trim().min(1).max(1024),
 });
 type PublicTvError = Readonly<z.infer<typeof publicTvErrorSchema>>;
 
 // Epoch milliseconds must be precisely representable and valid for JS Date.
-const timestampSchema = z.number().int().min(0).max(8_640_000_000_000_000);
+export const timestampSchema = z.number().int().min(0).max(8_640_000_000_000_000);
 
 export const tvOperationSchema = z.strictObject({
   id: z.string().trim().min(1).max(128),
