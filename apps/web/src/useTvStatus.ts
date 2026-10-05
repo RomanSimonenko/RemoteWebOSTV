@@ -9,6 +9,7 @@ export function useTvStatus(onSessionExpired: () => void) {
   const [snapshot, setSnapshot] = useState<{ status: TvStatusResponse | null; readVersion: number }>({ status: null, readVersion: 0 });
   // Only the initial read blocks the UI; background reads share inFlight below.
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const expired = useRef(onSessionExpired);
   expired.current = onSessionExpired;
@@ -28,6 +29,7 @@ export function useTvStatus(onSessionExpired: () => void) {
     async function read() {
       if (!active || inFlight) return;
       inFlight = true;
+      setRefreshing(true);
       const readVersion = ++startedReads.current;
       controller = new AbortController();
       try {
@@ -46,7 +48,7 @@ export function useTvStatus(onSessionExpired: () => void) {
         }
       } finally {
         inFlight = false;
-        if (active) { setLoading(false); schedule(); }
+        if (active) { setLoading(false); setRefreshing(false); schedule(); }
       }
     }
     requestRefresh.current = schedule;
@@ -58,5 +60,5 @@ export function useTvStatus(onSessionExpired: () => void) {
       controller?.abort();
     };
   }, []);
-  return { status: snapshot.status, statusReadVersion: snapshot.readVersion, getReadVersion, loading, error, refresh };
+  return { status: snapshot.status, statusReadVersion: snapshot.readVersion, getReadVersion, loading, refreshing, error, refresh };
 }

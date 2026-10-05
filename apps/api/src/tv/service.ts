@@ -429,6 +429,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
   function powerState(): TvPowerState {
     const idle = !closed && !unsafeCleanup && !work && !cleanup && !command && !probe;
     return {
+      busy: !!(work || cleanup || command || probe),
       mac: saved?.macAddress ?? null,
       canPowerOff: idle && connection === 'available' && !!activeAdapter && remoteCapability?.generation === generation && remoteCapability.powerOff === true,
       canWake: idle && !!saved?.macAddress && connection === 'unavailable',

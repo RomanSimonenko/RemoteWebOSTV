@@ -21,6 +21,7 @@ describe('TV commands', () => {
   test('a background status probe keeps remote enabled and a command waits for its completion', async () => {
     const h = await ready(); const adapter = h.adapters[0]!; adapter.readResult = barrier();
     const reading = h.service.status();
+    expect(h.service.powerState()).toMatchObject({ busy: true, canPowerOff: false, canWake: false });
     expect(h.service.remoteState()).toEqual({ enabled: true, reason: null });
     const sending = h.service.sendCommand(input, signal()); await drain();
     expect(adapter.sent).toEqual([]);

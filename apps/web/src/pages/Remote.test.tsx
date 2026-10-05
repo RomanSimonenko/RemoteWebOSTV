@@ -141,7 +141,7 @@ test('command progress and uncertain result appear above the remote outside its 
   fireEvent.click(screen.getByRole('button', { name: 'Вверх' }));
   const activity = view.container.querySelector('.tv-activity')!;
   expect(activity).not.toBeNull();
-  expect(within(activity as HTMLElement).getByRole('status', { name: 'Команды телевизора' }).textContent).toBe('Отправляем команду…');
+  expect(within(activity as HTMLElement).getByRole('status', { name: 'Команды телевизора' }).textContent).toBe('');
   expect(within(remote).queryByRole('status')).toBeNull();
   await act(async () => { pending.resolve(response({ code: 'SYNTHETIC_FAILURE', message: 'Синтетический отказ', requestId: 'synthetic' }, 503)); });
   expect(within(activity as HTMLElement).getByRole('alert').textContent).toBe(unknown);

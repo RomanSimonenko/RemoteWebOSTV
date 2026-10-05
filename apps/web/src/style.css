@@ -23,6 +23,11 @@ p { line-height: 1.5; margin: 12px 0; overflow-wrap: anywhere; }
 .tv-activity p:empty { display: none; }
 .connection-status { display: inline-block; margin: 0; padding: 4px 9px; border-radius: 12px; background: #303d46; color: #c3d0d9; font-size: .8rem; }
 .connection-status[data-connection="available"] { background: #124f38; color: #75ebba; }
+.connection-row { display: flex; align-items: center; gap: 8px; }
+.activity-slot { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; flex-shrink: 0; }
+.activity-spinner { width: 16px; height: 16px; border: 2px solid #526674; border-top-color: #75ebba; border-radius: 50%; animation: activity-spin .8s linear infinite; }
+@keyframes activity-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .activity-spinner { animation: none; } }
 form { display: grid; gap: 14px; margin-top: 20px; }
 label { display: grid; gap: 8px; font-size: .9rem; font-weight: 600; }
 input { min-width: 0; width: 100%; border: 1px solid #526674; border-radius: 10px; padding: 12px; font: inherit; color: #f1f5f8; background: #10191f; }

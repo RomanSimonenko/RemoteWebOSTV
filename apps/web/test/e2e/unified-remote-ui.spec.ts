@@ -19,6 +19,7 @@ async function fixture(page: Page, mode = 'idle') {
   if (mode === 'version-missing') status.tv = { host: '192.168.50.20', identity: { model: 'Synthetic TV', firmwareVersion: '99.8' } };
   if (mode === 'long-model') status.tv = { host: '192.168.50.20', identity: { model: 'Synthetic Television Model With A Very Long Identifier' } };
   const power: { -readonly [Key in keyof TvPowerState]: TvPowerState[Key] } = { mac: '02:00:00:00:00:03', canPowerOff: true, canWake: false, operation: null };
+  if (mode === 'power-busy') { power.busy = true; power.canPowerOff = false; }
   if (mode === 'connection-running') {
     status.connection = 'connecting';
     status.operation = { id: 'synthetic-operation', action: 'reconnect', status: 'running', startedAt: now, deadlineAt: now + 60_000 };
@@ -178,6 +179,21 @@ for (const width of [320, 1280]) {
 }
 
 for (const width of [320, 1280]) {
+  test(`temporary power activity uses a spinner without changing layout at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 960 });
+    const { power } = await fixture(page, 'power-busy');
+    const spinner = page.getByRole('img', { name: 'Выполняется запрос', exact: true });
+    await expect(spinner).toBeVisible();
+    await expect(page.getByText('Питание сейчас недоступно. Обновите статус.', { exact: true })).toHaveCount(0);
+    const card = await page.locator('.tv-card').boundingBox();
+    const slot = await page.locator('.activity-slot').boundingBox();
+    power.busy = false; power.canPowerOff = true;
+    await page.clock.runFor(2000);
+    await expect(spinner).toHaveCount(0);
+    expect(await page.locator('.tv-card').boundingBox()).toEqual(card);
+    expect(await page.locator('.activity-slot').boundingBox()).toEqual(slot);
+    await noOverflow(page);
+  });
   test(`compact semantic controls fit ${width}px with power above D-pad`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 960 });
     await fixture(page);

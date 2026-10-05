@@ -14,11 +14,13 @@ const connections: Record<TvConnectionState, string> = {
 };
 
 export function TvSetup({ username, csrfToken, onSessionExpired, settingsOpen, onCloseSettings, onConfirmationChange }: Props) {
-  const { status, statusReadVersion, getReadVersion, loading, error, refresh } = useTvStatus(onSessionExpired);
+  const { status, statusReadVersion, getReadVersion, loading, refreshing, error, refresh } = useTvStatus(onSessionExpired);
   const [host, setHost] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [powerState, setPowerState] = useState<TvPowerState | null>(null);
+  const [powerBusy, setPowerBusy] = useState(false);
+  const [remoteBusy, setRemoteBusy] = useState(false);
   const [settingsTarget, setSettingsTarget] = useState<HTMLDivElement | null>(null);
   const [powerActivityTarget, setPowerActivityTarget] = useState<HTMLDivElement | null>(null);
   const [remoteActivityTarget, setRemoteActivityTarget] = useState<HTMLDivElement | null>(null);
@@ -113,11 +115,11 @@ export function TvSetup({ username, csrfToken, onSessionExpired, settingsOpen, o
     {!tv && <h1>Телевизор ещё не настроен</h1>}
     {tv && <div className="tv-card">
       <div className="tv-info"><img className="tv-brand" src="/lg-logo.svg" alt="LG" /><p className="tv-model">{tv.identity.model}</p></div>
-      <PowerControls csrfToken={csrfToken} active settingsOpen={settingsOpen} settingsTarget={settingsTarget} activityTarget={powerActivityTarget} {...(onConfirmationChange ? { onConfirmationChange } : {})} onSessionExpired={onSessionExpired} onStateChange={setPowerState} />
-      <Remote csrfToken={csrfToken} active interactionBlocked={settingsOpen} activityTarget={remoteActivityTarget} onSessionExpired={onSessionExpired} />
+      <PowerControls csrfToken={csrfToken} active settingsOpen={settingsOpen} settingsTarget={settingsTarget} activityTarget={powerActivityTarget} {...(onConfirmationChange ? { onConfirmationChange } : {})} onSessionExpired={onSessionExpired} onStateChange={setPowerState} onBusyChange={setPowerBusy} />
+      <Remote csrfToken={csrfToken} active interactionBlocked={settingsOpen} activityTarget={remoteActivityTarget} onSessionExpired={onSessionExpired} onBusyChange={setRemoteBusy} />
     </div>}
     <div className="tv-activity">
-      <p className="connection-status" data-connection={error ? 'unknown' : status?.connection} role="status" aria-label="Соединение с телевизором" aria-live="polite">{connectionText}</p>
+      <div className="connection-row"><p className="connection-status" data-connection={error ? 'unknown' : status?.connection} role="status" aria-label="Соединение с телевизором" aria-live="polite">{connectionText}</p><span className="activity-slot">{(refreshing || busy || running || powerBusy || remoteBusy) && <span className="activity-spinner" role="img" aria-label="Выполняется запрос" />}</span></div>
       <div className={settingsOpen ? 'reserved-activity' : undefined} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{activity(true)}</div>
       <div className="power-activity" ref={setPowerActivityTarget} />
       <div ref={setRemoteActivityTarget} />

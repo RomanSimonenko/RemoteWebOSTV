@@ -5,7 +5,7 @@ import type { BasicTvButton, TvRemoteState, TvCommandResult } from '@remote-webo
 import { api, ApiFailure } from '../api.js';
 import { requestId } from '../requestId.js';
 
-interface Props { csrfToken: string; active: boolean; onSessionExpired(): void; interactionBlocked?: boolean; activityTarget?: HTMLElement | null }
+interface Props { csrfToken: string; active: boolean; onSessionExpired(): void; onBusyChange?(busy: boolean): void; interactionBlocked?: boolean; activityTarget?: HTMLElement | null }
 interface Runtime { active: boolean; pending: boolean; command: AbortController | null; refresh(): void }
 const unknownMessage = 'Результат команды неизвестен. Автоматический повтор не выполняется';
 const reasons = {
@@ -35,7 +35,7 @@ const keys: Readonly<Record<string, BasicTvButton>> = {
   Escape: 'BACK', Home: 'HOME', '+': 'VOLUME_UP', '-': 'VOLUME_DOWN', m: 'MUTE', M: 'MUTE',
 };
 
-export function Remote({ csrfToken, active, onSessionExpired, interactionBlocked = false, activityTarget }: Props) {
+export function Remote({ csrfToken, active, onSessionExpired, onBusyChange, interactionBlocked = false, activityTarget }: Props) {
   const [state, setState] = useState<TvRemoteState | null>(null);
   const [readError, setReadError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -43,6 +43,8 @@ export function Remote({ csrfToken, active, onSessionExpired, interactionBlocked
   const runtime = useRef<Runtime | null>(null);
   const expired = useRef(onSessionExpired);
   expired.current = onSessionExpired;
+  useEffect(() => { onBusyChange?.(active && busy); }, [active, busy, onBusyChange]);
+  useEffect(() => () => onBusyChange?.(false), [onBusyChange]);
 
   useEffect(() => {
     if (!feedback || feedback.alert) return;
@@ -148,7 +150,7 @@ export function Remote({ csrfToken, active, onSessionExpired, interactionBlocked
   });
   const activity = <div className="remote-activity">
     {explanation && <p>{explanation}</p>}
-    <p role="status" aria-label="Команды телевизора" aria-live="polite">{busy ? 'Отправляем команду…' : feedback && !feedback.alert ? feedback.text : ''}</p>
+    <p role="status" aria-label="Команды телевизора" aria-live="polite">{!busy && feedback && !feedback.alert ? feedback.text : ''}</p>
     {feedback?.alert && <p role="alert" className="error">{feedback.text}</p>}
   </div>;
   return <><div role="group" aria-label="Пульт" aria-describedby="remote-help" aria-busy={busy} tabIndex={0} className="remote" onKeyDown={keyDown}>

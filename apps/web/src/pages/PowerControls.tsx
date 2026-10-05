@@ -4,7 +4,7 @@ import { IconInfoCircle, IconPower } from '@tabler/icons-react';
 import type { TvPowerOperation, TvPowerState } from '@remote-webos-tv/contracts';
 import { useTvPower } from '../useTvPower.js';
 
-interface Props { csrfToken: string; active: boolean; onSessionExpired(): void; onStateChange?(state: TvPowerState | null): void; settingsTarget?: HTMLElement | null; activityTarget?: HTMLElement | null; settingsOpen?: boolean; onConfirmationChange?(confirming: boolean): void }
+interface Props { csrfToken: string; active: boolean; onSessionExpired(): void; onStateChange?(state: TvPowerState | null): void; onBusyChange?(busy: boolean): void; settingsTarget?: HTMLElement | null; activityTarget?: HTMLElement | null; settingsOpen?: boolean; onConfirmationChange?(confirming: boolean): void }
 
 function progress(operation: TvPowerOperation): string {
   if (operation.action === 'recover') return operation.status === 'succeeded' ? 'Соединение с телевизором восстановлено' : 'Восстанавливаем соединение с телевизором';
@@ -34,7 +34,7 @@ function terminalError(operation: TvPowerOperation | null | undefined): string {
   return operation.delivery === 'unknown' ? `Результат отправки неизвестен. ${detail}` : detail;
 }
 
-export function PowerControls({ csrfToken, active, onSessionExpired, onStateChange, settingsTarget, activityTarget, settingsOpen = false, onConfirmationChange }: Props) {
+export function PowerControls({ csrfToken, active, onSessionExpired, onStateChange, onBusyChange, settingsTarget, activityTarget, settingsOpen = false, onConfirmationChange }: Props) {
   const networkHelpId = useId();
   const { state, loading, error, message, busy, refresh, start, saveMac, cancel } = useTvPower(active, csrfToken, onSessionExpired);
   const [mac, setMac] = useState('');
@@ -45,6 +45,9 @@ export function PowerControls({ csrfToken, active, onSessionExpired, onStateChan
   const powerButton = useRef<HTMLButtonElement>(null);
   const operation = state?.operation;
   const running = operation?.status === 'running';
+  const activityBusy = active && (busy || loading || !!state?.busy || running);
+  useEffect(() => { onBusyChange?.(activityBusy); }, [activityBusy, onBusyChange]);
+  useEffect(() => () => onBusyChange?.(false), [onBusyChange]);
   const conflicting = !!state?.canPowerOff && state.canWake;
   const powerAction = conflicting ? null : state?.canPowerOff ? 'power_off' : state?.canWake && state.mac ? 'wake' : null;
   const disabled = busy || loading || !!error || !state || running;
@@ -69,7 +72,7 @@ export function PowerControls({ csrfToken, active, onSessionExpired, onStateChan
   // Only the retained background diagnostic owns autofocus; modal teardown
   // must not clear its ref while the background paragraph remains mounted.
   const activity = (withFocusRef: boolean) => <>
-    <p role="status" aria-label="Питание телевизора" aria-live="polite">{error ? 'Статус питания неизвестен' : loading ? 'Загрузка статуса питания…' : operation && (running || operation.status === 'succeeded') ? progress(operation) : busy ? 'Выполняется запрос…' : !powerAction && !diagnostic ? unavailable : ''}</p>
+    <p role="status" aria-label="Питание телевизора" aria-live="polite">{error ? 'Статус питания неизвестен' : operation && (running || operation.status === 'succeeded') ? progress(operation) : !activityBusy && !powerAction && !diagnostic ? unavailable : ''}</p>
     {diagnostic && <p ref={withFocusRef ? alert : undefined} tabIndex={-1} role="alert" className="error">{diagnostic}</p>}
     {running && <div>
       <p>Осталось: {Math.max(0, Math.ceil((operation.deadlineAt - now) / 1000))} с</p>
