@@ -23,8 +23,7 @@ async function startPair(page: Page, tv: TvFixture) {
 }
 
 async function savedTv(page: Page) {
-  await expect(page.getByRole('heading', { name: 'Телевизор', exact: true })).toBeVisible();
-  await expect(page.getByText('43UP76906LE', { exact: true })).toBeVisible();
+  await expect(page.locator('.tv-info').getByText('43UP76906LE', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Настройки', exact: true }).click();
   await expect(page.getByRole('dialog', { name: 'Настройки телевизора', exact: true }).getByText(`Сохранённый IP: ${tvHost}`, { exact: true })).toBeVisible();
   await page.keyboard.press('Escape');

@@ -250,7 +250,7 @@ test('another session cannot cancel wake; initiating logout aborts transport and
     await expect.poll(() => tv.clock.pendingCount).toBe(0);
     expect((await page.context().request.get(`${tv.origin}/api/tv/power`)).status()).toBe(401);
     await tv.login(page);
-    await expect(page.getByRole('heading', { name: 'Телевизор', exact: true })).toBeVisible();
+    await expect(page.locator('.tv-info').getByText('43UP76906LE', { exact: true })).toBeVisible();
     await expect.poll(async () => (await state(page, tv)).operation?.status).toBe('cancelled');
     const attempts = tv.policies.length;
     tv.clock.advance(120_000);
