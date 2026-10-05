@@ -13,7 +13,7 @@ h2 { font-size: 1.2rem; margin: 0; }
 p { line-height: 1.5; margin: 12px 0; overflow-wrap: anywhere; }
 .tv-card, .form-card { width: 100%; max-width: 400px; margin: 24px auto 0; padding: 24px; border: 1px solid #33424b; border-radius: 22px; background: linear-gradient(150deg, #202b32, #182127); box-shadow: 0 20px 60px #0004; position: relative; }
 .form-card { max-width: 440px; }
-.tv-layout { width: 100%; max-width: 400px; margin: 24px auto 0; }
+.tv-layout { width: 100%; max-width: 296px; margin: 24px auto 0; }
 .tv-layout .tv-card { margin-top: 0; }
 .tv-info { min-height: 58px; margin: 0 78px 18px 0; display: flex; align-items: center; gap: 10px; }
 .tv-brand { width: 48px; height: 22px; object-fit: contain; flex-shrink: 0; }

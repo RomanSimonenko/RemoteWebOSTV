@@ -184,7 +184,7 @@ for (const width of [320, 1280]) {
     await noOverflow(page);
     const card = page.locator('.tv-card');
     const box = (await card.boundingBox())!;
-    expect(box.width).toBeLessThanOrEqual(400);
+    expect(Math.abs(box.width - 296)).toBeLessThanOrEqual(1);
     const up = remote(page).getByRole('button', { name: 'Вверх', exact: true });
     const power = page.getByRole('button', { name: 'Выключить ТВ', exact: true });
     expect((await power.boundingBox())!.y).toBeLessThan((await up.boundingBox())!.y);
