@@ -12,7 +12,7 @@ import { createAuthSessionService, loadAuthMasterKey } from './auth/sessions.js'
 import { openDatabase } from './storage/database.js';
 import { safeCauseTypes, safeListenTextResolver } from './security/logging.js';
 import { createTvRepository } from './tv/repository.js';
-import { createTvService, type TvService, type TvServiceDependencies, type TvScheduler } from './tv/service.js';
+import { createTvService, type TvService, type TvServiceDependencies, type TvScheduler, type TvVersionDiagnostic } from './tv/service.js';
 
 const runtimeScheduler: TvScheduler = {
   now: () => performance.now(),
@@ -32,6 +32,12 @@ export async function createApiRuntime(config: AppConfig, options: {
 } = {}) {
   const database = await (options.openDatabase ?? openDatabase)({ dataDir: config.dataDir });
   let tv: TvService | undefined;
+  let logger: FastifyInstance['log'] | undefined;
+  const pendingVersionDiagnostics: TvVersionDiagnostic[] = [];
+  const logVersionDiagnostic = (diagnostic: TvVersionDiagnostic) => {
+    if (!logger) { pendingVersionDiagnostics.push(diagnostic); return; }
+    logger.warn({ code: 'TV_OPTIONAL_METADATA_UNAVAILABLE', operation: diagnostic.operation, diagnosticCode: diagnostic.code }, 'Optional TV metadata unavailable');
+  };
   const closeResources = async () => {
     const failures: unknown[] = [];
     try { await tv?.close(); } catch (cause) { failures.push(cause); }
@@ -51,6 +57,7 @@ export async function createApiRuntime(config: AppConfig, options: {
       repository: tvRepository, cipher, now, newId: options.newId ?? randomUUID,
       scheduler: options.scheduler ?? runtimeScheduler,
       recoveryTimeoutMs: config.recoveryTimeoutMs ?? 60_000,
+      onVersionDiagnostic: logVersionDiagnostic,
       createAdapter: options.createAdapter ?? ((host, keyStore, requestTimeoutMs, allowPairingPrompt) => new Lgtv2Adapter({
         host, keyStore, requestTimeoutMs, handshakeTimeoutMs: requestTimeoutMs, allowPairingPrompt, now: () => new Date(now()),
       })),
@@ -67,6 +74,8 @@ export async function createApiRuntime(config: AppConfig, options: {
         sessions,
       },
     });
+    logger = app.log;
+    for (const diagnostic of pendingVersionDiagnostics.splice(0)) logVersionDiagnostic(diagnostic);
     app.addHook('onClose', async () => {
       try { await closeResources(); }
       catch (cause) {

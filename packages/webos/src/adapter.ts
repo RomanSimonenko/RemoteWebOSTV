@@ -22,7 +22,18 @@ export interface PairingResult {
   readonly macAddresses: readonly string[];
 }
 
+export interface PlatformVersionDiagnostic {
+  readonly operation: 'hello';
+  readonly code: 'timeout' | 'invalid_response' | 'version_unavailable' | 'request_rejected' | 'send_failed';
+}
+
+export type PlatformVersionResult =
+  | { readonly version: string; readonly diagnostic?: never }
+  | { readonly version?: never; readonly diagnostic: PlatformVersionDiagnostic };
+
 export interface WebOsAdapter {
+  /** Optional metadata acquisition; at most one wire attempt per connection. */
+  readPlatformVersion?(signal: AbortSignal): Promise<PlatformVersionResult>;
   pair(request: PairingRequest): Promise<PairingResult>;
   readSnapshot(signal: AbortSignal): Promise<TvSnapshot>;
   openPointerSocket(signal: AbortSignal): Promise<void>;

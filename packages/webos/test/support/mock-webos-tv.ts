@@ -11,6 +11,7 @@ import {
 } from './fixtures.js';
 
 export type MockScenario =
+  | { readonly kind: 'hello-release' }
   | { readonly kind: 'success' }
   | { readonly kind: 'reject-pairing' }
   | { readonly kind: 'deferred-pairing'; readonly gate: Promise<void> }
@@ -20,7 +21,7 @@ export type MockScenario =
 
 export interface RecordedMockRequest {
   readonly id: string;
-  readonly type: 'register' | 'request' | 'subscribe' | 'unsubscribe';
+  readonly type: 'register' | 'request' | 'subscribe' | 'unsubscribe' | 'hello';
   readonly uri?: string;
   readonly payload?: unknown;
 }
@@ -198,6 +199,14 @@ export class MockWebOsTv {
     const envelope = decoded.value;
     this.#record(envelope);
 
+    if (envelope.type === 'hello' && this.#scenario.kind === 'hello-release') {
+      // The verified TV hello response omits the request id.
+      this.#send(socket, { type: 'hello', payload: {
+        deviceOS: 'webOS', deviceOSVersion: '4.1.0', deviceOSReleaseVersion: '6.5.3',
+      } });
+      return;
+    }
+
     if (envelope.type === 'register') {
       await this.#handleRegistration(socket, envelope);
       return;
@@ -322,7 +331,8 @@ export class MockWebOsTv {
     return {
       id,
       type: 'response',
-      payload: mockResponses[uri],
+      payload: this.#scenario.kind === 'hello-release' && uri === mockUris.softwareInfo
+        ? { major_ver: '03', minor_ver: '40.85' } : mockResponses[uri],
     };
   }
 
@@ -427,7 +437,7 @@ function decodeEnvelope(
   const id = typeof candidate.id === 'string' ? candidate.id : undefined;
   if (
     !id ||
-    !['register', 'request', 'subscribe', 'unsubscribe'].includes(
+    !['register', 'request', 'subscribe', 'unsubscribe', 'hello'].includes(
       String(candidate.type),
     )
   ) {

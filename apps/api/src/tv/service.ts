@@ -25,6 +25,11 @@ export interface TvServiceDependencies {
   readonly newId: () => string;
   readonly scheduler: TvScheduler;
   readonly recoveryTimeoutMs?: number;
+  readonly onVersionDiagnostic?: (diagnostic: TvVersionDiagnostic) => void;
+}
+export interface TvVersionDiagnostic {
+  readonly operation: 'hello';
+  readonly code: 'timeout' | 'invalid_response' | 'version_unavailable' | 'request_rejected' | 'send_failed' | 'read_failed' | 'storage_failed';
 }
 export interface TvService {
   powerState(): TvPowerState;
@@ -62,6 +67,7 @@ interface Power { operation: TvPowerOperation; readonly owner: string | symbol }
 interface Probe { readonly controller: AbortController; readonly promise: Promise<void> }
 interface Cleanup { readonly adapter: WebOsAdapter; readonly promise: Promise<void> }
 interface Command { readonly controller: AbortController; readonly promise: Promise<TvCommandResult> }
+interface Metadata extends Probe { readonly adapter: WebOsAdapter }
 
 export function createTvService(dependencies: TvServiceDependencies): TvService {
   const { repository, cipher, scheduler } = dependencies;
@@ -76,6 +82,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
   let probe: Probe | undefined;
   let cleanup: Cleanup | undefined;
   let command: Command | undefined;
+  let metadata: Metadata | undefined;
   let remoteCapability: { readonly generation: number; readonly pointer: boolean; readonly powerOff: boolean } | undefined;
   let power: Power | undefined;
   let intentionalOff = false;
@@ -100,6 +107,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
   }
 
   function disconnect(adapter: WebOsAdapter): Promise<void> {
+    if (metadata?.adapter === adapter) metadata.controller.abort(new TvServiceError('CANCELLED'));
     if (cleanup?.adapter === adapter) return cleanup.promise;
     if (activeAdapter === adapter) {
       activeAdapter = undefined; remoteCapability = undefined;
@@ -150,6 +158,13 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     if (!result.clientKey) throw new WebOsError('INVALID_TV_RESPONSE', 'Registered response lacks a client key');
     const identity = tvIdentitySchema.strict().safeParse(result.identity);
     if (!identity.success) throw new WebOsError('INVALID_TV_RESPONSE', 'Registration identity is invalid');
+    // Optional metadata absence is not an identity change on a verified ordinary reconnect.
+    if (input.action === 'reconnect' && previous?.host === host
+      && previous.identity.model === identity.data.model
+      && previous.identity.firmwareVersion === identity.data.firmwareVersion
+      && identity.data.platformVersion === undefined && previous.identity.platformVersion !== undefined) {
+      identity.data.platformVersion = previous.identity.platformVersion;
+    }
     const snapshot = await abortable(adapter.readSnapshot(signal), signal);
     checkConnection();
     if (!tvSnapshotSchema.safeParse(snapshot).success || snapshot.connection !== 'available') throw new WebOsError('INVALID_TV_RESPONSE', 'Snapshot did not confirm availability');
@@ -176,6 +191,60 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     }
     connection = 'available'; error = undefined;
     remoteCapability = { generation, pointer: snapshot.capabilities.pointer === true, powerOff: snapshot.capabilities.powerOff === true };
+    startVersionRead(adapter);
+  }
+
+  function reportVersionDiagnostic(code: TvVersionDiagnostic['code']): void {
+    const diagnostic: TvVersionDiagnostic = { operation: 'hello', code };
+    try {
+      if (dependencies.onVersionDiagnostic) dependencies.onVersionDiagnostic(diagnostic);
+      else console.warn(diagnostic, 'Optional TV metadata unavailable');
+    } catch {
+      // A failing diagnostic consumer must remain visible without leaking its error data.
+      console.error({ operation: 'hello', code: 'diagnostic_failed' }, 'Optional TV metadata diagnostic failed');
+    }
+  }
+
+  function startVersionRead(adapter: WebOsAdapter): void {
+    if (!saved || saved.identity.platformVersion !== undefined || !adapter.readPlatformVersion) return;
+    const controller = new AbortController();
+    const version = generation;
+    const host = saved.host;
+    const timer = scheduler.setTimeout(() => {
+      reportVersionDiagnostic('timeout');
+      controller.abort(new TvServiceError('CANCELLED'));
+    }, statusBudgetMs);
+    const live = () => !closed && !controller.signal.aborted && generation === version
+      && activeAdapter === adapter && connection === 'available' && saved?.host === host;
+    const pending = Promise.resolve().then(async () => {
+      if (!live()) return;
+      let result;
+      try { result = await abortable(adapter.readPlatformVersion!(controller.signal), controller.signal); }
+      catch {
+        if (live()) reportVersionDiagnostic('read_failed');
+        return;
+      }
+      if (!live()) return;
+      if (!result || typeof result !== 'object') { reportVersionDiagnostic('invalid_response'); return; }
+      if (result.diagnostic !== undefined) {
+        const diagnostic = result.diagnostic;
+        const valid = result.version === undefined && diagnostic?.operation === 'hello'
+          && ['timeout', 'invalid_response', 'version_unavailable', 'request_rejected', 'send_failed'].includes(diagnostic.code);
+        reportVersionDiagnostic(valid ? diagnostic.code : 'invalid_response'); return;
+      }
+      if (typeof result.version !== 'string') { reportVersionDiagnostic('invalid_response'); return; }
+      const identity = tvIdentitySchema.strict().safeParse({ ...saved!.identity, platformVersion: result.version });
+      if (!identity.success) { reportVersionDiagnostic('invalid_response'); return; }
+      const replacement: StoredTv = { ...saved!, identity: identity.data };
+      try { repository.replace(replacement); }
+      catch { reportVersionDiagnostic('storage_failed'); return; }
+      saved = replacement;
+    });
+    const current: Metadata = { adapter, controller, promise: pending.finally(() => {
+      scheduler.clearTimeout(timer);
+      if (metadata === current) metadata = undefined;
+    }) };
+    metadata = current;
   }
 
   function finish(context: Attempt, status: TvOperation['status'], cause?: unknown): void {
@@ -280,6 +349,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     const context: Attempt = { operation, controller, timer, expiresAt: scheduler.now() + budget, ...(owner === undefined ? {} : { owner }) };
     intentionalOff = false; recoverAfterProbe = false;
     attempt = context; generation++;
+    metadata?.controller.abort(new TvServiceError('CANCELLED'));
     remoteCapability = undefined;
     connection = input.action === 'pair' || input.action === 'repair' ? 'pairing' : 'connecting';
     error = undefined;
@@ -302,6 +372,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       // Before the deferred off worker starts there is no transport work to
       // invalidate; retain the capability tied to the existing live connection.
       if (context.power?.operation.action !== 'power_off' || context.power.operation.delivery !== 'not_sent') generation++;
+      metadata?.controller.abort(cancelled);
     }
     return copyOperation(context.operation);
   }
@@ -400,6 +471,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     const timer = scheduler.setTimeout(() => controller.abort(budgetFailure(context)), budget);
     const context: Attempt = { operation: { id: input.id, action: 'reconnect', status: 'running', startedAt, deadlineAt: startedAt + budget }, power: current, owner, controller, timer, expiresAt: scheduler.now() + budget };
     attempt = context; power = current; generation++;
+    metadata?.controller.abort(new TvServiceError('CANCELLED'));
     // Power-off retains the verified capability for its own observation.
     if (remoteCapability) remoteCapability = { ...remoteCapability, generation };
     recoverAfterProbe = false;
@@ -575,11 +647,13 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
   function close(): Promise<void> {
     if (closing) return closing;
     closed = true; generation++;
+    metadata?.controller.abort(new TvServiceError('CANCELLED'));
     if (attempt?.operation.status === 'running') cancelAttempt(attempt);
     probe?.controller.abort(new TvServiceError('CANCELLED'));
     command?.controller.abort(new TvServiceError('CANCELLED'));
     closing = (async () => {
       await command?.promise;
+      await metadata?.promise;
       await work; await probe?.promise;
       await cleanup?.promise;
       if (activeAdapter) await disconnect(activeAdapter);

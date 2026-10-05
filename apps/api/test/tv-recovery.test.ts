@@ -12,6 +12,7 @@ describe('bounded TV recovery', () => {
           const emitter = new EventEmitter();
           const client = Object.assign(emitter, {
             connected: false, urls: [], request: async () => { throw new Error('Unexpected SSAP request'); },
+            send: () => { throw new Error('Unexpected hello request'); },
             getSocket: async () => { throw new Error('Unexpected pointer request'); }, wake: async () => undefined,
             disconnect: async () => { disconnects++; throw new Error('synthetic client cleanup failure'); },
           }) as Lgtv2Client;
