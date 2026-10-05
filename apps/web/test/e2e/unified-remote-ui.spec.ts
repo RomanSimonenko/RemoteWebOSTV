@@ -17,6 +17,7 @@ async function fixture(page: Page, mode = 'idle') {
   const status: { -readonly [Key in keyof TvStatusResponse]: TvStatusResponse[Key] } = { tv: { host: '192.168.50.20', identity: { model: 'Synthetic TV' } }, connection: 'available', operation: null };
   if (mode === 'version-known') status.tv = { host: '192.168.50.20', identity: { model: 'Synthetic TV', platformVersion: '6.5.3', firmwareVersion: '99.8' } };
   if (mode === 'version-missing') status.tv = { host: '192.168.50.20', identity: { model: 'Synthetic TV', firmwareVersion: '99.8' } };
+  if (mode === 'long-model') status.tv = { host: '192.168.50.20', identity: { model: 'Synthetic Television Model With A Very Long Identifier' } };
   const power: { -readonly [Key in keyof TvPowerState]: TvPowerState[Key] } = { mac: '02:00:00:00:00:03', canPowerOff: true, canWake: false, operation: null };
   if (mode === 'connection-running') {
     status.connection = 'connecting';
@@ -48,17 +49,55 @@ async function fixture(page: Page, mode = 'idle') {
       };
       await route.fulfill({ status: mode === 'login' && path === '/api/auth/session' ? 401 : 200, json: data[path] });
     } else await route.fulfill({
-      contentType: path.endsWith('.js') ? 'text/javascript' : path.endsWith('.css') ? 'text/css' : 'text/html',
+      contentType: path.endsWith('.js') ? 'text/javascript' : path.endsWith('.css') ? 'text/css' : path.endsWith('.svg') ? 'image/svg+xml' : 'text/html',
       body: await readFile(new URL(path === '/' ? 'index.html' : path.slice(1), webRoot)),
     });
   });
   await page.goto(origin);
   if (mode !== 'login' && mode !== 'setup') await expect(remote(page).getByRole('button', { name: 'Вверх', exact: true })).toBeEnabled();
-  return { reads, mutations };
+  return { reads, mutations, status, power };
 }
 
 async function noOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+}
+
+for (const width of [320, 1280]) {
+  test(`long model stays beside LG logo without power or navigation overlap at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 960 });
+    await fixture(page, 'long-model');
+    const logo = page.getByRole('img', { name: 'LG', exact: true });
+    expect(await logo.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBe(228);
+    const logoBox = (await logo.boundingBox())!;
+    const modelBox = (await page.locator('.tv-model').boundingBox())!;
+    const powerBox = (await page.getByRole('button', { name: 'Выключить ТВ', exact: true }).boundingBox())!;
+    expect(modelBox.x).toBeGreaterThanOrEqual(logoBox.x + logoBox.width);
+    expect(modelBox.x + modelBox.width).toBeLessThanOrEqual(powerBox.x);
+    expect(modelBox.y + modelBox.height).toBeLessThanOrEqual((await remote(page).boundingBox())!.y);
+    await noOverflow(page);
+  });
+  for (const source of ['connection', 'power'] as const) {
+  test(`growing ${source} diagnostic keeps card geometry and viewport at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 400 });
+    const { status, power } = await fixture(page);
+    const card = page.locator('.tv-card');
+    const before = await card.boundingBox();
+    expect((await page.locator('.tv-activity').boundingBox())!.y).toBeGreaterThan(400);
+    const scrollBefore = await page.evaluate(() => window.scrollY);
+    if (source === 'connection') {
+      status.connection = 'unavailable';
+      status.error = { code: 'TV_UNAVAILABLE', message: longError };
+    } else {
+      power.operation = { id: '11111111-1111-4111-8111-111111111111', action: 'wake', status: 'failed', phase: 'finished', delivery: 'unknown', startedAt: 0, deadlineAt: 60_000, error: { code: 'SYNTHETIC_ERROR', message: longError } };
+    }
+    await page.clock.runFor(2000);
+    await expect(page.locator('.tv-activity').getByRole('alert')).toHaveText(source === 'power' ? `Результат отправки неизвестен. ${longError}` : longError);
+    await expect(page.locator('.tv-activity').getByRole('alert')).toBeFocused();
+    expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);
+    expect(await card.boundingBox()).toEqual(before);
+    await noOverflow(page);
+  });
+  }
 }
 
 for (const width of [320, 1280]) {
@@ -92,8 +131,9 @@ for (const width of [320, 1280]) {
     }
     expect(await card.getByRole('status').count()).toBe(0);
     expect(await card.getByRole('alert').count()).toBe(0);
-    expect(await card.locator('p, details').count()).toBe(0);
-    await expect(card).not.toContainText('Synthetic TV', { useInnerText: true });
+    expect(await card.locator('details').count()).toBe(0);
+    await expect(card.locator('.tv-model')).toHaveText('Synthetic TV');
+    await expect(card.getByRole('img', { name: 'LG', exact: true })).toBeVisible();
     await expect(card).not.toContainText('192.168.50.20', { useInnerText: true });
     await expect(card).not.toContainText('02:00:00:00:00:03', { useInnerText: true });
     expect(await card.getByRole('button', { name: 'Настройки', exact: true }).count()).toBe(0);
@@ -114,7 +154,7 @@ for (const width of [320, 1280]) {
       await expect(activity.getByRole('status', { name: 'Соединение с телевизором', exact: true })).toBeVisible();
       if (mode.endsWith('error')) await expect(activity.getByRole('alert')).toContainText(longError);
       if (mode.endsWith('running')) await expect(activity.getByText(/Осталось:/)).toBeVisible();
-      expect((await activity.boundingBox())!.y + (await activity.boundingBox())!.height).toBeLessThanOrEqual((await card.boundingBox())!.y);
+      expect((await activity.boundingBox())!.y).toBeGreaterThanOrEqual((await card.boundingBox())!.y + (await card.boundingBox())!.height);
       await noOverflow(page);
       // Initial diagnostic autofocus can scroll the document. Measure the modal
       // transition from the same viewport, with its opener already on screen.
@@ -155,7 +195,8 @@ for (const key of ['Enter', 'Space']) {
     const help = page.locator('.app-header details');
     const summary = help.locator('summary');
     await expect(summary).toHaveAccessibleName('Управление с клавиатуры');
-    expect(await summary.innerText()).toBe('?');
+    expect(await summary.innerText()).toBe('');
+    await expect(summary.locator('svg')).toHaveAttribute('aria-hidden', 'true');
     await summary.focus();
     await expect(summary).toBeFocused();
     await expect(help).toHaveJSProperty('open', false);
@@ -168,14 +209,19 @@ for (const key of ['Enter', 'Space']) {
 }
 
 for (const [mode, text] of [['version-known', 'webOS 6.5.3'], ['version-missing', 'Версия неизвестна']] as const) {
-  test(`${mode} shows model and platform version above the remote without using firmware`, async ({ page }) => {
+  test(`${mode} keeps model in card and version/session in settings without using firmware`, async ({ page }) => {
     await fixture(page, mode);
     const info = page.locator('.tv-info');
     await expect(info.getByText('Synthetic TV', { exact: true })).toBeVisible();
-    await expect(info.getByText(text, { exact: true })).toBeVisible();
+    await expect(page.getByText(text, { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Вы вошли как synthetic-owner.', { exact: true })).toHaveCount(0);
     await expect(info).not.toContainText('99.8');
     const box = (await info.boundingBox())!;
-    expect(box.y + box.height).toBeLessThanOrEqual((await page.locator('.tv-card').boundingBox())!.y);
+    expect(box.y).toBeGreaterThan((await page.locator('.tv-card').boundingBox())!.y);
+    await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+    await expect(settings(page).getByText(text, { exact: true })).toBeVisible();
+    await expect(settings(page).getByText('Вы вошли как synthetic-owner.', { exact: true })).toBeVisible();
+    await expect(settings(page)).not.toContainText('99.8');
   });
 }
 
@@ -192,7 +238,7 @@ test('header keyboard help stays readable inside a 320px viewport without sendin
   expect(mutations).toEqual([]);
 });
 
-test('remote command failure remains visible above the controls and never retries', async ({ page }) => {
+test('remote command failure remains visible below the controls and never retries', async ({ page }) => {
   const { mutations } = await fixture(page);
   await remote(page).getByRole('button', { name: 'Домой', exact: true }).click();
   await expect(page.locator('.tv-activity').getByRole('alert')).toContainText('Результат команды неизвестен');

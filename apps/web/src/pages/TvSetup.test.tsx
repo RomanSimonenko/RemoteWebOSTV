@@ -34,7 +34,7 @@ afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 test.each([
   [{ model: 'Synthetic TV', platformVersion: '6.5.3', firmwareVersion: '99.8' }, 'webOS 6.5.3'],
   [{ model: 'Synthetic TV', firmwareVersion: '99.8' }, 'Версия неизвестна'],
-])('saved TV identity %j is displayed above the button-only card', async (identity, version) => {
+])('saved TV identity %j keeps the model in the card and session/version in settings', async (identity, version) => {
   vi.stubGlobal('fetch', vi.fn((path: RequestInfo | URL) => Promise.resolve(response(path === '/api/tv'
     ? { ...saved, tv: { ...saved.tv, identity } }
     : path === '/api/tv/power' ? { mac: null, canPowerOff: true, canWake: false, operation: null }
@@ -44,13 +44,21 @@ test.each([
   const info = view.container.querySelector('.tv-info') as HTMLElement;
   expect(info).not.toBeNull();
   expect(within(info).getByText('Synthetic TV')).toBeTruthy();
-  expect(within(info).getByText(version)).toBeTruthy();
+  expect(screen.queryByText(version)).toBeNull();
+  expect(screen.queryByText('Вы вошли как synthetic-owner.')).toBeNull();
   expect(info.textContent).not.toContain('99.8');
   const card = view.container.querySelector('.tv-card') as HTMLElement;
   expect(within(card).queryByRole('status')).toBeNull();
-  expect(card.querySelector('p, details')).toBeNull();
-  expect(info.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(card.contains(info)).toBe(true);
+  expect(screen.queryByRole('heading', { name: /^Телевизор$/ })).toBeNull();
+  const activity = view.container.querySelector('.tv-activity')!;
+  expect(card.compareDocumentPosition(activity) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(screen.getAllByRole('button', { name: 'Выключить ТВ' })).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Настройки' }));
+  const settings = screen.getByRole('dialog', { name: 'Настройки телевизора' });
+  expect(within(settings).getByText(version)).toBeTruthy();
+  expect(within(settings).getByText('Вы вошли как synthetic-owner.')).toBeTruthy();
+  expect(settings.textContent).not.toContain('99.8');
 });
 
 test('keeps refresh enabled during background reads and coalesces clicks without shortening the completion cooldown', async () => {
@@ -325,11 +333,14 @@ test('new connection diagnostics focus the retained background alert after setti
   expect(within(screen.getByRole('dialog', { name: 'Настройки телевизора' })).getByRole('alert').textContent).toBe(detail);
   fireEvent.click(screen.getByRole('button', { name: 'Закрыть настройки' }));
   expect(document.activeElement).toBe(gear);
+  const focus = vi.spyOn(screen.getByRole('alert'), 'focus');
   detail = 'Новая ошибка после закрытия настроек.';
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
   const alert = screen.getByRole('alert');
   expect(alert.textContent).toBe(detail);
   expect(document.activeElement).toBe(alert);
+  expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+  focus.mockRestore();
 });
 
 test('losing power-off eligibility dismisses confirmation and unlocks settings', async () => {

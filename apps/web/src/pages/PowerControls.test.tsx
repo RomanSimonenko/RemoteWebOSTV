@@ -104,11 +104,13 @@ test('new power diagnostics focus the retained background alert after settings c
     expect(within(target).getByRole('alert').textContent).toBe(detail);
     view.rerender(presentation(false));
     const opener = screen.getByRole('button', { name: 'Настройки' }); opener.focus();
+    const focus = vi.spyOn(screen.getByRole('alert'), 'focus');
     detail = 'Новая ошибка после закрытия настроек.';
     await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
     const alert = screen.getByRole('alert');
     expect(alert.textContent).toBe(detail);
     expect(document.activeElement).toBe(alert);
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
   } finally { view.unmount(); target.remove(); }
 });
 

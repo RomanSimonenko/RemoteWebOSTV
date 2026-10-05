@@ -6,14 +6,14 @@ import { Remote } from './Remote.js';
 import { PowerControls } from './PowerControls.js';
 import { SettingsDialog } from '../components/SettingsDialog.js';
 
-interface Props { csrfToken: string; onSessionExpired(): void; settingsOpen: boolean; onCloseSettings(): void; onConfirmationChange?(confirming: boolean): void }
+interface Props { username?: string; csrfToken: string; onSessionExpired(): void; settingsOpen: boolean; onCloseSettings(): void; onConfirmationChange?(confirming: boolean): void }
 const connections: Record<TvConnectionState, string> = {
   unconfigured: 'Введите IP-адрес телевизора', pairing: 'Сопряжение', connecting: 'Подключение',
   available: 'Подключён', unavailable: 'Нет соединения', reconnecting: 'Подключение',
   authorization_error: 'Ошибка авторизации', compatibility_error: 'Ошибка совместимости',
 };
 
-export function TvSetup({ csrfToken, onSessionExpired, settingsOpen, onCloseSettings, onConfirmationChange }: Props) {
+export function TvSetup({ username, csrfToken, onSessionExpired, settingsOpen, onCloseSettings, onConfirmationChange }: Props) {
   const { status, statusReadVersion, getReadVersion, loading, error, refresh } = useTvStatus(onSessionExpired);
   const [host, setHost] = useState('');
   const [message, setMessage] = useState('');
@@ -58,7 +58,7 @@ export function TvSetup({ csrfToken, onSessionExpired, settingsOpen, onCloseSett
     return () => clearInterval(timer);
   }, [running, operation?.deadlineAt]);
   // Opening or closing presentation alone must not refocus a historical error.
-  useEffect(() => { if (diagnostic && !settingsOpen) alert.current?.focus(); }, [diagnostic]);
+  useEffect(() => { if (diagnostic && !settingsOpen) alert.current?.focus({ preventScroll: true }); }, [diagnostic]);
   useEffect(() => { if (settingsOpen && tv) setHost(tv.host); }, [settingsOpen, tv?.host]);
 
   async function mutate(action: (signal: AbortSignal) => Promise<TvOperation>) {
@@ -110,11 +110,12 @@ export function TvSetup({ csrfToken, onSessionExpired, settingsOpen, onCloseSett
     </div>}
   </>;
   return <section className={tv ? 'tv-layout' : 'form-card'}>
-    <div className={tv ? 'tv-info' : undefined}>
-      <h1>{tv ? 'Телевизор' : 'Телевизор ещё не настроен'}</h1>
-      {tv && <p className="tv-model">{tv.identity.model}</p>}
-      {tv && <p className="tv-version">{tv.identity.platformVersion ? `webOS ${tv.identity.platformVersion}` : 'Версия неизвестна'}</p>}
-    </div>
+    {!tv && <h1>Телевизор ещё не настроен</h1>}
+    {tv && <div className="tv-card">
+      <div className="tv-info"><img className="tv-brand" src="/lg-logo.svg" alt="LG" /><p className="tv-model">{tv.identity.model}</p></div>
+      <PowerControls csrfToken={csrfToken} active settingsOpen={settingsOpen} settingsTarget={settingsTarget} activityTarget={powerActivityTarget} {...(onConfirmationChange ? { onConfirmationChange } : {})} onSessionExpired={onSessionExpired} onStateChange={setPowerState} />
+      <Remote csrfToken={csrfToken} active interactionBlocked={settingsOpen} activityTarget={remoteActivityTarget} onSessionExpired={onSessionExpired} />
+    </div>}
     <div className="tv-activity">
       <p className="connection-status" data-connection={error ? 'unknown' : status?.connection} role="status" aria-label="Соединение с телевизором" aria-live="polite">{connectionText}</p>
       <div className={settingsOpen ? 'reserved-activity' : undefined} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{activity(true)}</div>
@@ -122,13 +123,10 @@ export function TvSetup({ csrfToken, onSessionExpired, settingsOpen, onCloseSett
       <div ref={setRemoteActivityTarget} />
     </div>
     {!tv && <>{addressForm}<button type="button" disabled={loading} onClick={refresh}>Обновить статус</button></>}
-    {tv && <div className="tv-card">
-      <PowerControls csrfToken={csrfToken} active settingsOpen={settingsOpen} settingsTarget={settingsTarget} activityTarget={powerActivityTarget} {...(onConfirmationChange ? { onConfirmationChange } : {})} onSessionExpired={onSessionExpired} onStateChange={setPowerState} />
-      <Remote csrfToken={csrfToken} active interactionBlocked={settingsOpen} activityTarget={remoteActivityTarget} onSessionExpired={onSessionExpired} />
-    </div>}
     <SettingsDialog open={settingsOpen} onClose={onCloseSettings}>
+      {settingsOpen && username && <p className="session-caption">Вы вошли как {username}.</p>}
       {settingsOpen && activity(false)}
-      {tv ? <><p>Текущий телевизор: {tv.identity.model}</p><p>Соединение: {connectionText}</p><p>Сохранённый IP: {tv.host}</p>{addressForm}
+      {tv ? <><p>Текущий телевизор: {tv.identity.model}</p>{settingsOpen && <p className="tv-version">{tv.identity.platformVersion ? `webOS ${tv.identity.platformVersion}` : 'Версия неизвестна'}</p>}<p>Соединение: {connectionText}</p><p>Сохранённый IP: {tv.host}</p>{addressForm}
         <button type="button" disabled={loading} onClick={refresh}>Обновить статус</button>
       </> : <p>Добавьте телевизор на основном экране.</p>}
       <div ref={setSettingsTarget} />

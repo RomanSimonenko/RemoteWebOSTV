@@ -56,7 +56,7 @@ export function PowerControls({ csrfToken, active, onSessionExpired, onStateChan
   useEffect(() => { if (!active || powerAction !== 'power_off' || powerDisabled) setConfirming(false); }, [active, powerAction, powerDisabled]);
   useEffect(() => { if (confirming) confirmation.current?.focus(); }, [confirming]);
   // Modal transitions do not refocus an existing background diagnostic.
-  useEffect(() => { if (diagnostic && !settingsOpen) alert.current?.focus(); }, [diagnostic]);
+  useEffect(() => { if (diagnostic && !settingsOpen) alert.current?.focus({ preventScroll: true }); }, [diagnostic]);
   useEffect(() => {
     if (!active || !running) return;
     setNow(Date.now()); const timer = setInterval(() => setNow(Date.now()), 1000);

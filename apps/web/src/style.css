@@ -7,18 +7,19 @@ body { margin: 0; min-width: 320px; min-height: 100vh; background: radial-gradie
 .header-actions { display: flex; flex-shrink: 0; align-items: center; gap: 8px; }
 .header-actions button { min-height: 42px; padding: 8px 12px; font-size: .85rem; }
 .header-actions button[aria-label="Настройки"] { display: flex; align-items: center; justify-content: center; width: 42px; padding: 0; }
-.session-caption { margin: 12px 0 20px; text-align: center; color: #a8b6bf; font-size: .75rem; }
+.session-caption { color: #a8b6bf; font-size: .75rem; }
 h1 { font-size: 1.65rem; line-height: 1.2; margin: 0 0 8px; letter-spacing: -.03em; }
 h2 { font-size: 1.2rem; margin: 0; }
 p { line-height: 1.5; margin: 12px 0; overflow-wrap: anywhere; }
 .tv-card, .form-card { width: 100%; max-width: 400px; margin: 24px auto 0; padding: 24px; border: 1px solid #33424b; border-radius: 22px; background: linear-gradient(150deg, #202b32, #182127); box-shadow: 0 20px 60px #0004; position: relative; }
 .form-card { max-width: 440px; }
 .tv-layout { width: 100%; max-width: 400px; margin: 24px auto 0; }
-.tv-layout .tv-card { margin-top: 16px; padding-top: 100px; }
-.tv-info { text-align: center; }
-.tv-model { margin: 0 0 8px; color: #a8b6bf; font-size: .9rem; }
+.tv-layout .tv-card { margin-top: 0; }
+.tv-info { min-height: 58px; margin: 0 78px 18px 0; display: flex; align-items: center; gap: 10px; }
+.tv-brand { width: 48px; height: 22px; object-fit: contain; flex-shrink: 0; }
+.tv-model { min-width: 0; margin: 0; color: #a8b6bf; font-size: .8rem; line-height: 1.2; }
 .tv-version { margin: 0 0 12px; color: #a8b6bf; font-size: .8rem; }
-.tv-activity { font-size: .85rem; }
+.tv-activity { margin-top: 16px; font-size: .85rem; }
 .tv-activity p:empty { display: none; }
 .connection-status { display: inline-block; margin: 0; padding: 4px 9px; border-radius: 12px; background: #303d46; color: #c3d0d9; font-size: .8rem; }
 .connection-status[data-connection="available"] { background: #124f38; color: #75ebba; }
@@ -65,7 +66,7 @@ svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width:
   .shell { padding: 16px 12px 28px; }
   .eyebrow { max-width: 110px; font-size: .9rem; }
   .tv-card, .form-card { padding: 18px; border-radius: 18px; }
-  .tv-info h1 { font-size: 1.4rem; }
+  .tv-info { margin-right: 72px; }
   .power-button { top: 18px; right: 18px; width: 56px; height: 56px; padding: 15px; }
   .settings-dialog { padding: 18px; }
 }
