@@ -203,6 +203,9 @@ for (const width of [320, 1280]) {
     const card = page.locator('.tv-card');
     const box = (await card.boundingBox())!;
     expect(Math.abs(box.width - 296)).toBeLessThanOrEqual(1);
+    expect(await card.evaluate((element) => getComputedStyle(element).borderRadius)).toBe('28px');
+    const logo = (await card.locator('.tv-brand').boundingBox())!;
+    expect(logo.width).toBe(60); expect(logo.height).toBe(28);
     const channels = remote(page).getByRole('group', { name: 'Каналы', exact: true });
     const colors = remote(page).getByRole('group', { name: 'Цветные кнопки', exact: true });
     await expect(channels.getByRole('button')).toHaveCount(2);
