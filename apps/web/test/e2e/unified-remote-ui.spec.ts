@@ -75,8 +75,9 @@ for (const width of [320, 1280]) {
     expect(Math.abs(closeBox.x + closeBox.width / 2 - iconBox.x - iconBox.width / 2)).toBeLessThanOrEqual(1);
     expect(Math.abs(closeBox.y + closeBox.height / 2 - iconBox.y - iconBox.height / 2)).toBeLessThanOrEqual(1);
     await expect(close.locator('svg')).toHaveAttribute('aria-hidden', 'true');
-    for (const heading of ['Телевизор', 'Подключение', 'Питание и WOL']) await expect(dialog.getByRole('heading', { name: heading, exact: true })).toBeVisible();
-    const controls = dialog.locator('input, button:not([aria-label="Закрыть настройки"])');
+    for (const heading of ['Подключение', 'Включение по сети']) await expect(dialog.getByRole('heading', { name: heading, exact: true })).toBeVisible();
+    await expect(dialog.getByRole('heading', { name: 'Телевизор', exact: true })).toHaveCount(0);
+    const controls = dialog.locator('input, button:not([aria-label])');
     const dimensions = await controls.evaluateAll((elements) => elements.map((element) => ({ height: element.getBoundingClientRect().height, radius: getComputedStyle(element).borderRadius })));
     expect(new Set(dimensions.map(({ height }) => height)).size).toBe(1);
     expect(new Set(dimensions.map(({ radius }) => radius)).size).toBe(1);
@@ -91,6 +92,50 @@ for (const width of [320, 1280]) {
     const screenshot = testInfo.outputPath(`settings-${width}.png`);
     await dialog.screenshot({ path: screenshot });
     await testInfo.attach(`settings-${width}`, { path: screenshot, contentType: 'image/png' });
+  });
+}
+
+for (const width of [320, 1280]) {
+  test(`network wake tooltip follows hover and keyboard focus at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 960 });
+    const { mutations } = await fixture(page, 'version-known');
+    await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+    const dialog = settings(page);
+    const info = dialog.getByRole('button', { name: 'О включении по сети', exact: true });
+    await expect(info).toHaveCount(1);
+    const tooltip = dialog.locator('[role="tooltip"]');
+    await expect(tooltip).toBeHidden();
+    await info.hover();
+    await expect(tooltip).toBeVisible();
+    await expect(tooltip).toContainText('Для включения нужен MAC-адрес');
+    await expect(tooltip).toContainText('Отправка сигнала не гарантирует включение');
+    const bounds = (await tooltip.boundingBox())!;
+    const dialogBounds = (await dialog.boundingBox())!;
+    expect(bounds.x).toBeGreaterThanOrEqual(dialogBounds.x);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(dialogBounds.x + dialogBounds.width);
+    expect(bounds.y).toBeGreaterThanOrEqual(dialogBounds.y);
+    expect(bounds.y + bounds.height).toBeLessThanOrEqual(dialogBounds.y + dialogBounds.height);
+    await dialog.getByRole('heading', { name: 'Настройки телевизора', exact: true }).hover();
+    await expect(tooltip).toBeHidden();
+    await dialog.getByRole('button', { name: 'Обновить статус', exact: true }).focus();
+    await page.keyboard.press('Tab');
+    await expect(info).toBeFocused();
+    await expect(tooltip).toBeVisible();
+    await dialog.getByRole('button', { name: 'Закрыть настройки' }).focus();
+    await expect(tooltip).toBeHidden();
+    await dialog.getByRole('button', { name: 'Закрыть настройки' }).click();
+    await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+    await expect(tooltip).toBeHidden();
+    const identity = dialog.locator('.settings-identity');
+    await expect(identity).toContainText('Модель: Synthetic TV');
+    await expect(identity).toContainText('webOS 6.5.3');
+    if (width === 1280) {
+      const model = (await identity.locator('.settings-model').boundingBox())!;
+      const version = (await identity.locator('.tv-version').boundingBox())!;
+      expect(Math.abs(model.y - version.y)).toBeLessThanOrEqual(1);
+    }
+    expect(mutations).toEqual([]);
+    await noOverflow(page);
   });
 }
 

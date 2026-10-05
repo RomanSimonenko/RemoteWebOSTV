@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { IconPower } from '@tabler/icons-react';
+import { IconInfoCircle, IconPower } from '@tabler/icons-react';
 import type { TvPowerOperation, TvPowerState } from '@remote-webos-tv/contracts';
 import { useTvPower } from '../useTvPower.js';
 
@@ -35,6 +35,7 @@ function terminalError(operation: TvPowerOperation | null | undefined): string {
 }
 
 export function PowerControls({ csrfToken, active, onSessionExpired, onStateChange, settingsTarget, activityTarget, settingsOpen = false, onConfirmationChange }: Props) {
+  const networkHelpId = useId();
   const { state, loading, error, message, busy, refresh, start, saveMac, cancel } = useTvPower(active, csrfToken, onSessionExpired);
   const [mac, setMac] = useState('');
   const [confirming, setConfirming] = useState(false);
@@ -75,15 +76,19 @@ export function PowerControls({ csrfToken, active, onSessionExpired, onStateChan
       {operation.action !== 'recover' && <button type="button" disabled={busy} onClick={() => cancel(operation.id)}>Отменить ожидание</button>}
     </div>}
   </>;
-  const settings = <section className="settings-section"><h3>Питание и WOL</h3>
+  const settings = <section className="settings-section">
+    <div className="settings-network-heading"><h3>Включение по сети</h3><button className="settings-help" type="button" aria-label="О включении по сети" aria-describedby={networkHelpId}><IconInfoCircle aria-hidden="true" /></button>
+      <div className="settings-tooltip" id={networkHelpId} role="tooltip">
+        <p>Для включения нужен MAC-адрес телевизора. После изменения IP проверьте, что MAC принадлежит этому телевизору.</p>
+        <p>Отправка сигнала не гарантирует включение. Сервер должен находиться в сети телевизора; WOL зависит от модели и настроек питания.</p>
+      </div>
+    </div>
     {settingsOpen && activity(false)}
     <form onSubmit={(event) => { event.preventDefault(); saveMac(mac.trim() || null); }} noValidate>
       <label>MAC-адрес телевизора<input autoComplete="off" value={mac} disabled={disabled} onChange={(event) => setMac(event.target.value)} /></label>
       <button className="settings-primary" type="submit" disabled={disabled}>Сохранить MAC</button>
       <button type="button" disabled={disabled || !state?.mac} onClick={() => saveMac(null)}>Очистить MAC</button>
     </form>
-    <p>Для включения нужен MAC-адрес телевизора. После изменения IP проверьте, что MAC принадлежит этому телевизору.</p>
-    <p>Отправка сигнала не гарантирует включение. Сервер должен находиться в сети телевизора; WOL зависит от модели и настроек питания.</p>
     <button type="button" disabled={loading} onClick={refresh}>Обновить статус питания</button>
   </section>;
   const backgroundActivity = <div className={settingsOpen ? 'reserved-activity' : undefined} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{activity(true)}</div>;

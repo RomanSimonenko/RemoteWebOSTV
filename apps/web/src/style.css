@@ -61,6 +61,16 @@ svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width:
 .settings-dialog p { font-size: .85rem; }
 .settings-section { margin-top: 20px; padding-top: 20px; border-top: 1px solid #39474f; }
 .settings-section h3 { margin: 0 0 12px; font-size: 1rem; }
+.settings-identity { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; }
+.settings-identity .tv-version { margin: 0; }
+.settings-network-heading { display: flex; align-items: center; gap: 8px; position: relative; margin-bottom: 12px; }
+.settings-network-heading h3 { margin: 0; }
+.settings-dialog .settings-section .settings-help { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 44px; height: 44px; min-height: 44px; padding: 8px; border-radius: 10px; }
+.settings-help svg { width: 22px; height: 22px; }
+.settings-tooltip { display: none; position: absolute; z-index: 2; bottom: calc(100% + 8px); left: 0; right: 0; padding: 14px; border: 1px solid #526674; border-radius: 12px; background: #24343f; box-shadow: 0 12px 32px #0008; }
+.settings-tooltip p { margin: 0; }
+.settings-tooltip p + p { margin-top: 12px; }
+.settings-help:hover + .settings-tooltip, .settings-help:focus-visible + .settings-tooltip { display: block; }
 .settings-dialog input, .settings-dialog .settings-section button { height: 48px; min-height: 48px; border-radius: 10px; padding: 10px 12px; font-size: .85rem; line-height: 1.2; }
 .settings-dialog .settings-section button { width: 100%; }
 .settings-dialog form { gap: 12px; margin-top: 16px; }

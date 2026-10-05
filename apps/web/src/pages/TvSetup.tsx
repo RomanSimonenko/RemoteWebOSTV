@@ -124,9 +124,9 @@ export function TvSetup({ username, csrfToken, onSessionExpired, settingsOpen, o
     </div>
     {!tv && <>{addressForm}<button type="button" disabled={loading} onClick={refresh}>Обновить статус</button></>}
     <SettingsDialog open={settingsOpen} onClose={onCloseSettings}>
-      {tv ? <><section className="settings-section"><h3>Телевизор</h3>
+      {tv ? <><section className="settings-section">
         {settingsOpen && username && <p className="session-caption">Вы вошли как {username}.</p>}
-        <p>Текущий телевизор: {tv.identity.model}</p>{settingsOpen && <p className="tv-version">{tv.identity.platformVersion ? `webOS ${tv.identity.platformVersion}` : 'Версия неизвестна'}</p>}
+        <p className="settings-identity"><span className="settings-model">Модель: {tv.identity.model}</span>{settingsOpen && <span className="tv-version">{tv.identity.platformVersion ? `webOS ${tv.identity.platformVersion}` : 'Версия неизвестна'}</span>}</p>
       </section><section className="settings-section"><h3>Подключение</h3>
         {settingsOpen && activity(false)}<p>Соединение: {connectionText}</p><p>Сохранённый IP: {tv.host}</p>{addressForm}
         <button type="button" disabled={loading} onClick={refresh}>Обновить статус</button>
