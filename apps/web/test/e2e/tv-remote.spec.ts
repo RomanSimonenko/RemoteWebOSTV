@@ -153,6 +153,25 @@ test('native keyboard maps ten controls with one Enter owner and ignores modifie
   expect(requests).toHaveLength(10);
 });
 
+for (const mode of ['mouse', 'keyboard', 'space'] as const) {
+  test(`native ${mode} hold repeats at controlled times and stops without a release duplicate`, async ({ page, tv }) => {
+    await pair(page, tv);
+    const button = remote(page).getByRole('button', { name: 'Громкость +', exact: true });
+    await button.scrollIntoViewIfNeeded();
+    await page.clock.install(); await page.clock.pauseAt(new Date(Date.now() + 100));
+    const first = commandResponse(page, tv);
+    if (mode === 'mouse') { const box = (await button.boundingBox())!; await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down(); }
+    else if (mode === 'space') { await button.focus(); await page.keyboard.down('Space'); }
+    else { await remote(page).focus(); await page.keyboard.down('+'); }
+    await sent(await first);
+    const second = commandResponse(page, tv); await page.clock.runFor(400); await sent(await second);
+    const third = commandResponse(page, tv); await page.clock.runFor(200); await sent(await third);
+    if (mode === 'mouse') await page.mouse.up(); else await page.keyboard.up(mode === 'space' ? 'Space' : '+');
+    await page.clock.runFor(1000);
+    expect(tv.tv.pointerFrames).toEqual([frame('VOLUMEUP'), frame('VOLUMEUP'), frame('VOLUMEUP')]);
+  });
+}
+
 test('native held keys do not repeat or queue while a genuine response is pending', async ({ page, tv }) => {
   await pair(page, tv);
   await remote(page).focus();
