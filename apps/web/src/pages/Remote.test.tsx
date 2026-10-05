@@ -5,7 +5,7 @@ import { Remote } from './Remote.js';
 import { App } from '../App.js';
 import { api, ApiFailure } from '../api.js';
 
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 test('saved television exposes the browser remote beside its setup', async () => {
   vi.stubGlobal('fetch', vi.fn(async (path: string) => new Response(JSON.stringify(path === '/api/tv'
     ? { tv: { host: '192.168.1.20', identity: { model: 'Synthetic TV' } }, connection: 'available', operation: null }
@@ -53,6 +53,83 @@ async function mount(command = (input: { id: string; button: string }) => Promis
 }
 const buttons = [['Вверх', 'UP'], ['Вниз', 'DOWN'], ['Влево', 'LEFT'], ['Вправо', 'RIGHT'], ['OK', 'ENTER'], ['Назад', 'BACK'], ['Домой', 'HOME'], ['Громкость +', 'VOLUME_UP'], ['Громкость −', 'VOLUME_DOWN'], ['Без звука', 'MUTE']] as const;
 const digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] as const;
+function pointer(target: Element | Window, type: string) {
+  const event = new Event(type, { bubbles: true });
+  Object.defineProperties(event, { button: { value: 0 }, isPrimary: { value: true }, pointerId: { value: 1 } });
+  fireEvent(target, event);
+}
+test.each(['Вверх', 'Вниз', 'Влево', 'Вправо', 'Громкость −', 'Громкость +'])('pointer hold repeats %s and release click does not add another command', async (label) => {
+  vi.useFakeTimers(); const view = await mount(); const button = screen.getByRole('button', { name: label });
+  pointer(button, 'pointerdown'); await act(async () => {});
+  expect(view.commands()).toHaveLength(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(400); }); expect(view.commands()).toHaveLength(2);
+  pointer(window, 'pointerup'); fireEvent.click(button, { detail: 1 });
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); expect(view.commands()).toHaveLength(2);
+});
+test.each(['blur', 'leave', 'cancel', 'hidden', 'unmount'])('hold stops on %s', async (ending) => {
+  vi.useFakeTimers(); const view = await mount(); const button = screen.getByRole('button', { name: 'Вверх' });
+  pointer(button, 'pointerdown'); await act(async () => {});
+  if (ending === 'blur') fireEvent.blur(button);
+  if (ending === 'leave') pointer(button, 'pointerout');
+  if (ending === 'cancel') pointer(window, 'pointercancel');
+  if (ending === 'hidden') { vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden'); fireEvent(document, new Event('visibilitychange')); }
+  if (ending === 'unmount') view.unmount();
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); expect(view.commands()).toHaveLength(1);
+});
+test.each(['Канал −', 'Канал +', 'OK', 'Без звука', '1', 'Красная'])('%s never starts pointer repetition', async (label) => {
+  vi.useFakeTimers(); const view = await mount(); const button = screen.getByRole('button', { name: label });
+  pointer(button, 'pointerdown'); await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  expect(view.commands()).toHaveLength(0);
+  pointer(window, 'pointerup'); fireEvent.click(button, { detail: 1 }); await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); expect(view.commands()).toHaveLength(1);
+});
+test('focused volume repeats with Space and stops when focus leaves the remote', async () => {
+  vi.useFakeTimers(); const view = await mount(); const button = screen.getByRole('button', { name: 'Громкость +' }); button.focus();
+  expect(fireEvent.keyDown(button, { key: ' ' })).toBe(false); await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(400); }); expect(view.commands()).toHaveLength(2);
+  screen.getByRole('button', { name: 'Настройки' }).focus();
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); expect(view.commands()).toHaveLength(2);
+});
+test('settings block an existing hold in a retained remote', async () => {
+  vi.useFakeTimers(); const commands: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+    if (path === '/api/tv/remote') return response(ready);
+    const input = JSON.parse(init!.body as string); commands.push(input.button); return response({ id: input.id, outcome: 'sent' });
+  }));
+  const props = { csrfToken, active: true, onSessionExpired: vi.fn() };
+  const view = render(<Remote {...props} />); await act(async () => {});
+  pointer(screen.getByRole('button', { name: 'Вверх' }), 'pointerdown'); await act(async () => {});
+  view.rerender(<Remote {...props} interactionBlocked />);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); expect(commands).toEqual(['UP']);
+});
+test('pending hold ticks are discarded and an unknown result ends repetition', async () => {
+  vi.useFakeTimers(); const pending = barrier<Response>(); const view = await mount(() => pending.promise);
+  pointer(screen.getByRole('button', { name: 'Вверх' }), 'pointerdown'); await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); expect(view.commands()).toHaveLength(1);
+  const id = JSON.parse(view.commands()[0]![1]!.body as string).id;
+  pending.resolve(response({ id, outcome: 'unknown', error: { code: 'COMMAND_RESULT_UNKNOWN', message: 'Unknown' } })); await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); expect(view.commands()).toHaveLength(1);
+});
+test('held arrow repeats after 400ms then every 200ms and stops on key release', async () => {
+  vi.useFakeTimers(); const view = await mount();
+  const remote = screen.getByRole('group', { name: 'Пульт' }); remote.focus();
+  fireEvent.keyDown(remote, { key: 'ArrowUp' }); await act(async () => {});
+  expect(view.commands()).toHaveLength(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(399); }); expect(view.commands()).toHaveLength(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); }); expect(view.commands()).toHaveLength(2);
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); }); expect(view.commands()).toHaveLength(3);
+  fireEvent.keyUp(remote, { key: 'ArrowUp' });
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); expect(view.commands()).toHaveLength(3);
+});
+test.each([
+  ['Канал −', 'CHANNEL_DOWN'], ['Канал +', 'CHANNEL_UP'],
+  ['Красная', 'RED'], ['Зелёная', 'GREEN'], ['Жёлтая', 'YELLOW'], ['Синяя', 'BLUE'],
+])('new remote button %s sends exactly one protected command', async (label, button) => {
+  const view = await mount();
+  fireEvent.click(screen.getByRole('button', { name: label })); await act(async () => {});
+  expect(view.commands()).toHaveLength(1);
+  expect(JSON.parse(view.commands()[0]![1]!.body as string)).toEqual({ id: expect.any(String), button });
+});
 test('successful feedback expires after two seconds and a new success resets its timer', async () => {
   vi.useFakeTimers(); const view = await mount();
   const status = () => screen.getByRole('status', { name: 'Команды телевизора' }).textContent;
@@ -121,7 +198,7 @@ test.each(['UNAVAILABLE', 'BUSY', 'UNSUPPORTED'])('numeric keypad stays visible 
 });
 test('icon controls retain accessible names and tooltips without visible labels', async () => {
   await mount();
-  expect(within(screen.getByRole('group', { name: 'Пульт' })).getAllByRole('button')).toHaveLength(20);
+  expect(within(screen.getByRole('group', { name: 'Пульт' })).getAllByRole('button')).toHaveLength(26);
   for (const [label] of buttons) {
     const button = screen.getByRole('button', { name: label });
     expect(button.title).toBe(label);

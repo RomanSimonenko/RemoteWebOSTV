@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { IconChevronUp, IconChevronDown, IconChevronLeft, IconChevronRight, IconHome, IconArrowBackUp, IconMinus, IconPlus, IconVolumeOff, type Icon } from '@tabler/icons-react';
 import type { BasicTvButton, TvRemoteState, TvCommandResult } from '@remote-webos-tv/contracts';
@@ -25,10 +25,14 @@ const buttons: ReadonlyArray<readonly [BasicTvButton, string]> = [
   ['HOME', 'Домой'], ['BACK', 'Назад'], ['VOLUME_DOWN', 'Громкость −'], ['MUTE', 'Без звука'], ['VOLUME_UP', 'Громкость +'],
 ];
 const numericButtons: ReadonlyArray<BasicTvButton> = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
+const repeatable = new Set<BasicTvButton>(['UP', 'DOWN', 'LEFT', 'RIGHT', 'VOLUME_DOWN', 'VOLUME_UP']);
+const channelButtons = [['CHANNEL_DOWN', 'Канал −'], ['CHANNEL_UP', 'Канал +']] as const;
+const colorButtons = [['RED', 'Красная'], ['GREEN', 'Зелёная'], ['YELLOW', 'Жёлтая'], ['BLUE', 'Синяя']] as const;
 const icons: Partial<Record<BasicTvButton, Icon>> = {
   UP: IconChevronUp, DOWN: IconChevronDown, LEFT: IconChevronLeft, RIGHT: IconChevronRight,
   HOME: IconHome, BACK: IconArrowBackUp,
   VOLUME_DOWN: IconMinus, VOLUME_UP: IconPlus, MUTE: IconVolumeOff,
+  CHANNEL_DOWN: IconMinus, CHANNEL_UP: IconPlus,
 };
 const keys: Readonly<Record<string, BasicTvButton>> = {
   ArrowUp: 'UP', ArrowDown: 'DOWN', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT', Enter: 'ENTER',
@@ -41,6 +45,47 @@ export function Remote({ csrfToken, active, onSessionExpired, onBusyChange, inte
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<{ text: string; alert: boolean } | null>(null);
   const runtime = useRef<Runtime | null>(null);
+  const held = useRef<{ button: BasicTvButton; key?: string; pointerId?: number; timer: ReturnType<typeof setTimeout> | undefined } | null>(null);
+  const [heldButton, setHeldButton] = useState<BasicTvButton | null>(null);
+  const suppressedClick = useRef<BasicTvButton | null>(null);
+  const stopHold = useCallback(() => {
+    if (held.current?.timer !== undefined) clearTimeout(held.current.timer);
+    held.current = null; setHeldButton(null);
+  }, []);
+  const sendLatest = useRef(send);
+  sendLatest.current = send;
+  function beginHold(button: BasicTvButton, owner: { key?: string; pointerId?: number }) {
+    if (held.current?.button === button) return;
+    stopHold();
+    if (interactionBlocked || !active || !state?.enabled || runtime.current?.pending || document.visibilityState === 'hidden') return;
+    const hold = { button, ...owner, timer: undefined as ReturnType<typeof setTimeout> | undefined };
+    held.current = hold; setHeldButton(button);
+    void sendLatest.current(button);
+    function tick() {
+      if (held.current !== hold) return;
+      // Never queue behind an outstanding command; missed ticks are discarded.
+      if (!runtime.current?.pending) void sendLatest.current(button);
+      if (held.current === hold) hold.timer = setTimeout(tick, 200);
+    }
+    hold.timer = setTimeout(tick, 400);
+  }
+  useEffect(() => {
+    if (!active || interactionBlocked || !state?.enabled) stopHold();
+  }, [active, interactionBlocked, state?.enabled, stopHold]);
+  useEffect(() => () => stopHold(), [csrfToken, stopHold]);
+  useEffect(() => {
+    const releasePointer = (event: PointerEvent) => { if (held.current?.pointerId === event.pointerId) stopHold(); };
+    const releaseKey = (event: globalThis.KeyboardEvent) => { if (held.current?.key === event.key) stopHold(); };
+    const visibility = () => { if (document.visibilityState !== 'visible') stopHold(); };
+    window.addEventListener('pointerup', releasePointer); window.addEventListener('pointercancel', releasePointer);
+    window.addEventListener('keyup', releaseKey); window.addEventListener('blur', stopHold);
+    document.addEventListener('visibilitychange', visibility);
+    return () => {
+      stopHold(); window.removeEventListener('pointerup', releasePointer); window.removeEventListener('pointercancel', releasePointer);
+      window.removeEventListener('keyup', releaseKey); window.removeEventListener('blur', stopHold);
+      document.removeEventListener('visibilitychange', visibility);
+    };
+  }, [stopHold]);
   const expired = useRef(onSessionExpired);
   expired.current = onSessionExpired;
   useEffect(() => { onBusyChange?.(active && busy); }, [active, busy, onBusyChange]);
@@ -99,15 +144,18 @@ export function Remote({ csrfToken, active, onSessionExpired, onBusyChange, inte
       let id: string;
       try { id = requestId(); }
       catch {
+        stopHold();
         // No API call has started: this failure proves the command was not sent.
         setFeedback({ text: 'Команда не отправлена. Не удалось подготовить идентификатор команды.', alert: true });
         return;
       }
       const result: TvCommandResult = await api.sendCommand({ id, button }, csrfToken, current.command.signal);
       if (!current.active) return;
+      if (result.outcome !== 'sent') stopHold();
       setFeedback({ text: result.outcome === 'sent' ? 'Команда отправлена' : result.outcome === 'unknown' ? unknownMessage : rejectionMessages[result.error.code], alert: result.outcome !== 'sent' });
     } catch (cause) {
       if (!current.active) return;
+      stopHold();
       if (cause instanceof ApiFailure && cause.status === 401) {
         current.active = false; setState(null); expired.current();
       } else {
@@ -124,18 +172,23 @@ export function Remote({ csrfToken, active, onSessionExpired, onBusyChange, inte
 
   function keyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (interactionBlocked) return;
+    if (event.ctrlKey || event.altKey || event.metaKey) stopHold();
     const target = event.target as HTMLElement;
     if (!event.currentTarget.contains(document.activeElement) || target.closest('summary, input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
-    const button = keys[event.key];
+    const focusedButton = target.closest<HTMLButtonElement>('button[data-command]');
+    const spaceButton = event.key === ' ' ? focusedButton?.dataset.command as BasicTvButton | undefined : undefined;
+    const button = keys[event.key] ?? (spaceButton && repeatable.has(spaceButton) ? spaceButton : undefined);
     if (!button) return;
     if (event.repeat || event.ctrlKey || event.altKey || event.metaKey) {
       // Suppress the button's native Enter click as well as the mapped command.
-      if (event.key === 'Enter' && target.closest('button')) event.preventDefault();
+      if ((event.key === 'Enter' || spaceButton) && target.closest('button')) event.preventDefault();
       return;
     }
     if (document.visibilityState === 'hidden') { event.preventDefault(); return; }
     // One owner for Enter, including when a native button has focus.
-    event.preventDefault(); void send(button);
+    event.preventDefault();
+    if (repeatable.has(button)) beginHold(button, { key: event.key });
+    else { stopHold(); void send(button); }
   }
 
   if (!active) return null;
@@ -143,9 +196,18 @@ export function Remote({ csrfToken, active, onSessionExpired, onBusyChange, inte
   const explanation = readError || (state ? state.enabled ? '' : reasons[state.reason] : 'Проверяем доступность пульта…');
   const controls = (entries: typeof buttons) => entries.map(([button, label]) => {
     const ButtonIcon = icons[button];
-    return <button type="button" key={button} aria-label={label} title={label} className={button === 'ENTER' ? 'ok-button' : undefined} style={{ gridArea: button }} disabled={disabled} onClick={() => void send(button)}>
+    return <button type="button" key={button} data-command={button} aria-label={label} title={label} className={button === 'ENTER' ? 'ok-button' : undefined} style={{ gridArea: button, touchAction: repeatable.has(button) ? 'none' : undefined }} disabled={disabled && heldButton !== button}
+      onPointerDown={(event) => {
+        if (!repeatable.has(button) || event.button !== 0 || !event.isPrimary) return;
+        event.preventDefault(); event.currentTarget.focus(); suppressedClick.current = button;
+        beginHold(button, { pointerId: event.pointerId });
+      }}
+      onPointerLeave={() => { if (held.current?.button === button && held.current.pointerId !== undefined) stopHold(); }}
+      onBlur={stopHold}
+      onClick={(event) => { if (event.detail > 0 && suppressedClick.current === button) { suppressedClick.current = null; return; } void send(button); }}>
     {ButtonIcon && <ButtonIcon aria-hidden="true" />}
     {button === 'ENTER' && 'OK'}
+    {(button === 'CHANNEL_DOWN' || button === 'CHANNEL_UP') && 'CH'}
   </button>;
   });
   const activity = <div className="remote-activity">
@@ -153,11 +215,13 @@ export function Remote({ csrfToken, active, onSessionExpired, onBusyChange, inte
     <p role="status" aria-label="Команды телевизора" aria-live="polite">{!busy && feedback && !feedback.alert ? feedback.text : ''}</p>
     {feedback?.alert && <p role="alert" className="error">{feedback.text}</p>}
   </div>;
-  return <><div role="group" aria-label="Пульт" aria-describedby="remote-help" aria-busy={busy} tabIndex={0} className="remote" onKeyDown={keyDown}>
+  return <><div role="group" aria-label="Пульт" aria-describedby="remote-help" aria-busy={busy} tabIndex={0} className="remote" onKeyDown={keyDown} onBlur={stopHold}>
     <h2 className="visually-hidden">Пульт</h2>
     <div role="group" aria-label="Цифры" className="remote-buttons numeric-pad">{numericButtons.map((button) => <button type="button" key={button} aria-label={button} title={button} disabled={disabled} onClick={() => void send(button)}>{button}</button>)}</div>
     <div role="group" aria-label="Навигация" className="remote-buttons d-pad">{controls(buttons.slice(0, 5))}</div>
     <div role="group" aria-label="Домой и назад" className="remote-buttons home-back">{controls(buttons.slice(5, 7))}</div>
     <div role="group" aria-label="Громкость" className="remote-buttons volume">{controls(buttons.slice(7))}</div>
+    <div role="group" aria-label="Каналы" className="remote-buttons channels">{controls(channelButtons)}</div>
+    <div role="group" aria-label="Цветные кнопки" className="remote-buttons color-buttons">{colorButtons.map(([button, label]) => <button type="button" key={button} aria-label={label} title={label} data-color={button} disabled={disabled} onClick={() => void send(button)}><span aria-hidden="true" className="color-mark" /></button>)}</div>
   </div>{activityTarget ? createPortal(activity, activityTarget) : activity}</>;
 }

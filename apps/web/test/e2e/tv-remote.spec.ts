@@ -90,6 +90,22 @@ test('all ten browser controls reach the pointer once; saved TV remains usable a
   expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
 });
 
+test('channel and color buttons send exact pointer frames once without replay', async ({ page, tv }) => {
+  await pair(page, tv);
+  const entries = [['Канал −', 'CHANNEL_DOWN', 'CHANNELDOWN'], ['Канал +', 'CHANNEL_UP', 'CHANNELUP'], ['Красная', 'RED', 'RED'], ['Зелёная', 'GREEN', 'GREEN'], ['Жёлтая', 'YELLOW', 'YELLOW'], ['Синяя', 'BLUE', 'BLUE']];
+  for (const [label, button, wire] of entries) {
+    const response = commandResponse(page, tv);
+    await remote(page).getByRole('button', { name: label!, exact: true }).click();
+    const result = await response; await sent(result);
+    expect(result.request().postDataJSON().button).toBe(button);
+    await tv.tv.waitForPointerFrameCount(entries.findIndex((entry) => entry[0] === label) + 1);
+    expect(tv.tv.pointerFrames.at(-1)).toBe(frame(wire!));
+  }
+  expect(tv.tv.pointerFrames).toEqual(entries.map((entry) => frame(entry[2]!)));
+  await page.reload(); await ready(page);
+  expect(tv.tv.pointerFrames).toEqual(entries.map((entry) => frame(entry[2]!)));
+});
+
 test('numeric keypad sends each digit once through authenticated API and pointer without replay', async ({ page, tv }) => {
   await pair(page, tv);
   const digits = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
@@ -136,6 +152,25 @@ test('native keyboard maps ten controls with one Enter owner and ignores modifie
   expect(tv.tv.pointerFrames).toEqual(['ENTER', 'UP', 'DOWN', 'LEFT', 'RIGHT', 'BACK', 'HOME', 'VOLUMEUP', 'VOLUMEDOWN', 'MUTE'].map(frame));
   expect(requests).toHaveLength(10);
 });
+
+for (const mode of ['mouse', 'keyboard', 'space'] as const) {
+  test(`native ${mode} hold repeats at controlled times and stops without a release duplicate`, async ({ page, tv }) => {
+    await pair(page, tv);
+    const button = remote(page).getByRole('button', { name: 'Громкость +', exact: true });
+    await button.scrollIntoViewIfNeeded();
+    await page.clock.install(); await page.clock.pauseAt(new Date(Date.now() + 100));
+    const first = commandResponse(page, tv);
+    if (mode === 'mouse') { const box = (await button.boundingBox())!; await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down(); }
+    else if (mode === 'space') { await button.focus(); await page.keyboard.down('Space'); }
+    else { await remote(page).focus(); await page.keyboard.down('+'); }
+    await sent(await first);
+    const second = commandResponse(page, tv); await page.clock.runFor(400); await sent(await second);
+    const third = commandResponse(page, tv); await page.clock.runFor(200); await sent(await third);
+    if (mode === 'mouse') await page.mouse.up(); else await page.keyboard.up(mode === 'space' ? 'Space' : '+');
+    await page.clock.runFor(1000);
+    expect(tv.tv.pointerFrames).toEqual([frame('VOLUMEUP'), frame('VOLUMEUP'), frame('VOLUMEUP')]);
+  });
+}
 
 test('native held keys do not repeat or queue while a genuine response is pending', async ({ page, tv }) => {
   await pair(page, tv);

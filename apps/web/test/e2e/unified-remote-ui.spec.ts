@@ -203,6 +203,16 @@ for (const width of [320, 1280]) {
     const card = page.locator('.tv-card');
     const box = (await card.boundingBox())!;
     expect(Math.abs(box.width - 296)).toBeLessThanOrEqual(1);
+    expect(await card.evaluate((element) => getComputedStyle(element).borderRadius)).toBe('40px');
+    const logo = (await card.locator('.tv-brand').boundingBox())!;
+    expect(logo.width).toBe(60); expect(logo.height).toBe(28);
+    const channels = remote(page).getByRole('group', { name: 'Каналы', exact: true });
+    const colors = remote(page).getByRole('group', { name: 'Цветные кнопки', exact: true });
+    await expect(channels.getByRole('button')).toHaveCount(2);
+    await expect(colors.getByRole('button')).toHaveCount(4);
+    const colorBoxes = await Promise.all((await colors.getByRole('button').all()).map((button) => button.boundingBox()));
+    expect(new Set(colorBoxes.map((button) => button!.y)).size).toBe(1);
+    expect((await colors.boundingBox())!.y).toBeGreaterThan((await channels.boundingBox())!.y);
     const up = remote(page).getByRole('button', { name: 'Вверх', exact: true });
     const power = page.getByRole('button', { name: 'Выключить ТВ', exact: true });
     expect((await power.boundingBox())!.y).toBeLessThan((await up.boundingBox())!.y);
@@ -247,7 +257,13 @@ for (const width of [320, 1280]) {
       if (await button.locator('svg').count() === 0) continue;
       const control = (await button.boundingBox())!;
       const icon = (await button.locator('svg').boundingBox())!;
-      expect(Math.abs(icon.x + icon.width / 2 - control.x - control.width / 2)).toBeLessThanOrEqual(1);
+      if (await button.evaluate((element) => element.closest('.channels') !== null)) {
+        const content = await button.evaluate((element) => {
+          const range = document.createRange(); range.selectNodeContents(element);
+          const bounds = range.getBoundingClientRect(); return { x: bounds.x, width: bounds.width };
+        });
+        expect(Math.abs(content.x + content.width / 2 - control.x - control.width / 2)).toBeLessThanOrEqual(1);
+      } else expect(Math.abs(icon.x + icon.width / 2 - control.x - control.width / 2)).toBeLessThanOrEqual(1);
       expect(Math.abs(icon.y + icon.height / 2 - control.y - control.height / 2)).toBeLessThanOrEqual(1);
     }
     expect(await card.getByRole('status').count()).toBe(0);
