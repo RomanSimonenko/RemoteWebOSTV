@@ -3,6 +3,10 @@ import type { TvPowerState } from '../../../../packages/contracts/src/index.js';
 import { test, tvHost, type TvFixture } from '../support/tv-fixture.js';
 
 const power = (page: Page) => page.getByRole('group', { name: 'Питание телевизора', exact: true });
+const settings = (page: Page) => page.getByRole('dialog', { name: 'Настройки телевизора', exact: true });
+async function openSettings(page: Page) {
+  if (!await settings(page).isVisible()) await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+}
 const off = 'ssap://system/turnOff';
 const mac = '02:00:00:00:00:03';
 const offRequests = (tv: TvFixture) => tv.tv.requests.filter((request) => request.uri === off);
@@ -34,11 +38,13 @@ async function pair(page: Page, tv: TvFixture) {
 }
 
 async function saveMac(page: Page) {
-  await power(page).getByLabel('MAC-адрес телевизора').fill('02-00-00-00-00-03');
+  await openSettings(page);
+  await settings(page).getByLabel('MAC-адрес телевизора').fill('02-00-00-00-00-03');
   const saved = page.waitForResponse((response) => response.url().endsWith('/api/tv/mac') && response.request().method() === 'PUT');
-  await power(page).getByRole('button', { name: 'Сохранить MAC', exact: true }).click();
+  await settings(page).getByRole('button', { name: 'Сохранить MAC', exact: true }).click();
   expect((await saved).status()).toBe(200);
-  await expect(power(page).getByLabel('MAC-адрес телевизора')).toHaveValue(mac);
+  await expect(settings(page).getByLabel('MAC-адрес телевизора')).toHaveValue(mac);
+  await page.keyboard.press('Escape');
 }
 
 async function confirmOff(page: Page) {
@@ -67,12 +73,12 @@ test('cancelled confirmation sends nothing; confirmed power-off sends exact SSAP
   await expect.poll(async () => (await state(page, tv)).operation?.status).toBe('succeeded');
   expect(offRequests(tv)).toEqual([{ id: expect.any(String), type: 'request', uri: off }]);
   expect((await state(page, tv)).operation).toMatchObject({ action: 'power_off', delivery: 'sent' });
-  await expect(power(page).getByRole('status', { name: 'Питание телевизора' })).toContainText('фактическое выключение не подтверждено');
+  await expect(page.getByRole('status', { name: 'Питание телевизора', exact: true })).toContainText('фактическое выключение не подтверждено');
   const attempts = tv.policies.length;
   tv.clock.advance(120_000);
   await tv.status(page);
   await page.reload();
-  await expect(power(page).getByRole('status', { name: 'Питание телевизора' })).toContainText('фактическое выключение не подтверждено');
+  await expect(page.getByRole('status', { name: 'Питание телевизора', exact: true })).toContainText('фактическое выключение не подтверждено');
   expect(tv.policies).toHaveLength(attempts);
   expect(offRequests(tv)).toHaveLength(1);
   expect(tv.wakes).toEqual([]);
@@ -80,18 +86,21 @@ test('cancelled confirmation sends nothing; confirmed power-off sends exact SSAP
 
 test('MAC validation and normalization persist in SQLite across restart; cleared MAC prevents WOL', async ({ page, tv }) => {
   await pair(page, tv);
-  await power(page).getByLabel('MAC-адрес телевизора').fill('00:00:00:00:00:00');
-  await power(page).getByRole('button', { name: 'Сохранить MAC', exact: true }).click();
-  await expect(power(page).getByRole('alert')).toContainText('корректный ненулевой unicast');
+  await openSettings(page);
+  await settings(page).getByLabel('MAC-адрес телевизора').fill('00:00:00:00:00:00');
+  await settings(page).getByRole('button', { name: 'Сохранить MAC', exact: true }).click();
+  await expect(settings(page).getByRole('alert')).toContainText('корректный ненулевой unicast');
   await saveMac(page);
   await tv.replaceTv({ kind: 'success' });
   await tv.restart();
   await page.reload();
   await ready(page);
   expect((await state(page, tv)).mac).toBe(mac);
-  await expect(power(page).getByLabel('MAC-адрес телевизора')).toHaveValue(mac);
-  await power(page).getByRole('button', { name: 'Очистить MAC', exact: true }).click();
+  await openSettings(page);
+  await expect(settings(page).getByLabel('MAC-адрес телевизора')).toHaveValue(mac);
+  await settings(page).getByRole('button', { name: 'Очистить MAC', exact: true }).click();
   await expect.poll(async () => (await state(page, tv)).mac).toBeNull();
+  await page.keyboard.press('Escape');
   await tv.restart();
   await page.reload();
   await ready(page);
@@ -100,7 +109,7 @@ test('MAC validation and normalization persist in SQLite across restart; cleared
   await tv.status(page);
   tv.clock.advance(60_000);
   await expect.poll(async () => (await state(page, tv)).operation?.status).toBe('failed');
-  await expect(power(page).getByRole('button', { name: 'Включить ТВ', exact: true })).toBeDisabled();
+  await expect(power(page).getByRole('button', { name: 'Питание ТВ', exact: true })).toBeDisabled();
   const rejected = await page.context().request.post(`${tv.origin}/api/tv/power`, {
     headers: await headers(page, tv), data: { id: '10000000-0000-4000-8000-000000000001', action: 'wake' },
   });
@@ -127,7 +136,7 @@ test('double click and stale second tab admit one wake; unavailable retry recove
   expect(tv.wakes[0]!.macs).toEqual([mac]);
   const acceptedId = (await state(page, tv)).operation!.id;
   await page.reload();
-  await expect(power(page).getByRole('button', { name: 'Отменить ожидание', exact: true })).toBeVisible();
+  await expect(page.locator('.tv-activity').getByRole('button', { name: 'Отменить ожидание', exact: true })).toBeVisible();
   expect((await state(page, tv)).operation!.id).toBe(acceptedId);
   wake.release();
   await expect.poll(() => tv.clock.nextDelay).toBe(1000);
@@ -151,9 +160,11 @@ test('unexpected disconnect runs one bounded recovery without WOL or PROMPT and 
   await tv.status(page);
   await expect.poll(() => tv.clock.nextDelay).toBe(1000);
   await page.reload();
-  await expect(power(page).getByRole('status', { name: 'Питание телевизора' })).toHaveText('Восстанавливаем соединение с телевизором');
-  await expect(power(page).getByRole('button', { name: 'Отменить ожидание', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Подключиться снова', exact: true })).toBeDisabled();
+  await expect(page.getByRole('status', { name: 'Питание телевизора', exact: true })).toHaveText('Восстанавливаем соединение с телевизором');
+  await expect(page.locator('.tv-activity').getByRole('button', { name: 'Отменить ожидание', exact: true })).toHaveCount(0);
+  await openSettings(page);
+  await expect(settings(page).getByRole('button', { name: 'Подключиться снова', exact: true })).toBeDisabled();
+  await page.keyboard.press('Escape');
   expect((await tv.status(page)).operation).toBeNull();
   await tv.replaceTv({ kind: 'success' });
   tv.clock.advance(1000);
@@ -176,7 +187,7 @@ test('recovery deadline ends retries and status reads never start another cycle'
   tv.clock.advance(120_000);
   await tv.status(page);
   await page.reload();
-  await expect(power(page).getByRole('alert')).toContainText('Не удалось подключиться');
+  await expect(page.locator('.power-activity').getByRole('alert')).toContainText('Не удалось подключиться');
   expect(tv.policies).toHaveLength(attempts);
   expect(tv.wakes).toEqual([]);
 });
@@ -195,12 +206,14 @@ test('lost genuine power response reports uncertainty and never replays shutdown
     await route.abort('failed');
   });
   await confirmOff(page);
-  await expect(power(page).getByRole('alert')).toContainText('Результат операции неизвестен');
+  await expect(page.locator('.power-activity').getByRole('alert')).toContainText('Результат операции неизвестен');
   await page.unroute(`${tv.origin}/api/tv/power`);
   await expect.poll(async () => (await state(page, tv)).operation?.status).toBe('succeeded');
   await tv.replaceTv({ kind: 'success' });
-  await expect(page.getByRole('button', { name: 'Подключиться снова', exact: true })).toBeEnabled();
-  await page.getByRole('button', { name: 'Подключиться снова', exact: true }).click();
+  await openSettings(page);
+  await expect(settings(page).getByRole('button', { name: 'Подключиться снова', exact: true })).toBeEnabled();
+  await settings(page).getByRole('button', { name: 'Подключиться снова', exact: true }).click();
+  await page.keyboard.press('Escape');
   await ready(page);
   await page.reload();
   await ready(page);
@@ -237,7 +250,7 @@ test('another session cannot cancel wake; initiating logout aborts transport and
     await expect.poll(() => tv.clock.pendingCount).toBe(0);
     expect((await page.context().request.get(`${tv.origin}/api/tv/power`)).status()).toBe(401);
     await tv.login(page);
-    await expect(page.getByRole('heading', { name: 'Телевизор', exact: true })).toBeVisible();
+    await expect(page.locator('.tv-info').getByText('43UP76906LE', { exact: true })).toBeVisible();
     await expect.poll(async () => (await state(page, tv)).operation?.status).toBe('cancelled');
     const attempts = tv.policies.length;
     tv.clock.advance(120_000);

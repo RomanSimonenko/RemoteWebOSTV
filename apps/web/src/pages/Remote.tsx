@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { createPortal } from 'react-dom';
+import { IconChevronUp, IconChevronDown, IconChevronLeft, IconChevronRight, IconHome, IconArrowBackUp, IconMinus, IconPlus, IconVolumeOff, type Icon } from '@tabler/icons-react';
 import type { BasicTvButton, TvRemoteState, TvCommandResult } from '@remote-webos-tv/contracts';
 import { api, ApiFailure } from '../api.js';
 import { requestId } from '../requestId.js';
 
-interface Props { csrfToken: string; active: boolean; onSessionExpired(): void }
+interface Props { csrfToken: string; active: boolean; onSessionExpired(): void; interactionBlocked?: boolean; activityTarget?: HTMLElement | null }
 interface Runtime { active: boolean; pending: boolean; command: AbortController | null; refresh(): void }
 const unknownMessage = 'Результат команды неизвестен. Автоматический повтор не выполняется';
 const reasons = {
@@ -20,14 +22,19 @@ const rejectionMessages = {
 };
 const buttons: ReadonlyArray<readonly [BasicTvButton, string]> = [
   ['UP', 'Вверх'], ['LEFT', 'Влево'], ['ENTER', 'OK'], ['RIGHT', 'Вправо'], ['DOWN', 'Вниз'],
-  ['BACK', 'Назад'], ['HOME', 'Домой'], ['VOLUME_UP', 'Громкость +'], ['VOLUME_DOWN', 'Громкость −'], ['MUTE', 'Без звука'],
+  ['HOME', 'Домой'], ['BACK', 'Назад'], ['VOLUME_DOWN', 'Громкость −'], ['MUTE', 'Без звука'], ['VOLUME_UP', 'Громкость +'],
 ];
+const icons: Partial<Record<BasicTvButton, Icon>> = {
+  UP: IconChevronUp, DOWN: IconChevronDown, LEFT: IconChevronLeft, RIGHT: IconChevronRight,
+  HOME: IconHome, BACK: IconArrowBackUp,
+  VOLUME_DOWN: IconMinus, VOLUME_UP: IconPlus, MUTE: IconVolumeOff,
+};
 const keys: Readonly<Record<string, BasicTvButton>> = {
   ArrowUp: 'UP', ArrowDown: 'DOWN', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT', Enter: 'ENTER',
   Escape: 'BACK', Home: 'HOME', '+': 'VOLUME_UP', '-': 'VOLUME_DOWN', m: 'MUTE', M: 'MUTE',
 };
 
-export function Remote({ csrfToken, active, onSessionExpired }: Props) {
+export function Remote({ csrfToken, active, onSessionExpired, interactionBlocked = false, activityTarget }: Props) {
   const [state, setState] = useState<TvRemoteState | null>(null);
   const [readError, setReadError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -76,7 +83,7 @@ export function Remote({ csrfToken, active, onSessionExpired }: Props) {
 
   async function send(button: BasicTvButton) {
     const current = runtime.current;
-    if (!active || !current?.active || current.pending || !state?.enabled || document.visibilityState === 'hidden') return;
+    if (interactionBlocked || !active || !current?.active || current.pending || !state?.enabled || document.visibilityState === 'hidden') return;
     current.pending = true; current.command = new AbortController();
     setBusy(true); setFeedback(null);
     try {
@@ -107,8 +114,9 @@ export function Remote({ csrfToken, active, onSessionExpired }: Props) {
   }
 
   function keyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (interactionBlocked) return;
     const target = event.target as HTMLElement;
-    if (!event.currentTarget.contains(document.activeElement) || target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
+    if (!event.currentTarget.contains(document.activeElement) || target.closest('summary, input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
     const button = keys[event.key];
     if (!button) return;
     if (event.repeat || event.ctrlKey || event.altKey || event.metaKey) {
@@ -122,14 +130,24 @@ export function Remote({ csrfToken, active, onSessionExpired }: Props) {
   }
 
   if (!active) return null;
-  const disabled = busy || !state?.enabled;
+  const disabled = interactionBlocked || busy || !state?.enabled;
   const explanation = readError || (state ? state.enabled ? '' : reasons[state.reason] : 'Проверяем доступность пульта…');
-  return <div role="group" aria-label="Пульт" aria-describedby="remote-help" aria-busy={busy} tabIndex={0} className="remote" onKeyDown={keyDown}>
-    <h2>Пульт</h2>
-    <p id="remote-help">Клавиатура при фокусе на пульте: стрелки, Enter — OK, Escape — назад, Home — домой, +/− — громкость, M — без звука.</p>
+  const controls = (entries: typeof buttons) => entries.map(([button, label]) => {
+    const ButtonIcon = icons[button];
+    return <button type="button" key={button} aria-label={label} title={label} className={button === 'ENTER' ? 'ok-button' : undefined} style={{ gridArea: button }} disabled={disabled} onClick={() => void send(button)}>
+    {ButtonIcon && <ButtonIcon aria-hidden="true" />}
+    {button === 'ENTER' && 'OK'}
+  </button>;
+  });
+  const activity = <div className="remote-activity">
     {explanation && <p>{explanation}</p>}
-    <div className="remote-buttons">{buttons.map(([button, label]) => <button type="button" key={button} style={{ gridArea: button }} disabled={disabled} onClick={() => void send(button)}>{label}</button>)}</div>
-    <p role="status" aria-live="polite">{busy ? 'Отправляем команду…' : feedback && !feedback.alert ? feedback.text : ''}</p>
+    <p role="status" aria-label="Команды телевизора" aria-live="polite">{busy ? 'Отправляем команду…' : feedback && !feedback.alert ? feedback.text : ''}</p>
     {feedback?.alert && <p role="alert" className="error">{feedback.text}</p>}
   </div>;
+  return <><div role="group" aria-label="Пульт" aria-describedby="remote-help" aria-busy={busy} tabIndex={0} className="remote" onKeyDown={keyDown}>
+    <h2 className="visually-hidden">Пульт</h2>
+    <div role="group" aria-label="Навигация" className="remote-buttons d-pad">{controls(buttons.slice(0, 5))}</div>
+    <div role="group" aria-label="Домой и назад" className="remote-buttons home-back">{controls(buttons.slice(5, 7))}</div>
+    <div role="group" aria-label="Громкость" className="remote-buttons volume">{controls(buttons.slice(7))}</div>
+  </div>{activityTarget ? createPortal(activity, activityTarget) : activity}</>;
 }

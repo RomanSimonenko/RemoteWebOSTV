@@ -16,6 +16,19 @@ test('saved television exposes the browser remote beside its setup', async () =>
   expect(screen.getByRole('group', { name: 'Пульт' })).toBeTruthy();
 });
 
+test('settings block direct mouse and keyboard commands while retaining the capability read lifecycle', async () => {
+  vi.useFakeTimers();
+  const fetch = vi.fn(async (path: string) => response(ready)); vi.stubGlobal('fetch', fetch);
+  const view = render(<Remote csrfToken={csrfToken} active onSessionExpired={vi.fn()} />); await act(async () => {});
+  const remote = screen.getByRole('group', { name: 'Пульт' }); remote.focus();
+  view.rerender(<Remote csrfToken={csrfToken} active interactionBlocked onSessionExpired={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+  for (const key of ['Escape', 'Enter', 'ArrowUp']) fireEvent.keyDown(remote, { key });
+  expect(fetch.mock.calls.map(([path]) => path)).toEqual(['/api/tv/remote']);
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(fetch.mock.calls.map(([path]) => path)).toEqual(['/api/tv/remote', '/api/tv/remote']);
+});
+
 const csrfToken = 'c'.repeat(43);
 const saved = { tv: { host: '192.168.1.20', identity: { model: 'Synthetic TV' } }, connection: 'available', operation: null };
 const ready = { enabled: true, reason: null };
@@ -38,7 +51,35 @@ async function mount(command = (input: { id: string; button: string }) => Promis
   await act(async () => {});
   return { ...view, fetch, commands: () => fetch.mock.calls.filter(([path]) => path === '/api/tv/commands'), reads: () => fetch.mock.calls.filter(([path]) => path === '/api/tv/remote') };
 }
-const buttons = [['Вверх', 'UP'], ['Вниз', 'DOWN'], ['Влево', 'LEFT'], ['Вправо', 'RIGHT'], ['OK', 'ENTER'], ['Назад', 'BACK'], ['Домой', 'HOME'], ['Громкость +', 'VOLUME_UP'], ['Громкость −', 'VOLUME_DOWN'], ['Без звука', 'MUTE']];
+const buttons = [['Вверх', 'UP'], ['Вниз', 'DOWN'], ['Влево', 'LEFT'], ['Вправо', 'RIGHT'], ['OK', 'ENTER'], ['Назад', 'BACK'], ['Домой', 'HOME'], ['Громкость +', 'VOLUME_UP'], ['Громкость −', 'VOLUME_DOWN'], ['Без звука', 'MUTE']] as const;
+test('icon controls retain accessible names and tooltips without visible labels', async () => {
+  await mount();
+  for (const [label] of buttons) {
+    const button = screen.getByRole('button', { name: label });
+    expect(button.title).toBe(label);
+    expect(button.textContent).toBe(label === 'OK' ? 'OK' : '');
+    if (label !== 'OK') {
+      const icon = button.querySelector('svg');
+      expect(icon?.classList.contains('tabler-icon')).toBe(true);
+      expect(icon?.getAttribute('aria-hidden')).toBe('true');
+    }
+  }
+});
+
+test('command progress and uncertain result appear above the remote outside its keyboard boundary', async () => {
+  const pending = barrier<Response>();
+  const view = await mount(() => pending.promise);
+  const remote = screen.getByRole('group', { name: 'Пульт' });
+  fireEvent.click(screen.getByRole('button', { name: 'Вверх' }));
+  const activity = view.container.querySelector('.tv-activity')!;
+  expect(activity).not.toBeNull();
+  expect(within(activity as HTMLElement).getByRole('status', { name: 'Команды телевизора' }).textContent).toBe('Отправляем команду…');
+  expect(within(remote).queryByRole('status')).toBeNull();
+  await act(async () => { pending.resolve(response({ code: 'SYNTHETIC_FAILURE', message: 'Синтетический отказ', requestId: 'synthetic' }, 503)); });
+  expect(within(activity as HTMLElement).getByRole('alert').textContent).toBe(unknown);
+  expect(within(remote).queryByRole('alert')).toBeNull();
+  expect(view.commands()).toHaveLength(1);
+});
 test.each([true, false])('cryptographic command IDs are valid and distinct with secureContext=%s', async (secureContext) => {
   let allocations = 0;
   vi.stubGlobal('isSecureContext', secureContext);
@@ -49,7 +90,7 @@ test.each([true, false])('cryptographic command IDs are valid and distinct with 
   const view = await mount();
   for (const label of ['Вверх', 'OK']) {
     fireEvent.click(screen.getByRole('button', { name: label })); await act(async () => {});
-    expect(within(screen.getByRole('group', { name: 'Пульт' })).getByRole('status').textContent).toBe('Команда отправлена');
+  expect(screen.getByRole('status', { name: 'Команды телевизора' }).textContent).toBe('Команда отправлена');
   }
   expect(view.commands().map(([, init]) => JSON.parse(init!.body as string))).toEqual([
     { id: 'ffffffff-ffff-4fff-bfff-ffffffffffff', button: 'UP' },
@@ -74,7 +115,7 @@ test('entropy failure is explicitly not sent, posts nothing and permits only a f
   vi.stubGlobal('crypto', { getRandomValues: (bytes: Uint8Array) => bytes.fill(0) });
   fireEvent.click(screen.getByRole('button', { name: 'Вверх' })); await act(async () => {});
   expect(view.commands()).toHaveLength(1);
-  expect(within(screen.getByRole('group', { name: 'Пульт' })).getByRole('status').textContent).toBe('Команда отправлена');
+  expect(screen.getByRole('status', { name: 'Команды телевизора' }).textContent).toBe('Команда отправлена');
 });
 test.each(buttons)('click %s sends one protected correlated %s command', async (label, button) => {
   const view = await mount();
@@ -83,7 +124,7 @@ test.each(buttons)('click %s sends one protected correlated %s command', async (
   const init = view.commands()[0]![1]!;
   expect(init).toMatchObject({ method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken } });
   expect(JSON.parse(init.body as string)).toEqual({ id: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i), button });
-  expect(within(screen.getByRole('group', { name: 'Пульт' })).getByRole('status').textContent).toBe('Команда отправлена');
+  expect(screen.getByRole('status', { name: 'Команды телевизора' }).textContent).toBe('Команда отправлена');
 });
 test('pending disables every command and ignores a second activation', async () => {
   const pending = barrier<Response>(); const view = await mount(() => pending.promise);
@@ -105,6 +146,16 @@ test('Enter on a command button belongs to the remote mapping, suppressing nativ
   if (defaultAllowed) fireEvent.click(button);
   await act(async () => {});
   expect(view.commands()).toHaveLength(1); expect(JSON.parse(view.commands()[0]![1]!.body as string).button).toBe('ENTER');
+});
+test.each(['Enter', ' ', 'ArrowUp', 'Home', 'Escape'])('keyboard help preserves native %s handling without sending a TV command', async (key) => {
+  const view = await mount();
+  const help = screen.getByLabelText('Управление с клавиатуры'); help.focus();
+  expect(help.closest('.app-header')).not.toBeNull();
+  expect(screen.getByRole('group', { name: 'Пульт' }).contains(help)).toBe(false);
+  const defaultAllowed = fireEvent.keyDown(help, { key });
+  await act(async () => {});
+  expect(view.commands()).toHaveLength(0);
+  expect(defaultAllowed).toBe(true);
 });
 test('repeat, modifiers, editable targets, outside focus and hidden document never send keyboard commands', async () => {
   const view = await mount(); const group = screen.getByRole('group', { name: 'Пульт' }); group.focus();

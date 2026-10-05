@@ -1,12 +1,32 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { TvSetup } from './TvSetup.js';
+import { IconInfoCircle, IconSettings } from '@tabler/icons-react';
 
 interface Props { username: string; csrfToken: string; tvActive: boolean; busy: boolean; error: ReactNode; onLogout(): void; onSessionExpired(): void }
 export function Home({ username, csrfToken, tvActive, busy, error, onLogout, onSessionExpired }: Props) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [confirmingPower, setConfirmingPower] = useState(false);
+  const settingsButton = useRef<HTMLButtonElement>(null);
+  const help = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    function dismissHelp(event: PointerEvent) {
+      if (event.target instanceof Node && !help.current?.contains(event.target) && help.current) help.current.open = false;
+    }
+    document.addEventListener('pointerdown', dismissHelp);
+    return () => document.removeEventListener('pointerdown', dismissHelp);
+  }, []);
+  useEffect(() => { if ((settingsOpen || confirmingPower) && help.current) help.current.open = false; }, [settingsOpen, confirmingPower]);
+  useEffect(() => { if (!tvActive) { setSettingsOpen(false); setConfirmingPower(false); } }, [tvActive]);
   return <section>
-    <p>Вы вошли как {username}.</p>
-    {tvActive && <TvSetup csrfToken={csrfToken} onSessionExpired={onSessionExpired} />}
+    <header className="app-header">
+      <p className="eyebrow">Remote WebOS TV</p>
+      <div className="header-actions">
+        <details ref={help} className="keyboard-help"><summary aria-label="Управление с клавиатуры" title="Управление с клавиатуры"><IconInfoCircle aria-hidden="true" /></summary><p id="remote-help">Клавиатура при фокусе на пульте: стрелки, Enter — OK, Escape — назад, Home — домой, +/− — громкость, M — без звука.</p></details>
+        <button ref={settingsButton} type="button" aria-label="Настройки" title="Настройки" aria-haspopup="dialog" disabled={!tvActive || confirmingPower} onClick={() => { settingsButton.current?.focus(); setSettingsOpen(true); }}><IconSettings aria-hidden="true" /></button>
+        <button type="button" disabled={busy} onClick={onLogout}>{busy ? 'Выход…' : 'Выйти'}</button>
+      </div>
+    </header>
+    {tvActive && <TvSetup username={username} csrfToken={csrfToken} settingsOpen={settingsOpen} onCloseSettings={() => setSettingsOpen(false)} onConfirmationChange={setConfirmingPower} onSessionExpired={onSessionExpired} />}
     {error}
-    <button type="button" disabled={busy} onClick={onLogout}>{busy ? 'Выход…' : 'Выйти'}</button>
   </section>;
 }

@@ -14,6 +14,14 @@ import { WebOsError } from './errors.js';
 
 const nonEmptyTextSchema = z.string().trim().min(1);
 const volumeValueSchema = z.number().int().min(0).max(100);
+const helloResponseSchema = z.object({
+  deviceOS: z.literal('webOS'),
+  deviceOSReleaseVersion: nonEmptyTextSchema.optional(),
+}).passthrough();
+
+export function parsePlatformVersion(payload: unknown): string | undefined {
+  return parseTvResponse('hello', () => helloResponseSchema.parse(payload).deviceOSReleaseVersion);
+}
 
 const systemInfoResponseSchema = z
   .object({ modelName: nonEmptyTextSchema })

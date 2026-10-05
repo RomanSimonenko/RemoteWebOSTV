@@ -3,5 +3,6 @@ dist/
 coverage/
 .local/
 .worktrees/
+.superpowers/
 *.log
 .DS_Store

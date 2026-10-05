@@ -36,7 +36,7 @@ async function press(page: Page, tv: TvFixture, key: string) {
   const response = commandResponse(page, tv);
   await page.keyboard.press(key);
   await sent(await response);
-  await expect(remote(page).getByRole('status')).toHaveText('Команда отправлена');
+  await expect(page.getByRole('status', { name: 'Команды телевизора', exact: true })).toHaveText('Команда отправлена');
 }
 
 test('all ten browser controls reach the pointer once; saved TV remains usable after reload and login', async ({ page, tv }) => {
@@ -50,7 +50,7 @@ test('all ten browser controls reach the pointer once; saved TV remains usable a
     const response = commandResponse(page, tv);
     await remote(page).getByRole('button', { name: label, exact: true }).click();
     await sent(await response);
-    await expect(remote(page).getByRole('status')).toHaveText('Команда отправлена');
+    await expect(page.getByRole('status', { name: 'Команды телевизора', exact: true })).toHaveText('Команда отправлена');
     await tv.tv.waitForPointerFrameCount(requests.length);
     expect(tv.tv.pointerFrames.at(-1)).toBe(frame(name));
   }
@@ -96,10 +96,12 @@ test('native keyboard maps ten controls with one Enter owner and ignores modifie
   page.on('request', (request) => {
     if (request.url() === `${tv.origin}/api/tv/commands` && request.method() === 'POST') requests.push(request.postData()!);
   });
+  await page.getByRole('button', { name: 'Настройки', exact: true }).click();
   await page.getByLabel('IP-адрес телевизора').focus();
   await page.keyboard.press('ArrowUp');
   await page.getByRole('button', { name: 'Обновить статус', exact: true }).focus();
   await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Escape');
   await remote(page).focus();
   for (const key of ['Control+ArrowUp', 'Alt+ArrowDown', 'Meta+ArrowLeft']) await page.keyboard.press(key);
   await remote(page).getByRole('button', { name: 'Домой', exact: true }).focus();
@@ -159,7 +161,7 @@ test('offline remote disables commands and reconnect never replays offline input
   await tv.makeTvUnavailable();
   await tv.expireUnavailableRecovery(page);
   await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Нет соединения');
-  await expect(remote(page).getByText('Телевизор недоступен. Подключитесь снова.', { exact: true })).toBeVisible();
+  await expect(page.locator('.remote-activity').getByText('Телевизор недоступен. Подключитесь снова.', { exact: true })).toBeVisible();
   for (const [label] of mappings) await expect(remote(page).getByRole('button', { name: label, exact: true })).toBeDisabled();
   await remote(page).focus();
   await page.keyboard.press('ArrowUp');
@@ -172,7 +174,9 @@ test('offline remote disables commands and reconnect never replays offline input
   expect(rejected.status()).toBe(409);
   expect(await rejected.json()).toMatchObject({ id: '33333333-3333-4333-8333-333333333333', outcome: 'rejected', error: { code: 'TV_UNAVAILABLE' } });
   await tv.replaceTv({ kind: 'success' });
+  await page.getByRole('button', { name: 'Настройки', exact: true }).click();
   await page.getByRole('button', { name: 'Подключиться снова', exact: true }).click();
+  await page.keyboard.press('Escape');
   await ready(page);
   await remote(page).focus();
   await press(page, tv, 'Home');
@@ -201,14 +205,16 @@ test('lost genuine command response after pointer receipt shows uncertainty and 
     expect(original.pointerFrames).toEqual([frame('UP')]);
     await tv.makeTvUnavailable();
     loseResponse.release();
-    await expect(remote(page).getByRole('alert')).toHaveText('Результат команды неизвестен. Автоматический повтор не выполняется');
+    await expect(page.locator('.remote-activity').getByRole('alert')).toHaveText('Результат команды неизвестен. Автоматический повтор не выполняется');
     await page.unroute(`${tv.origin}/api/tv/commands`);
     await tv.expireUnavailableRecovery(page);
     await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Нет соединения');
     await tv.replaceTv({ kind: 'success' });
+    await page.getByRole('button', { name: 'Настройки', exact: true }).click();
     await page.getByRole('button', { name: 'Подключиться снова', exact: true }).click();
+    await page.keyboard.press('Escape');
     await ready(page);
-    await expect(remote(page).getByRole('alert')).toHaveText('Результат команды неизвестен. Автоматический повтор не выполняется');
+    await expect(page.locator('.remote-activity').getByRole('alert')).toHaveText('Результат команды неизвестен. Автоматический повтор не выполняется');
     await remote(page).focus();
     await press(page, tv, 'Home');
     await tv.tv.waitForPointerFrameCount(1);

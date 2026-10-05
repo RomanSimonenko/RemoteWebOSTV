@@ -17,6 +17,8 @@ import LGTV from 'lgtv2';
 import type {
   PairingRequest,
   PairingResult,
+  PlatformVersionResult,
+  PlatformVersionDiagnostic,
   WebOsAdapter,
 } from './adapter.js';
 import { toWebOsButton } from './buttons.js';
@@ -33,6 +35,7 @@ import {
   parseIdentity,
   parseInputs,
   parseMacAddresses,
+  parsePlatformVersion,
   parseVolume,
 } from './response-parsers.js';
 import { sendWakeOnLan } from './wake-on-lan.js';
@@ -111,6 +114,8 @@ export class Lgtv2Adapter implements WebOsAdapter {
   #cancelPairing: (() => void) | undefined;
   #disconnectPromise: Promise<void> | undefined;
   #pointerCleanupFailure: WebOsError | undefined;
+  readonly #cancelMetadata = new Set<() => void>();
+  #metadataAttemptClient: Lgtv2Client | undefined;
 
   constructor(
     options: Lgtv2AdapterOptions,
@@ -154,6 +159,83 @@ export class Lgtv2Adapter implements WebOsAdapter {
       capabilities: this.#capabilities,
       transport: this.#transport,
       ...volume,
+    });
+  }
+
+  async readPlatformVersion(signal: AbortSignal): Promise<PlatformVersionResult> {
+    throwIfAborted(signal);
+    const client = this.#requireClient();
+    if (this.#identity?.platformVersion !== undefined) {
+      return { version: this.#identity.platformVersion };
+    }
+    // Verified TV hello replies have no id. One attempt per connection avoids
+    // attributing a late idless reply to a concurrent or subsequent request.
+    if (this.#metadataAttemptClient === client) {
+      throw new WebOsError('UNKNOWN', 'Platform metadata was already requested on this connection');
+    }
+    this.#metadataAttemptClient = client;
+
+    return new Promise<PlatformVersionResult>((resolve, reject) => {
+      let settled = false;
+      let id: string | undefined;
+      const cleanup = () => {
+        clearTimeout(timer);
+        client.removeListener('message', receive);
+        client.removeListener('close', cancel);
+        client.removeListener('error', connectionError);
+        signal.removeEventListener('abort', cancel);
+        this.#cancelMetadata.delete(cancel);
+      };
+      const finish = (result: PlatformVersionResult) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(result);
+      };
+      const diagnostic = (code: PlatformVersionDiagnostic['code']) => finish({ diagnostic: { operation: 'hello', code } });
+      const fail = (cause: unknown) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(cause);
+      };
+      const cancel = () => fail(new WebOsError('CONNECTION_LOST', 'Platform metadata acquisition was cancelled or disconnected'));
+      const connectionError = (error: Error) => fail(mapLgtv2Error(error, 'snapshot', true));
+      const receive = (text: string) => {
+        if (settled) return;
+        let message: unknown;
+        try { message = JSON.parse(text); }
+        catch { diagnostic('invalid_response'); return; }
+        if (!message || typeof message !== 'object') return;
+        if ('id' in message) {
+          if (message.id !== id) return;
+        } else if (!('type' in message) || message.type !== 'hello') {
+          return;
+        }
+        if (!('type' in message)) { diagnostic('invalid_response'); return; }
+        if (message.type === 'error') { diagnostic('request_rejected'); return; }
+        if (message.type !== 'hello' || !('payload' in message)) { diagnostic('invalid_response'); return; }
+        let version: string | undefined;
+        try { version = parsePlatformVersion(message.payload); }
+        catch { diagnostic('invalid_response'); return; }
+        if (version === undefined) { diagnostic('version_unavailable'); return; }
+        if (this.#client !== client) { cancel(); return; }
+        if (this.#identity) this.#identity = { ...this.#identity, platformVersion: version };
+        finish({ version });
+      };
+      const timer = setTimeout(() => diagnostic('timeout'), this.#options.requestTimeoutMs);
+      timer.unref();
+      client.on('message', receive);
+      client.on('close', cancel);
+      client.on('error', connectionError);
+      signal.addEventListener('abort', cancel, { once: true });
+      this.#cancelMetadata.add(cancel);
+      try {
+        id = client.send('hello', undefined, {});
+        if (id === undefined) diagnostic('send_failed');
+      } catch {
+        diagnostic('send_failed');
+      }
     });
   }
 
@@ -570,9 +652,11 @@ export class Lgtv2Adapter implements WebOsAdapter {
       return this.#disconnectPromise;
     }
 
+    for (const cancel of this.#cancelMetadata) cancel();
     const client = this.#client;
     const pointerSocket = this.#pointerSocket;
     this.#client = undefined;
+    this.#metadataAttemptClient = undefined;
     this.#pointerSocket = undefined;
     this.#identity = undefined;
     this.#capabilities = undefined;
@@ -599,7 +683,9 @@ export class Lgtv2Adapter implements WebOsAdapter {
 export function createLgtv2Client(
   options: Lgtv2ClientOptions,
 ): Lgtv2Client {
-  return new LGTV(options) as Lgtv2Client;
+  // Upstream types omit hello, though its public send serializes all types
+  // without a callback; the raw message event is required for its response.
+  return new LGTV(options) as unknown as Lgtv2Client;
 }
 
 export function mapLgtv2Error(

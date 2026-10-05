@@ -6,7 +6,7 @@ export function Login({ busy, error, feedback, onSubmit }: Props) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); if (!busy) onSubmit({ username, password }); }
-  return <section>
+  return <section className="form-card">
     <h1>Вход</h1>
     {feedback && <p role="status">{feedback}</p>}
     <form onSubmit={submit}>

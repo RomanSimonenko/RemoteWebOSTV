@@ -38,7 +38,7 @@ for (const [origin, secureContext] of [['http://localhost', true], ['http://192.
       .toEqual({ secure: secureContext, uuid: secureContext ? 'function' : 'undefined', entropy: 'function' });
     for (const label of ['Вверх', 'OK']) {
       await group.getByRole('button', { name: label, exact: true }).click();
-      await expect(group.getByRole('status')).toHaveText('Команда отправлена');
+      await expect(page.getByRole('status', { name: 'Команды телевизора', exact: true })).toHaveText('Команда отправлена');
     }
     expect(posts).toEqual([{ id: expect.stringMatching(uuid), button: 'UP' }, { id: expect.stringMatching(uuid), button: 'ENTER' }]);
     expect(new Set(posts.map(({ id }) => id)).size).toBe(2);
@@ -51,8 +51,8 @@ test('synthetic HTTP entropy failure proves zero POST and explicit not-sent feed
   });
   const { group, posts } = await syntheticRemote(page, 'http://192.0.2.20');
   await group.getByRole('button', { name: 'Вверх', exact: true }).click();
-  await expect(group.getByRole('alert')).toContainText('Команда не отправлена');
-  await expect(group.getByRole('alert')).toContainText('идентификатор');
+  await expect(page.locator('.remote-activity').getByRole('alert')).toContainText('Команда не отправлена');
+  await expect(page.locator('.remote-activity').getByRole('alert')).toContainText('идентификатор');
   await expect(group).toHaveAttribute('aria-busy', 'false');
   await expect(group.getByRole('button', { name: 'Вверх', exact: true })).toBeEnabled();
   expect(posts).toEqual([]);

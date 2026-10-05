@@ -108,6 +108,129 @@ function pair(adapter: Lgtv2Adapter, signal = new AbortController().signal) {
 }
 
 describe('Lgtv2Adapter', () => {
+  test('reads hello through the real lgtv2 wire without another registration', async () => {
+    const mock = await startMock({ kind: 'hello-release' });
+    const { adapter } = createHarness(mock, new MemoryKeyStore(mockClientKey));
+    const paired = await pair(adapter);
+    expect(paired.identity.platformVersion).toBeUndefined();
+    expect(await adapter.readPlatformVersion(new AbortController().signal)).toEqual({ version: '6.5.3' });
+    expect((await adapter.readSnapshot(new AbortController().signal)).identity).toEqual({
+      model: '43UP76906LE', firmwareVersion: '03.40.85', platformVersion: '6.5.3',
+    });
+    expect(mock.requests.filter((request) => request.type === 'register')).toHaveLength(1);
+    expect(mock.requests.find((request) => request.type === 'hello')).toMatchObject({ payload: {} });
+  });
+
+  test('preserves SDK version without sending optional hello', async () => {
+    const send = vi.fn(() => { throw new Error('hello must not be sent'); });
+    const { adapter } = createUnitAdapter({ send });
+    await pair(adapter);
+    expect(await adapter.readPlatformVersion(new AbortController().signal)).toEqual({ version: '6.5.3' });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  test('disconnect cancels pending optional hello and clears its deadline', async () => {
+    vi.useFakeTimers();
+    const harness = createHelloAdapter(() => undefined);
+    await pair(harness.adapter);
+    const pending = harness.adapter.readPlatformVersion(new AbortController().signal);
+    await harness.sent;
+    const rejected = expect(pending).rejects.toMatchObject({ code: 'CONNECTION_LOST' });
+    await harness.adapter.disconnect();
+    await rejected;
+    expect(harness.client().listenerCount('message')).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  test('acquires correlated hello release when the software response omits SDK', async () => {
+    const harness = createHelloAdapter((client) => {
+      client.emit('message', JSON.stringify({ id: 'other', type: 'hello', payload: { deviceOS: 'webOS', deviceOSReleaseVersion: '99' } }));
+      client.emit('message', JSON.stringify({ type: 'hello', payload: { deviceOS: 'webOS', deviceOSVersion: '4.1.0', deviceOSReleaseVersion: '6.5.3' } }));
+    });
+    await pair(harness.adapter);
+    const result = await harness.adapter.readPlatformVersion(new AbortController().signal);
+    expect(result).toEqual({ version: '6.5.3' });
+    expect(harness.client().listenerCount('message')).toBe(0);
+  });
+
+  test.each([
+    [{ type: 'hello', payload: { deviceOS: 'webOS', deviceOSReleaseVersion: '' } }, 'invalid_response'],
+    [{ type: 'hello', payload: { deviceOS: 'webOS', deviceOSReleaseVersion: 6 } }, 'invalid_response'],
+    [{ type: 'hello', payload: { deviceOS: 'other', deviceOSReleaseVersion: '6.5.3' } }, 'invalid_response'],
+    [{ type: 'response', payload: { deviceOS: 'webOS', deviceOSReleaseVersion: '6.5.3' } }, 'invalid_response'],
+    [{ type: 'hello', payload: { deviceOS: 'webOS' } }, 'version_unavailable'],
+    [{ type: 'error', error: 'synthetic unsupported hello' }, 'request_rejected'],
+  ])('keeps pairing usable with observable optional metadata failure', async (response, code) => {
+    const harness = createHelloAdapter((client) => client.emit('message', JSON.stringify({ id: 'hello-id', ...response })));
+    await pair(harness.adapter);
+    const result = await harness.adapter.readPlatformVersion(new AbortController().signal);
+    expect(result).toEqual({ diagnostic: { operation: 'hello', code } });
+    expect((await harness.adapter.readSnapshot(new AbortController().signal)).connection).toBe('available');
+    expect(harness.client().listenerCount('message')).toBe(0);
+  });
+
+  test('optional hello timeout preserves pairing and clears listeners and timers', async () => {
+    vi.useFakeTimers();
+    const harness = createHelloAdapter(() => undefined);
+    await pair(harness.adapter);
+    const pending = harness.adapter.readPlatformVersion(new AbortController().signal);
+    await harness.sent;
+    await vi.advanceTimersByTimeAsync(2_000);
+    const result = await pending;
+    expect(result).toEqual({ diagnostic: { operation: 'hello', code: 'timeout' } });
+    expect((await harness.adapter.readSnapshot(new AbortController().signal)).connection).toBe('available');
+    expect(harness.client().listenerCount('message')).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  test('cancelling optional hello cleans up without disabling the paired remote', async () => {
+    vi.useFakeTimers();
+    const harness = createHelloAdapter(() => undefined);
+    const controller = new AbortController();
+    await pair(harness.adapter);
+    const pending = harness.adapter.readPlatformVersion(controller.signal);
+    await harness.sent;
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ code: 'CONNECTION_LOST' });
+    expect(harness.client().listenerCount('message')).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+    expect((await harness.adapter.readSnapshot(new AbortController().signal)).connection).toBe('available');
+  });
+
+  test('failed hello send reports metadata failure while preserving paired control', async () => {
+    const { adapter } = createUnitAdapter({
+      request: async (uri) => uri === mockUris.softwareInfo ? {} : responseForPairing(uri),
+      send: () => { throw new Error('synthetic send failure'); },
+    });
+    await pair(adapter);
+    expect(await adapter.readPlatformVersion(new AbortController().signal)).toEqual({ diagnostic: { operation: 'hello', code: 'send_failed' } });
+    expect((await adapter.readSnapshot(new AbortController().signal)).connection).toBe('available');
+  });
+
+  test('cancelled hello receiver cannot mutate identity from the EventEmitter listener snapshot', async () => {
+    const controller = new AbortController();
+    const harness = createHelloAdapter((client) => client.emit('message', JSON.stringify({
+      id: 'hello-id', type: 'hello', payload: { deviceOS: 'webOS', deviceOSReleaseVersion: '6.5.3' },
+    })));
+    await pair(harness.adapter);
+    // Earlier listener cancels during this same emission. EventEmitter still
+    // invokes listeners from its snapshot after removeListener cleanup.
+    harness.client().on('message', () => controller.abort());
+    await expect(harness.adapter.readPlatformVersion(controller.signal)).rejects.toMatchObject({ code: 'CONNECTION_LOST' });
+    expect((await harness.adapter.readSnapshot(new AbortController().signal)).identity?.platformVersion).toBeUndefined();
+  });
+
+  test('rejects a second hello acquisition on the same client so idless replies cannot cross attempts', async () => {
+    const harness = createHelloAdapter(() => undefined);
+    await pair(harness.adapter);
+    const controller = new AbortController();
+    const pending = harness.adapter.readPlatformVersion(controller.signal);
+    await harness.sent;
+    const second = harness.adapter.readPlatformVersion(new AbortController().signal);
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ code: 'CONNECTION_LOST' });
+    await expect(second).rejects.toMatchObject({ code: 'UNKNOWN' });
+    await expect(harness.adapter.readPlatformVersion(new AbortController().signal)).rejects.toMatchObject({ code: 'UNKNOWN' });
+  });
   test('power delivery is not_sent before SSAP and unknown after request failure', async () => {
     const cause = new WebOsError('CONNECTION_LOST', 'synthetic ambiguous request');
     const request = vi.fn(async (uri: string) => { if (uri === mockMutationUris.powerOff) throw cause; return responseForPairing(uri); });
@@ -821,6 +944,8 @@ function createHangingClient(
     connected: false,
     urls: ['wss://tv.invalid:3001', 'ws://tv.invalid:3000'],
     on: () => client,
+    removeListener: () => client,
+    send: () => undefined,
     request: async () => new Promise<never>(() => undefined),
     getSocket: async () => new Promise<never>(() => undefined),
     wake: async () => undefined,
@@ -834,6 +959,7 @@ function createUnitAdapter(
     readonly getSocket?: () => Promise<Lgtv2SpecializedSocket>;
     readonly request?: (uri: string) => Promise<unknown>;
     readonly disconnect?: () => Promise<void>;
+    readonly send?: Lgtv2Client['send'];
   } = {},
 ): { readonly adapter: Lgtv2Adapter; readonly client: Lgtv2Client } {
   let client!: Lgtv2Client;
@@ -872,7 +998,21 @@ function createUnitAdapter(
     },
   );
   createdAdapters.push(adapter);
-  return { adapter, client };
+  return { adapter, get client() { return client; } };
+}
+
+function createHelloAdapter(respond: (client: EventEmitter) => void) {
+  let sent!: () => void;
+  const gate = new Promise<void>((resolve) => { sent = resolve; });
+  const harness = createUnitAdapter({
+    request: async (uri) => uri === mockUris.softwareInfo
+      ? { major_ver: '03', minor_ver: '40.85' } : responseForPairing(uri),
+    send: () => {
+      queueMicrotask(() => { respond(harness.client as unknown as EventEmitter); sent(); });
+      return 'hello-id';
+    },
+  });
+  return { adapter: harness.adapter, client: () => harness.client as unknown as EventEmitter, sent: gate };
 }
 
 async function runAdapterCli(adapter: Lgtv2Adapter, listeners = new Map<string, () => void>()) {

@@ -66,6 +66,9 @@ importers:
       '@remote-webos-tv/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@tabler/icons-react':
+        specifier: 3.48.0
+        version: 3.48.0(react@19.2.0)
       react:
         specifier: 19.2.0
         version: 19.2.0
@@ -514,6 +517,14 @@ packages:
     resolution: {integrity: sha512-at8QVep6S3h5Y6gSbdGU06bRY5WJkf6WUduM9YtvYMbYhB1MOFfUgc6kehitQXzOtMSaT70q7f9ydPhpqu821w==}
     cpu: [x64]
     os: [win32]
+
+  '@tabler/icons-react@3.48.0':
+    resolution: {integrity: sha512-OCeAlpaWHEMV+EsgdVeGQ3YuKfmfnThZhc++CaZ/ujYzi5+/DONDQlX4OGvH1ikYhIfmc0grI4otJgHy7QAvng==}
+    peerDependencies:
+      react: '>= 16'
+
+  '@tabler/icons@3.48.0':
+    resolution: {integrity: sha512-lQk06gVHNVBnJp0UOgtth54mcZBJM7rdYKsAxKOProj1bbSAx+/xiuOWfHlyvgdL3M+Y+I0HINrjHa3ygp8eXQ==}
 
   '@testing-library/dom@10.4.1':
     resolution: {integrity: sha512-o4PXJQidqJl82ckFaXUeoAW+XysPLauYI43Abki5hABd853iMhitooc6znOnczgbTYmEP6U6/y1ZyKAIsvMKGg==}
@@ -1645,6 +1656,13 @@ snapshots:
 
   '@rollup/rollup-win32-x64-msvc@4.63.1':
     optional: true
+
+  '@tabler/icons-react@3.48.0(react@19.2.0)':
+    dependencies:
+      '@tabler/icons': 3.48.0
+      react: 19.2.0
+
+  '@tabler/icons@3.48.0': {}
 
   '@testing-library/dom@10.4.1':
     dependencies:
