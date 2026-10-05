@@ -183,6 +183,8 @@ for (const width of [320, 1280]) {
     await page.setViewportSize({ width, height: 960 });
     const { power } = await fixture(page, 'power-busy');
     const spinner = page.getByRole('img', { name: 'Выполняется запрос', exact: true });
+    await expect(spinner).toHaveCount(0);
+    await page.clock.runFor(400);
     await expect(spinner).toBeVisible();
     await expect(page.getByText('Питание сейчас недоступно. Обновите статус.', { exact: true })).toHaveCount(0);
     const card = await page.locator('.tv-card').boundingBox();

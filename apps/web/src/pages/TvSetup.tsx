@@ -42,6 +42,13 @@ export function TvSetup({ username, csrfToken, onSessionExpired, settingsOpen, o
   const running = operation?.status === 'running';
   const powerRunning = powerState?.operation?.status === 'running';
   const controlsBusy = busy || powerRunning;
+  const activityBusy = refreshing || busy || running || powerBusy || remoteBusy;
+  const [showActivity, setShowActivity] = useState(false);
+  useEffect(() => {
+    if (!activityBusy) { setShowActivity(false); return; }
+    const timer = setTimeout(() => setShowActivity(true), 400);
+    return () => clearTimeout(timer);
+  }, [activityBusy]);
   const progress = running ? (operation.action === 'pair' || operation.action === 'repair' ? 'Сопряжение' : 'Подключение') : null;
   const diagnostic = message || error || status?.error?.message || operation?.error?.message || '';
 
@@ -119,7 +126,7 @@ export function TvSetup({ username, csrfToken, onSessionExpired, settingsOpen, o
       <Remote csrfToken={csrfToken} active interactionBlocked={settingsOpen} activityTarget={remoteActivityTarget} onSessionExpired={onSessionExpired} onBusyChange={setRemoteBusy} />
     </div>}
     <div className="tv-activity">
-      <div className="connection-row"><p className="connection-status" data-connection={error ? 'unknown' : status?.connection} role="status" aria-label="Соединение с телевизором" aria-live="polite">{connectionText}</p><span className="activity-slot">{(refreshing || busy || running || powerBusy || remoteBusy) && <span className="activity-spinner" role="img" aria-label="Выполняется запрос" />}</span></div>
+      <div className="connection-row"><p className="connection-status" data-connection={error ? 'unknown' : status?.connection} role="status" aria-label="Соединение с телевизором" aria-live="polite">{connectionText}</p><span className="activity-slot">{activityBusy && showActivity && <span className="activity-spinner" role="img" aria-label="Выполняется запрос" />}</span></div>
       <div className={settingsOpen ? 'reserved-activity' : undefined} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{activity(true)}</div>
       <div className="power-activity" ref={setPowerActivityTarget} />
       <div ref={setRemoteActivityTarget} />

@@ -32,6 +32,7 @@ function submitHost(host: string) {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 test('connection spinner follows a pending command without visible activity text and retains its slot', async () => {
+  vi.useFakeTimers();
   const pending = barrier<Response>(); let commandId = '';
   vi.stubGlobal('fetch', vi.fn((path: string, init?: RequestInit) => {
     if (path === '/api/tv/commands') { commandId = JSON.parse(init!.body as string).id; return pending.promise; }
@@ -44,6 +45,9 @@ test('connection spinner follows a pending command without visible activity text
   expect(screen.queryByRole('img', { name: 'Выполняется запрос' })).toBeNull();
   const slot = view.container.querySelector('.activity-slot');
   fireEvent.click(screen.getByRole('button', { name: 'OK' })); await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(399); });
+  expect(screen.queryByRole('img', { name: 'Выполняется запрос' })).toBeNull();
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
   expect(screen.getByRole('img', { name: 'Выполняется запрос' }).parentElement).toBe(slot);
   expect(screen.queryByText('Отправляем команду…')).toBeNull();
   pending.resolve(response({ id: commandId, outcome: 'sent' })); await act(async () => {});
