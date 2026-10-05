@@ -18,11 +18,30 @@ describe('TV commands', () => {
     expect(h.adapters[0]!.sent).toEqual([]); await h.service.close();
   });
 
-  test('an existing status probe owns adapter cleanup and blocks command admission', async () => {
+  test('a background status probe keeps remote enabled and a command waits for its completion', async () => {
     const h = await ready(); const adapter = h.adapters[0]!; adapter.readResult = barrier();
     const reading = h.service.status();
-    expect(await h.service.sendCommand(input, signal())).toMatchObject({ outcome: 'rejected', error: { code: 'TV_BUSY' } });
-    expect(adapter.sent).toEqual([]); adapter.readResult.resolve(snapshot); await reading; await h.service.close();
+    expect(h.service.powerState()).toMatchObject({ busy: true, canPowerOff: false, canWake: false });
+    expect(h.service.remoteState()).toEqual({ enabled: true, reason: null });
+    const sending = h.service.sendCommand(input, signal()); await drain();
+    expect(adapter.sent).toEqual([]);
+    expect(await h.service.sendCommand({ ...input, button: 'UP' }, signal())).toMatchObject({ outcome: 'rejected', error: { code: 'TV_BUSY' } });
+    adapter.readResult.resolve(snapshot); await reading;
+    expect(await sending).toEqual({ id: input.id, outcome: 'sent' });
+    expect(adapter.sent).toEqual(['HOME']); await h.service.close();
+  });
+
+  test.each(['abort', 'timeout', 'failure', 'unsupported'] as const)('a command waiting for a probe is not sent after %s', async (ending) => {
+    const h = await ready(); const adapter = h.adapters[0]!; adapter.readResult = barrier();
+    const reading = h.service.status(); const controller = new AbortController();
+    const sending = h.service.sendCommand(input, controller.signal); await drain();
+    if (ending === 'abort') controller.abort();
+    if (ending === 'timeout') h.scheduler.advance(5000);
+    if (ending === 'failure') adapter.readResult.reject(new Error('synthetic failure'));
+    else adapter.readResult.resolve(ending === 'unsupported' ? { ...snapshot, capabilities: { ...snapshot.capabilities, pointer: false } } : snapshot);
+    await reading;
+    expect(await sending).toMatchObject({ outcome: 'rejected', error: { code: ending === 'unsupported' ? 'UNSUPPORTED_CAPABILITY' : ending === 'failure' ? 'TV_UNAVAILABLE' : 'COMMAND_NOT_SENT' } });
+    expect(adapter.sent).toEqual([]); await h.service.close();
   });
 
   test('replacement invalidates old capability and late probe cannot enable new remote', async () => {

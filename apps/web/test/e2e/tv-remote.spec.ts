@@ -90,6 +90,29 @@ test('all ten browser controls reach the pointer once; saved TV remains usable a
   expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
 });
 
+test('numeric keypad sends each digit once through authenticated API and pointer without replay', async ({ page, tv }) => {
+  await pair(page, tv);
+  const digits = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
+  const ids = new Set<string>();
+  for (const digit of digits) {
+    const response = commandResponse(page, tv);
+    await remote(page).getByRole('button', { name: digit, exact: true }).click();
+    const result = await response;
+    await sent(result);
+    const request = result.request().postDataJSON() as { id: string; button: string };
+    expect(request.button).toBe(digit);
+    expect(ids.has(request.id)).toBe(false);
+    ids.add(request.id);
+    await expect(page.getByRole('status', { name: 'Команды телевизора', exact: true })).toHaveText('Команда отправлена');
+    await tv.tv.waitForPointerFrameCount(ids.size);
+    expect(tv.tv.pointerFrames.at(-1)).toBe(frame(digit));
+  }
+  expect(tv.tv.pointerFrames).toEqual(digits.map(frame));
+  await page.reload();
+  await ready(page);
+  expect(tv.tv.pointerFrames).toEqual(digits.map(frame));
+});
+
 test('native keyboard maps ten controls with one Enter owner and ignores modifiers and outside focus', async ({ page, tv }) => {
   await pair(page, tv);
   const requests: string[] = [];

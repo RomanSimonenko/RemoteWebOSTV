@@ -5,7 +5,7 @@ import { Writable } from 'node:stream';
 import { request as httpRequest } from 'node:http';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { afterEach, expect, test, vi } from 'vitest';
-import { basicTvButtonSchema, tvCommandResultSchema } from '@remote-webos-tv/contracts';
+import { tvCommandResultSchema } from '@remote-webos-tv/contracts';
 import { TvButtonSendError } from '@remote-webos-tv/webos';
 import { buildApp } from '../src/app.js';
 import { openDatabase } from '../src/storage/database.js';
@@ -87,12 +87,14 @@ test('strict command schema keeps existing requestId errors, no-store and does n
   expect(h.adapters[0]!.sent).toEqual([]);
 });
 
-test('all ten buttons send once; owner budget spans source addresses and sessions and expires at 1000ms', async () => {
+test('all twenty buttons send once across two windows; owner budget spans source addresses and sessions and expires at 1000ms', async () => {
   const { app, h, headers, sessions, headersFor } = await fixture();
   let now = 1_000_000;
   vi.spyOn(Date, 'now').mockImplementation(() => now);
   const other = (await sessions.login('owner', 'synthetic password 123'))!;
-  for (const [index, button] of basicTvButtonSchema.options.entries()) {
+  const buttons = ['UP', 'DOWN', 'LEFT', 'RIGHT', 'ENTER', 'BACK', 'HOME', 'VOLUME_UP', 'VOLUME_DOWN', 'MUTE', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+  for (const [index, button] of buttons.entries()) {
+    if (index === 10) now += 1000;
     const response = await app.inject({ method: 'POST', url: '/api/tv/commands', headers: index % 2 ? headersFor(other.token) : headers, remoteAddress: `203.0.113.${index + 1}`, payload: { ...command, button } });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ id: command.id, outcome: 'sent' });
@@ -104,7 +106,7 @@ test('all ten buttons send once; owner budget spans source addresses and session
   expect(blocked.headers['retry-after']).toBe('1');
   expect(tvCommandResultSchema.parse(blocked.json())).toMatchObject({ id: command.id, outcome: 'rejected', error: { code: 'RATE_LIMITED' } });
   expect(blocked.headers['cache-control']).toBe('no-store');
-  expect(h.adapters[0]!.sent).toEqual(basicTvButtonSchema.options);
+  expect(h.adapters[0]!.sent).toEqual(buttons);
   now += 1;
   expect((await app.inject({ method: 'POST', url: '/api/tv/commands', headers, payload: command })).statusCode).toBe(200);
 });

@@ -13,6 +13,16 @@ async function mount() { render(<PowerControls csrfToken={csrfToken} active onSe
 function powerButton() { return screen.getByRole<HTMLButtonElement>('button', { name: /^(Выключить ТВ|Включить ТВ|Питание ТВ)$/ }); }
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
+test('temporary server activity disables power without an unavailable message and reports spinner activity', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ ...wake, canWake: false, busy: true })));
+  const activity = vi.fn();
+  render(<PowerControls csrfToken={csrfToken} active onSessionExpired={vi.fn()} onBusyChange={activity} />);
+  await act(async () => {});
+  expect(powerButton().disabled).toBe(true);
+  expect(screen.queryByText(/Питание сейчас недоступно/)).toBeNull();
+  expect(activity).toHaveBeenLastCalledWith(true);
+});
+
 test('the single power button opens power-off confirmation without dispatching a command', async () => {
   const fetch = vi.fn().mockResolvedValue(response(off)); vi.stubGlobal('fetch', fetch); await mount();
   const buttons = screen.getAllByRole('button', { name: /^(Выключить ТВ|Включить ТВ|Питание ТВ)$/ });
@@ -50,7 +60,7 @@ test.each([
 test('the single power button blocks loading and status errors with a visible reason', async () => {
   const pending = barrier<Response>(); const fetch = vi.fn().mockReturnValue(pending.promise); vi.stubGlobal('fetch', fetch);
   render(<PowerControls csrfToken={csrfToken} active onSessionExpired={vi.fn()} />);
-  expect(powerButton().disabled).toBe(true); expect(screen.getByRole('status', { name: 'Питание телевизора' }).textContent).toContain('Загрузка');
+  expect(powerButton().disabled).toBe(true); expect(screen.getByRole('status', { name: 'Питание телевизора' }).textContent).toBe('');
   await act(async () => { pending.resolve(response({ code: 'UNEXPECTED_ERROR', message: 'Synthetic error', requestId: 'synthetic' }, 500)); });
   expect(powerButton().disabled).toBe(true); expect(screen.getByRole('status', { name: 'Питание телевизора' }).textContent).toContain('Статус питания неизвестен');
   expect(screen.getByRole('alert').textContent).toContain('Не удалось выполнить запрос'); expect(fetch).toHaveBeenCalledTimes(1);

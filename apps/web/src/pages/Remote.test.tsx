@@ -52,8 +52,76 @@ async function mount(command = (input: { id: string; button: string }) => Promis
   return { ...view, fetch, commands: () => fetch.mock.calls.filter(([path]) => path === '/api/tv/commands'), reads: () => fetch.mock.calls.filter(([path]) => path === '/api/tv/remote') };
 }
 const buttons = [['Вверх', 'UP'], ['Вниз', 'DOWN'], ['Влево', 'LEFT'], ['Вправо', 'RIGHT'], ['OK', 'ENTER'], ['Назад', 'BACK'], ['Домой', 'HOME'], ['Громкость +', 'VOLUME_UP'], ['Громкость −', 'VOLUME_DOWN'], ['Без звука', 'MUTE']] as const;
+const digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] as const;
+test('successful feedback expires after two seconds and a new success resets its timer', async () => {
+  vi.useFakeTimers(); const view = await mount();
+  const status = () => screen.getByRole('status', { name: 'Команды телевизора' }).textContent;
+  fireEvent.click(screen.getByRole('button', { name: 'OK' })); await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+  expect(status()).toBe('Команда отправлена');
+  fireEvent.click(screen.getByRole('button', { name: 'OK' })); await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(1999); });
+  expect(status()).toBe('Команда отправлена');
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(status()).toBe(''); expect(view.commands()).toHaveLength(2);
+});
+test('an old success timer never clears a subsequent unknown command result', async () => {
+  vi.useFakeTimers(); let count = 0;
+  const view = await mount((input) => Promise.resolve(response(++count === 1
+    ? { id: input.id, outcome: 'sent' }
+    : { id: input.id, outcome: 'unknown', error: { code: 'COMMAND_RESULT_UNKNOWN', message: 'Unknown result' } })));
+  fireEvent.click(screen.getByRole('button', { name: 'OK' })); await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  fireEvent.click(screen.getByRole('button', { name: 'OK' })); await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+  expect(screen.getByRole('alert').textContent).toBe(unknown); expect(view.commands()).toHaveLength(2);
+});
+test.each(digits)('numeric click %s sends one protected command without a numeric keyboard shortcut', async (digit) => {
+  const view = await mount();
+  const numeric = screen.getByRole('group', { name: 'Цифры' });
+  const button = within(numeric).getByRole('button', { name: digit });
+  expect(button.textContent).toBe(digit);
+  const remote = screen.getByRole('group', { name: 'Пульт' }); remote.focus();
+  fireEvent.keyDown(remote, { key: digit });
+  expect(view.commands()).toHaveLength(0);
+  fireEvent.click(button); await act(async () => {});
+  expect(view.commands()).toHaveLength(1);
+  expect(view.commands()[0]![1]).toMatchObject({ method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken } });
+  expect(JSON.parse(view.commands()[0]![1]!.body as string)).toEqual({ id: expect.any(String), button: digit });
+});
+test('numeric keys preserve settings, hidden document and in-flight command guards', async () => {
+  const pending = barrier<Response>();
+  const fetch = vi.fn((path: string, _init?: RequestInit) => path === '/api/tv/remote' ? Promise.resolve(response(ready)) : pending.promise);
+  vi.stubGlobal('fetch', fetch);
+  const props = { csrfToken, active: true, onSessionExpired: vi.fn() };
+  const view = render(<Remote {...props} interactionBlocked />); await act(async () => {});
+  const zero = screen.getByRole('button', { name: '0' });
+  fireEvent.click(zero);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  view.rerender(<Remote {...props} />);
+  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+  fireEvent.click(zero); expect(fetch).toHaveBeenCalledTimes(1);
+  visibility.mockRestore();
+  fireEvent.click(zero); fireEvent.click(zero);
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(screen.getAllByRole('button').every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
+  const input = JSON.parse(fetch.mock.calls[1]![1]?.body as string);
+  await act(async () => { pending.resolve(response({ id: input.id, outcome: 'sent' })); });
+});
+test.each(['UNAVAILABLE', 'BUSY', 'UNSUPPORTED'])('numeric keypad stays visible but sends nothing when remote is %s', async (reason) => {
+  const view = await mount(undefined, () => Promise.resolve(response({ enabled: false, reason })));
+  const numeric = screen.getByRole('group', { name: 'Цифры' });
+  expect(within(numeric).getAllByRole('button')).toHaveLength(10);
+  for (const digit of digits) {
+    const button = within(numeric).getByRole('button', { name: digit });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(button);
+  }
+  expect(view.commands()).toHaveLength(0);
+});
 test('icon controls retain accessible names and tooltips without visible labels', async () => {
   await mount();
+  expect(within(screen.getByRole('group', { name: 'Пульт' })).getAllByRole('button')).toHaveLength(20);
   for (const [label] of buttons) {
     const button = screen.getByRole('button', { name: label });
     expect(button.title).toBe(label);
@@ -73,7 +141,7 @@ test('command progress and uncertain result appear above the remote outside its 
   fireEvent.click(screen.getByRole('button', { name: 'Вверх' }));
   const activity = view.container.querySelector('.tv-activity')!;
   expect(activity).not.toBeNull();
-  expect(within(activity as HTMLElement).getByRole('status', { name: 'Команды телевизора' }).textContent).toBe('Отправляем команду…');
+  expect(within(activity as HTMLElement).getByRole('status', { name: 'Команды телевизора' }).textContent).toBe('');
   expect(within(remote).queryByRole('status')).toBeNull();
   await act(async () => { pending.resolve(response({ code: 'SYNTHETIC_FAILURE', message: 'Синтетический отказ', requestId: 'synthetic' }, 503)); });
   expect(within(activity as HTMLElement).getByRole('alert').textContent).toBe(unknown);

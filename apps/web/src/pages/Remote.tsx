@@ -5,7 +5,7 @@ import type { BasicTvButton, TvRemoteState, TvCommandResult } from '@remote-webo
 import { api, ApiFailure } from '../api.js';
 import { requestId } from '../requestId.js';
 
-interface Props { csrfToken: string; active: boolean; onSessionExpired(): void; interactionBlocked?: boolean; activityTarget?: HTMLElement | null }
+interface Props { csrfToken: string; active: boolean; onSessionExpired(): void; onBusyChange?(busy: boolean): void; interactionBlocked?: boolean; activityTarget?: HTMLElement | null }
 interface Runtime { active: boolean; pending: boolean; command: AbortController | null; refresh(): void }
 const unknownMessage = 'Результат команды неизвестен. Автоматический повтор не выполняется';
 const reasons = {
@@ -24,6 +24,7 @@ const buttons: ReadonlyArray<readonly [BasicTvButton, string]> = [
   ['UP', 'Вверх'], ['LEFT', 'Влево'], ['ENTER', 'OK'], ['RIGHT', 'Вправо'], ['DOWN', 'Вниз'],
   ['HOME', 'Домой'], ['BACK', 'Назад'], ['VOLUME_DOWN', 'Громкость −'], ['MUTE', 'Без звука'], ['VOLUME_UP', 'Громкость +'],
 ];
+const numericButtons: ReadonlyArray<BasicTvButton> = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
 const icons: Partial<Record<BasicTvButton, Icon>> = {
   UP: IconChevronUp, DOWN: IconChevronDown, LEFT: IconChevronLeft, RIGHT: IconChevronRight,
   HOME: IconHome, BACK: IconArrowBackUp,
@@ -34,7 +35,7 @@ const keys: Readonly<Record<string, BasicTvButton>> = {
   Escape: 'BACK', Home: 'HOME', '+': 'VOLUME_UP', '-': 'VOLUME_DOWN', m: 'MUTE', M: 'MUTE',
 };
 
-export function Remote({ csrfToken, active, onSessionExpired, interactionBlocked = false, activityTarget }: Props) {
+export function Remote({ csrfToken, active, onSessionExpired, onBusyChange, interactionBlocked = false, activityTarget }: Props) {
   const [state, setState] = useState<TvRemoteState | null>(null);
   const [readError, setReadError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -42,6 +43,14 @@ export function Remote({ csrfToken, active, onSessionExpired, interactionBlocked
   const runtime = useRef<Runtime | null>(null);
   const expired = useRef(onSessionExpired);
   expired.current = onSessionExpired;
+  useEffect(() => { onBusyChange?.(active && busy); }, [active, busy, onBusyChange]);
+  useEffect(() => () => onBusyChange?.(false), [onBusyChange]);
+
+  useEffect(() => {
+    if (!feedback || feedback.alert) return;
+    const timer = setTimeout(() => setFeedback((current) => current === feedback ? null : current), 2000);
+    return () => clearTimeout(timer);
+  }, [feedback]);
 
   useEffect(() => {
     setState(null); setReadError(''); setFeedback(null); setBusy(false);
@@ -141,11 +150,12 @@ export function Remote({ csrfToken, active, onSessionExpired, interactionBlocked
   });
   const activity = <div className="remote-activity">
     {explanation && <p>{explanation}</p>}
-    <p role="status" aria-label="Команды телевизора" aria-live="polite">{busy ? 'Отправляем команду…' : feedback && !feedback.alert ? feedback.text : ''}</p>
+    <p role="status" aria-label="Команды телевизора" aria-live="polite">{!busy && feedback && !feedback.alert ? feedback.text : ''}</p>
     {feedback?.alert && <p role="alert" className="error">{feedback.text}</p>}
   </div>;
   return <><div role="group" aria-label="Пульт" aria-describedby="remote-help" aria-busy={busy} tabIndex={0} className="remote" onKeyDown={keyDown}>
     <h2 className="visually-hidden">Пульт</h2>
+    <div role="group" aria-label="Цифры" className="remote-buttons numeric-pad">{numericButtons.map((button) => <button type="button" key={button} aria-label={button} title={button} disabled={disabled} onClick={() => void send(button)}>{button}</button>)}</div>
     <div role="group" aria-label="Навигация" className="remote-buttons d-pad">{controls(buttons.slice(0, 5))}</div>
     <div role="group" aria-label="Домой и назад" className="remote-buttons home-back">{controls(buttons.slice(5, 7))}</div>
     <div role="group" aria-label="Громкость" className="remote-buttons volume">{controls(buttons.slice(7))}</div>

@@ -13,7 +13,7 @@ h2 { font-size: 1.2rem; margin: 0; }
 p { line-height: 1.5; margin: 12px 0; overflow-wrap: anywhere; }
 .tv-card, .form-card { width: 100%; max-width: 400px; margin: 24px auto 0; padding: 24px; border: 1px solid #33424b; border-radius: 22px; background: linear-gradient(150deg, #202b32, #182127); box-shadow: 0 20px 60px #0004; position: relative; }
 .form-card { max-width: 440px; }
-.tv-layout { width: 100%; max-width: 400px; margin: 24px auto 0; }
+.tv-layout { width: 100%; max-width: 296px; margin: 24px auto 0; }
 .tv-layout .tv-card { margin-top: 0; }
 .tv-info { min-height: 58px; margin: 0 78px 18px 0; display: flex; align-items: center; gap: 10px; }
 .tv-brand { width: 48px; height: 22px; object-fit: contain; flex-shrink: 0; }
@@ -23,6 +23,11 @@ p { line-height: 1.5; margin: 12px 0; overflow-wrap: anywhere; }
 .tv-activity p:empty { display: none; }
 .connection-status { display: inline-block; margin: 0; padding: 4px 9px; border-radius: 12px; background: #303d46; color: #c3d0d9; font-size: .8rem; }
 .connection-status[data-connection="available"] { background: #124f38; color: #75ebba; }
+.connection-row { display: flex; align-items: center; gap: 8px; }
+.activity-slot { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; flex-shrink: 0; }
+.activity-spinner { width: 16px; height: 16px; border: 2px solid #526674; border-top-color: #75ebba; border-radius: 50%; animation: activity-spin .8s linear infinite; }
+@keyframes activity-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .activity-spinner { animation: none; } }
 form { display: grid; gap: 14px; margin-top: 20px; }
 label { display: grid; gap: 8px; font-size: .9rem; font-weight: 600; }
 input { min-width: 0; width: 100%; border: 1px solid #526674; border-radius: 10px; padding: 12px; font: inherit; color: #f1f5f8; background: #10191f; }
@@ -44,8 +49,10 @@ svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width:
 .remote { margin: 0; }
 .remote-buttons { display: grid; gap: 8px; }
 .remote-buttons button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 10px 4px; min-width: 0; }
+.numeric-pad { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 16px; }
+.numeric-pad button:last-child { grid-column: 2; }
 .d-pad { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(3, 64px); grid-template-areas: ". UP ." "LEFT ENTER RIGHT" ". DOWN ."; }
-.d-pad .ok-button { width: 64px; height: 64px; justify-self: center; align-self: center; border: 2px solid #39cdea; border-radius: 50%; font-size: 1.2rem; }
+.d-pad .ok-button { font-size: 1.2rem; }
 .home-back { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "HOME BACK"; margin-top: 16px; }
 .volume { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-areas: "VOLUME_DOWN MUTE VOLUME_UP"; margin-top: 16px; padding-top: 16px; border-top: 1px solid #39474f; }
 .remote-activity p[role="status"] { color: #9fc7d5; }
