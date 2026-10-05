@@ -7,7 +7,7 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "build": "pnpm -r build",
+    "build": "pnpm --filter @remote-webos-tv/contracts build && pnpm --filter @remote-webos-tv/webos build && pnpm --filter @remote-webos-tv/api build && pnpm --filter @remote-webos-tv/web build && pnpm --filter @remote-webos-tv/protocol-probe build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"
   },
