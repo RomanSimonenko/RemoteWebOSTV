@@ -45,7 +45,7 @@ svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width:
 .remote-buttons { display: grid; gap: 8px; }
 .remote-buttons button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 10px 4px; min-width: 0; }
 .d-pad { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(3, 64px); grid-template-areas: ". UP ." "LEFT ENTER RIGHT" ". DOWN ."; }
-.d-pad .ok-button { width: 64px; height: 64px; justify-self: center; align-self: center; border: 2px solid #39cdea; border-radius: 50%; font-size: 1.2rem; }
+.d-pad .ok-button { font-size: 1.2rem; }
 .home-back { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "HOME BACK"; margin-top: 16px; }
 .volume { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-areas: "VOLUME_DOWN MUTE VOLUME_UP"; margin-top: 16px; padding-top: 16px; border-top: 1px solid #39474f; }
 .remote-activity p[role="status"] { color: #9fc7d5; }

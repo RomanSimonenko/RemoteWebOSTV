@@ -197,8 +197,15 @@ for (const width of [320, 1280]) {
       await expect(button).toHaveAttribute('title', name);
       expect(await button.innerText()).toBe(name === 'OK' ? 'OK' : '');
     }
-    const ok = (await remote(page).getByRole('button', { name: 'OK', exact: true }).boundingBox())!;
-    expect(Math.abs(ok.width - ok.height)).toBeLessThanOrEqual(1);
+    const okButton = remote(page).getByRole('button', { name: 'OK', exact: true });
+    const upButton = remote(page).getByRole('button', { name: 'Вверх', exact: true });
+    const ok = (await okButton.boundingBox())!;
+    const upBounds = (await upButton.boundingBox())!;
+    expect(Math.abs(ok.width - upBounds.width)).toBeLessThanOrEqual(1);
+    expect(Math.abs(ok.height - upBounds.height)).toBeLessThanOrEqual(1);
+    for (const property of ['border-radius', 'border-width', 'border-color', 'background-image']) {
+      expect(await okButton.evaluate((element, name) => getComputedStyle(element).getPropertyValue(name), property)).toBe(await upButton.evaluate((element, name) => getComputedStyle(element).getPropertyValue(name), property));
+    }
     for (const button of await page.locator('.tv-card button, .header-actions button').all()) {
       if (await button.locator('svg').count() === 0) continue;
       const control = (await button.boundingBox())!;
