@@ -189,6 +189,44 @@ for (const width of [320, 1280]) {
   }
 }
 
+for (const activation of ['pointer', 'keyboard']) {
+  test(`settings dismiss help permanently via ${activation}`, async ({ page }) => {
+    const { mutations } = await fixture(page);
+    const help = page.locator('.app-header details');
+    await help.locator('summary').click();
+    await expect(help).toHaveJSProperty('open', true);
+    const settings = page.getByRole('button', { name: 'Настройки', exact: true });
+    if (activation === 'pointer') await settings.click();
+    else { await settings.focus(); await page.keyboard.press('Enter'); }
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(help).toHaveJSProperty('open', false);
+    await page.getByRole('button', { name: 'Закрыть настройки' }).click();
+    await expect(help).toHaveJSProperty('open', false);
+    expect(mutations).toEqual([]);
+  });
+}
+test('settings retain inside clicks but dismiss on free background', async ({ page }) => {
+  const { mutations } = await fixture(page);
+  await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('heading').click();
+  await expect(dialog).toBeVisible();
+  await page.mouse.click(5, 300);
+  await expect(dialog).not.toBeVisible();
+  await expect(page.getByRole('button', { name: 'Настройки', exact: true })).toBeFocused();
+  expect(mutations).toEqual([]);
+});
+test('help retains inside clicks but dismisses on free background', async ({ page }) => {
+  const { mutations } = await fixture(page);
+  const help = page.locator('.app-header details');
+  await help.locator('summary').click();
+  await help.locator('p').click();
+  await expect(help).toHaveJSProperty('open', true);
+  await page.mouse.click(5, 300);
+  await expect(help).toHaveJSProperty('open', false);
+  expect(mutations).toEqual([]);
+});
+
 for (const key of ['Enter', 'Space']) {
   test(`keyboard help toggles with native ${key} without a TV command`, async ({ page }) => {
     const { mutations } = await fixture(page);
@@ -262,8 +300,10 @@ test('native settings trap focus, block pointer and TV keys, then restore gear f
   await expect(remote(page).getByRole('button', { name: 'Вверх', exact: true })).toBeDisabled();
   const backgroundGear = (await gear.boundingBox())!;
   await page.mouse.click(backgroundGear.x + backgroundGear.width / 2, backgroundGear.y + backgroundGear.height / 2);
-  await expect(settings(page)).toBeVisible();
+  await expect(settings(page)).not.toBeVisible();
+  await expect(gear).toBeFocused();
   expect(mutations).toEqual([]);
+  await gear.click();
   await page.keyboard.press('Escape');
   await expect(gear).toBeFocused();
   expect(mutations).toEqual([]);

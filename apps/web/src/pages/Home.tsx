@@ -7,12 +7,21 @@ export function Home({ username, csrfToken, tvActive, busy, error, onLogout, onS
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [confirmingPower, setConfirmingPower] = useState(false);
   const settingsButton = useRef<HTMLButtonElement>(null);
+  const help = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    function dismissHelp(event: PointerEvent) {
+      if (event.target instanceof Node && !help.current?.contains(event.target) && help.current) help.current.open = false;
+    }
+    document.addEventListener('pointerdown', dismissHelp);
+    return () => document.removeEventListener('pointerdown', dismissHelp);
+  }, []);
+  useEffect(() => { if ((settingsOpen || confirmingPower) && help.current) help.current.open = false; }, [settingsOpen, confirmingPower]);
   useEffect(() => { if (!tvActive) { setSettingsOpen(false); setConfirmingPower(false); } }, [tvActive]);
   return <section>
     <header className="app-header">
       <p className="eyebrow">Remote WebOS TV</p>
       <div className="header-actions">
-        <details className="keyboard-help"><summary aria-label="Управление с клавиатуры" title="Управление с клавиатуры"><IconInfoCircle aria-hidden="true" /></summary><p id="remote-help">Клавиатура при фокусе на пульте: стрелки, Enter — OK, Escape — назад, Home — домой, +/− — громкость, M — без звука.</p></details>
+        <details ref={help} className="keyboard-help"><summary aria-label="Управление с клавиатуры" title="Управление с клавиатуры"><IconInfoCircle aria-hidden="true" /></summary><p id="remote-help">Клавиатура при фокусе на пульте: стрелки, Enter — OK, Escape — назад, Home — домой, +/− — громкость, M — без звука.</p></details>
         <button ref={settingsButton} type="button" aria-label="Настройки" title="Настройки" aria-haspopup="dialog" disabled={!tvActive || confirmingPower} onClick={() => { settingsButton.current?.focus(); setSettingsOpen(true); }}><IconSettings aria-hidden="true" /></button>
         <button type="button" disabled={busy} onClick={onLogout}>{busy ? 'Выход…' : 'Выйти'}</button>
       </div>
