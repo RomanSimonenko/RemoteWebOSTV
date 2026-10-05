@@ -191,6 +191,25 @@ for (const width of [320, 1280]) {
     await expect(remote(page).getByRole('group', { name: 'Навигация', exact: true })).toBeVisible();
     await expect(remote(page).getByRole('group', { name: 'Домой и назад', exact: true })).toBeVisible();
     await expect(remote(page).getByRole('group', { name: 'Громкость', exact: true })).toBeVisible();
+    const keypad = remote(page).getByRole('group', { name: 'Цифры', exact: true });
+    await expect(keypad).toBeVisible();
+    const digitBounds = [];
+    for (const digit of ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']) {
+      const button = keypad.getByRole('button', { name: digit, exact: true });
+      await expect(button).toBeInViewport();
+      expect(await button.innerText()).toBe(digit);
+      digitBounds.push((await button.boundingBox())!);
+    }
+    for (let row = 0; row < 3; row++) {
+      const [left, middle, right] = digitBounds.slice(row * 3, row * 3 + 3);
+      expect(Math.abs(left!.y - middle!.y)).toBeLessThanOrEqual(1);
+      expect(Math.abs(middle!.y - right!.y)).toBeLessThanOrEqual(1);
+      expect(left!.x + left!.width).toBeLessThan(middle!.x);
+      expect(middle!.x + middle!.width).toBeLessThan(right!.x);
+    }
+    expect(Math.abs(digitBounds[9]!.x - digitBounds[1]!.x)).toBeLessThanOrEqual(1);
+    expect(digitBounds[9]!.y).toBeGreaterThan(digitBounds[6]!.y);
+    expect(digitBounds[9]!.y + digitBounds[9]!.height).toBeLessThan((await up.boundingBox())!.y);
     for (const name of ['Вверх', 'Вниз', 'Влево', 'Вправо', 'OK', 'Домой', 'Назад', 'Громкость −', 'Без звука', 'Громкость +']) {
       const button = remote(page).getByRole('button', { name, exact: true });
       await expect(button).toBeInViewport();

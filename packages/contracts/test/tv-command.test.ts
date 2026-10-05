@@ -13,6 +13,7 @@ describe('basic remote command contracts', () => {
   test.each([
     'UP', 'DOWN', 'LEFT', 'RIGHT', 'ENTER', 'BACK', 'HOME',
     'VOLUME_UP', 'VOLUME_DOWN', 'MUTE',
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
   ])('accepts basic button %s', (button) => {
     expect(basicTvButtonSchema.parse(button)).toBe(button);
     expect(tvCommandRequestSchema.parse({ id, button })).toEqual({ id, button });
@@ -20,7 +21,7 @@ describe('basic remote command contracts', () => {
 
   test.each([
     'EXIT', 'MENU', 'CHANNEL_UP', 'CHANNEL_DOWN', 'RED', 'PLAY',
-    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'UNKNOWN', '', 'up',
+    'LIST', 'GUIDE', 'INPUT', 'UNKNOWN', '', 'up',
     null, 0,
   ])('rejects excluded button %j', (button) => {
     expect(basicTvButtonSchema.safeParse(button).success).toBe(false);

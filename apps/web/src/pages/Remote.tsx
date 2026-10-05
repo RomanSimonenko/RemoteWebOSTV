@@ -24,6 +24,7 @@ const buttons: ReadonlyArray<readonly [BasicTvButton, string]> = [
   ['UP', 'Вверх'], ['LEFT', 'Влево'], ['ENTER', 'OK'], ['RIGHT', 'Вправо'], ['DOWN', 'Вниз'],
   ['HOME', 'Домой'], ['BACK', 'Назад'], ['VOLUME_DOWN', 'Громкость −'], ['MUTE', 'Без звука'], ['VOLUME_UP', 'Громкость +'],
 ];
+const numericButtons: ReadonlyArray<BasicTvButton> = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
 const icons: Partial<Record<BasicTvButton, Icon>> = {
   UP: IconChevronUp, DOWN: IconChevronDown, LEFT: IconChevronLeft, RIGHT: IconChevronRight,
   HOME: IconHome, BACK: IconArrowBackUp,
@@ -146,6 +147,7 @@ export function Remote({ csrfToken, active, onSessionExpired, interactionBlocked
   </div>;
   return <><div role="group" aria-label="Пульт" aria-describedby="remote-help" aria-busy={busy} tabIndex={0} className="remote" onKeyDown={keyDown}>
     <h2 className="visually-hidden">Пульт</h2>
+    <div role="group" aria-label="Цифры" className="remote-buttons numeric-pad">{numericButtons.map((button) => <button type="button" key={button} aria-label={button} title={button} disabled={disabled} onClick={() => void send(button)}>{button}</button>)}</div>
     <div role="group" aria-label="Навигация" className="remote-buttons d-pad">{controls(buttons.slice(0, 5))}</div>
     <div role="group" aria-label="Домой и назад" className="remote-buttons home-back">{controls(buttons.slice(5, 7))}</div>
     <div role="group" aria-label="Громкость" className="remote-buttons volume">{controls(buttons.slice(7))}</div>

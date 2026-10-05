@@ -44,6 +44,8 @@ svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width:
 .remote { margin: 0; }
 .remote-buttons { display: grid; gap: 8px; }
 .remote-buttons button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 10px 4px; min-width: 0; }
+.numeric-pad { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 16px; }
+.numeric-pad button:last-child { grid-column: 2; }
 .d-pad { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(3, 64px); grid-template-areas: ". UP ." "LEFT ENTER RIGHT" ". DOWN ."; }
 .d-pad .ok-button { font-size: 1.2rem; }
 .home-back { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "HOME BACK"; margin-top: 16px; }

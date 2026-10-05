@@ -52,8 +52,53 @@ async function mount(command = (input: { id: string; button: string }) => Promis
   return { ...view, fetch, commands: () => fetch.mock.calls.filter(([path]) => path === '/api/tv/commands'), reads: () => fetch.mock.calls.filter(([path]) => path === '/api/tv/remote') };
 }
 const buttons = [['Вверх', 'UP'], ['Вниз', 'DOWN'], ['Влево', 'LEFT'], ['Вправо', 'RIGHT'], ['OK', 'ENTER'], ['Назад', 'BACK'], ['Домой', 'HOME'], ['Громкость +', 'VOLUME_UP'], ['Громкость −', 'VOLUME_DOWN'], ['Без звука', 'MUTE']] as const;
+const digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] as const;
+test.each(digits)('numeric click %s sends one protected command without a numeric keyboard shortcut', async (digit) => {
+  const view = await mount();
+  const numeric = screen.getByRole('group', { name: 'Цифры' });
+  const button = within(numeric).getByRole('button', { name: digit });
+  expect(button.textContent).toBe(digit);
+  const remote = screen.getByRole('group', { name: 'Пульт' }); remote.focus();
+  fireEvent.keyDown(remote, { key: digit });
+  expect(view.commands()).toHaveLength(0);
+  fireEvent.click(button); await act(async () => {});
+  expect(view.commands()).toHaveLength(1);
+  expect(view.commands()[0]![1]).toMatchObject({ method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken } });
+  expect(JSON.parse(view.commands()[0]![1]!.body as string)).toEqual({ id: expect.any(String), button: digit });
+});
+test('numeric keys preserve settings, hidden document and in-flight command guards', async () => {
+  const pending = barrier<Response>();
+  const fetch = vi.fn((path: string, _init?: RequestInit) => path === '/api/tv/remote' ? Promise.resolve(response(ready)) : pending.promise);
+  vi.stubGlobal('fetch', fetch);
+  const props = { csrfToken, active: true, onSessionExpired: vi.fn() };
+  const view = render(<Remote {...props} interactionBlocked />); await act(async () => {});
+  const zero = screen.getByRole('button', { name: '0' });
+  fireEvent.click(zero);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  view.rerender(<Remote {...props} />);
+  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+  fireEvent.click(zero); expect(fetch).toHaveBeenCalledTimes(1);
+  visibility.mockRestore();
+  fireEvent.click(zero); fireEvent.click(zero);
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(screen.getAllByRole('button').every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
+  const input = JSON.parse(fetch.mock.calls[1]![1]?.body as string);
+  await act(async () => { pending.resolve(response({ id: input.id, outcome: 'sent' })); });
+});
+test.each(['UNAVAILABLE', 'BUSY', 'UNSUPPORTED'])('numeric keypad stays visible but sends nothing when remote is %s', async (reason) => {
+  const view = await mount(undefined, () => Promise.resolve(response({ enabled: false, reason })));
+  const numeric = screen.getByRole('group', { name: 'Цифры' });
+  expect(within(numeric).getAllByRole('button')).toHaveLength(10);
+  for (const digit of digits) {
+    const button = within(numeric).getByRole('button', { name: digit });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(button);
+  }
+  expect(view.commands()).toHaveLength(0);
+});
 test('icon controls retain accessible names and tooltips without visible labels', async () => {
   await mount();
+  expect(within(screen.getByRole('group', { name: 'Пульт' })).getAllByRole('button')).toHaveLength(20);
   for (const [label] of buttons) {
     const button = screen.getByRole('button', { name: label });
     expect(button.title).toBe(label);
