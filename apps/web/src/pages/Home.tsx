@@ -11,7 +11,8 @@ export function Home({ username, csrfToken, tvActive, busy, error, onLogout, onS
     <header className="app-header">
       <p className="eyebrow">Remote WebOS TV</p>
       <div className="header-actions">
-        <button ref={settingsButton} type="button" aria-label="Настройки" aria-haspopup="dialog" disabled={!tvActive || confirmingPower} onClick={() => { settingsButton.current?.focus(); setSettingsOpen(true); }}>⚙</button>
+        <details className="keyboard-help"><summary aria-label="Управление с клавиатуры" title="Управление с клавиатуры">?</summary><p id="remote-help">Клавиатура при фокусе на пульте: стрелки, Enter — OK, Escape — назад, Home — домой, +/− — громкость, M — без звука.</p></details>
+        <button ref={settingsButton} type="button" aria-label="Настройки" title="Настройки" aria-haspopup="dialog" disabled={!tvActive || confirmingPower} onClick={() => { settingsButton.current?.focus(); setSettingsOpen(true); }}><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7" /><circle cx="12" cy="12" r="3" /><path d="M12 2v3m0 14v3M2 12h3m14 0h3M4.9 4.9l2.2 2.2m9.8 9.8 2.2 2.2M4.9 19.1l2.2-2.2m9.8-9.8 2.2-2.2" /></svg></button>
         <button type="button" disabled={busy} onClick={onLogout}>{busy ? 'Выход…' : 'Выйти'}</button>
       </div>
     </header>

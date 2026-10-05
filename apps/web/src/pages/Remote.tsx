@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { createPortal } from 'react-dom';
 import type { BasicTvButton, TvRemoteState, TvCommandResult } from '@remote-webos-tv/contracts';
 import { api, ApiFailure } from '../api.js';
 import { requestId } from '../requestId.js';
 
-interface Props { csrfToken: string; active: boolean; onSessionExpired(): void; interactionBlocked?: boolean }
+interface Props { csrfToken: string; active: boolean; onSessionExpired(): void; interactionBlocked?: boolean; activityTarget?: HTMLElement | null }
 interface Runtime { active: boolean; pending: boolean; command: AbortController | null; refresh(): void }
 const unknownMessage = 'Результат команды неизвестен. Автоматический повтор не выполняется';
 const reasons = {
@@ -33,7 +34,7 @@ const keys: Readonly<Record<string, BasicTvButton>> = {
   Escape: 'BACK', Home: 'HOME', '+': 'VOLUME_UP', '-': 'VOLUME_DOWN', m: 'MUTE', M: 'MUTE',
 };
 
-export function Remote({ csrfToken, active, onSessionExpired, interactionBlocked = false }: Props) {
+export function Remote({ csrfToken, active, onSessionExpired, interactionBlocked = false, activityTarget }: Props) {
   const [state, setState] = useState<TvRemoteState | null>(null);
   const [readError, setReadError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -131,18 +132,19 @@ export function Remote({ csrfToken, active, onSessionExpired, interactionBlocked
   if (!active) return null;
   const disabled = interactionBlocked || busy || !state?.enabled;
   const explanation = readError || (state ? state.enabled ? '' : reasons[state.reason] : 'Проверяем доступность пульта…');
-  const controls = (entries: typeof buttons) => entries.map(([button, label]) => <button type="button" key={button} aria-label={label} className={button === 'ENTER' ? 'ok-button' : undefined} style={{ gridArea: button }} disabled={disabled} onClick={() => void send(button)}>
+  const controls = (entries: typeof buttons) => entries.map(([button, label]) => <button type="button" key={button} aria-label={label} title={label} className={button === 'ENTER' ? 'ok-button' : undefined} style={{ gridArea: button }} disabled={disabled} onClick={() => void send(button)}>
     {iconPaths[button] && <svg aria-hidden="true" viewBox="0 0 24 24"><path d={iconPaths[button]} /></svg>}
-    {button === 'ENTER' ? 'OK' : !['UP', 'DOWN', 'LEFT', 'RIGHT'].includes(button) && <span>{label}</span>}
+    {button === 'ENTER' && 'OK'}
   </button>);
-  return <div role="group" aria-label="Пульт" aria-describedby="remote-help" aria-busy={busy} tabIndex={0} className="remote" onKeyDown={keyDown}>
-    <h2 className="visually-hidden">Пульт</h2>
+  const activity = <div className="remote-activity">
     {explanation && <p>{explanation}</p>}
+    <p role="status" aria-label="Команды телевизора" aria-live="polite">{busy ? 'Отправляем команду…' : feedback && !feedback.alert ? feedback.text : ''}</p>
+    {feedback?.alert && <p role="alert" className="error">{feedback.text}</p>}
+  </div>;
+  return <><div role="group" aria-label="Пульт" aria-describedby="remote-help" aria-busy={busy} tabIndex={0} className="remote" onKeyDown={keyDown}>
+    <h2 className="visually-hidden">Пульт</h2>
     <div role="group" aria-label="Навигация" className="remote-buttons d-pad">{controls(buttons.slice(0, 5))}</div>
     <div role="group" aria-label="Домой и назад" className="remote-buttons home-back">{controls(buttons.slice(5, 7))}</div>
     <div role="group" aria-label="Громкость" className="remote-buttons volume">{controls(buttons.slice(7))}</div>
-    <p role="status" aria-live="polite">{busy ? 'Отправляем команду…' : feedback && !feedback.alert ? feedback.text : ''}</p>
-    {feedback?.alert && <p role="alert" className="error">{feedback.text}</p>}
-    <details className="keyboard-help"><summary>Управление с клавиатуры</summary><p id="remote-help">Клавиатура при фокусе на пульте: стрелки, Enter — OK, Escape — назад, Home — домой, +/− — громкость, M — без звука.</p></details>
-  </div>;
+  </div>{activityTarget ? createPortal(activity, activityTarget) : activity}</>;
 }

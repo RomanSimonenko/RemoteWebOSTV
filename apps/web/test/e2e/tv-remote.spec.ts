@@ -36,7 +36,7 @@ async function press(page: Page, tv: TvFixture, key: string) {
   const response = commandResponse(page, tv);
   await page.keyboard.press(key);
   await sent(await response);
-  await expect(remote(page).getByRole('status')).toHaveText('Команда отправлена');
+  await expect(page.getByRole('status', { name: 'Команды телевизора', exact: true })).toHaveText('Команда отправлена');
 }
 
 test('all ten browser controls reach the pointer once; saved TV remains usable after reload and login', async ({ page, tv }) => {
@@ -50,7 +50,7 @@ test('all ten browser controls reach the pointer once; saved TV remains usable a
     const response = commandResponse(page, tv);
     await remote(page).getByRole('button', { name: label, exact: true }).click();
     await sent(await response);
-    await expect(remote(page).getByRole('status')).toHaveText('Команда отправлена');
+    await expect(page.getByRole('status', { name: 'Команды телевизора', exact: true })).toHaveText('Команда отправлена');
     await tv.tv.waitForPointerFrameCount(requests.length);
     expect(tv.tv.pointerFrames.at(-1)).toBe(frame(name));
   }
@@ -161,7 +161,7 @@ test('offline remote disables commands and reconnect never replays offline input
   await tv.makeTvUnavailable();
   await tv.expireUnavailableRecovery(page);
   await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Нет соединения');
-  await expect(remote(page).getByText('Телевизор недоступен. Подключитесь снова.', { exact: true })).toBeVisible();
+  await expect(page.locator('.remote-activity').getByText('Телевизор недоступен. Подключитесь снова.', { exact: true })).toBeVisible();
   for (const [label] of mappings) await expect(remote(page).getByRole('button', { name: label, exact: true })).toBeDisabled();
   await remote(page).focus();
   await page.keyboard.press('ArrowUp');
@@ -205,7 +205,7 @@ test('lost genuine command response after pointer receipt shows uncertainty and 
     expect(original.pointerFrames).toEqual([frame('UP')]);
     await tv.makeTvUnavailable();
     loseResponse.release();
-    await expect(remote(page).getByRole('alert')).toHaveText('Результат команды неизвестен. Автоматический повтор не выполняется');
+    await expect(page.locator('.remote-activity').getByRole('alert')).toHaveText('Результат команды неизвестен. Автоматический повтор не выполняется');
     await page.unroute(`${tv.origin}/api/tv/commands`);
     await tv.expireUnavailableRecovery(page);
     await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Нет соединения');
@@ -214,7 +214,7 @@ test('lost genuine command response after pointer receipt shows uncertainty and 
     await page.getByRole('button', { name: 'Подключиться снова', exact: true }).click();
     await page.keyboard.press('Escape');
     await ready(page);
-    await expect(remote(page).getByRole('alert')).toHaveText('Результат команды неизвестен. Автоматический повтор не выполняется');
+    await expect(page.locator('.remote-activity').getByRole('alert')).toHaveText('Результат команды неизвестен. Автоматический повтор не выполняется');
     await remote(page).focus();
     await press(page, tv, 'Home');
     await tv.tv.waitForPointerFrameCount(1);

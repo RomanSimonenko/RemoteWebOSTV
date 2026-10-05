@@ -31,6 +31,28 @@ function submitHost(host: string) {
 }
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
+test.each([
+  [{ model: 'Synthetic TV', platformVersion: '6.5.3', firmwareVersion: '99.8' }, 'webOS 6.5.3'],
+  [{ model: 'Synthetic TV', firmwareVersion: '99.8' }, 'Версия неизвестна'],
+])('saved TV identity %j is displayed above the button-only card', async (identity, version) => {
+  vi.stubGlobal('fetch', vi.fn((path: RequestInfo | URL) => Promise.resolve(response(path === '/api/tv'
+    ? { ...saved, tv: { ...saved.tv, identity } }
+    : path === '/api/tv/power' ? { mac: null, canPowerOff: true, canWake: false, operation: null }
+    : { enabled: true, reason: null }))));
+  const view = render(<Home username="synthetic-owner" csrfToken={csrfToken} tvActive busy={false} error={null} onLogout={vi.fn()} onSessionExpired={vi.fn()} />);
+  await act(async () => {});
+  const info = view.container.querySelector('.tv-info') as HTMLElement;
+  expect(info).not.toBeNull();
+  expect(within(info).getByText('Synthetic TV')).toBeTruthy();
+  expect(within(info).getByText(version)).toBeTruthy();
+  expect(info.textContent).not.toContain('99.8');
+  const card = view.container.querySelector('.tv-card') as HTMLElement;
+  expect(within(card).queryByRole('status')).toBeNull();
+  expect(card.querySelector('p, details')).toBeNull();
+  expect(info.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getAllByRole('button', { name: 'Выключить ТВ' })).toHaveLength(1);
+});
+
 test('keeps refresh enabled during background reads and coalesces clicks without shortening the completion cooldown', async () => {
   vi.useFakeTimers();
   const initial = barrier<Response>();

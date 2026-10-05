@@ -15,6 +15,8 @@ async function fixture(page: Page, mode = 'idle') {
   await page.clock.pauseAt(new Date('2026-10-04T12:00:01Z'));
   const now = Date.parse('2026-10-04T12:00:00Z');
   const status: { -readonly [Key in keyof TvStatusResponse]: TvStatusResponse[Key] } = { tv: { host: '192.168.50.20', identity: { model: 'Synthetic TV' } }, connection: 'available', operation: null };
+  if (mode === 'version-known') status.tv = { host: '192.168.50.20', identity: { model: 'Synthetic TV', platformVersion: '6.5.3', firmwareVersion: '99.8' } };
+  if (mode === 'version-missing') status.tv = { host: '192.168.50.20', identity: { model: 'Synthetic TV', firmwareVersion: '99.8' } };
   const power: { -readonly [Key in keyof TvPowerState]: TvPowerState[Key] } = { mac: '02:00:00:00:00:03', canPowerOff: true, canWake: false, operation: null };
   if (mode === 'connection-running') {
     status.connection = 'connecting';
@@ -74,8 +76,24 @@ for (const width of [320, 1280]) {
     await expect(remote(page).getByRole('group', { name: 'Домой и назад', exact: true })).toBeVisible();
     await expect(remote(page).getByRole('group', { name: 'Громкость', exact: true })).toBeVisible();
     for (const name of ['Вверх', 'Вниз', 'Влево', 'Вправо', 'OK', 'Домой', 'Назад', 'Громкость −', 'Без звука', 'Громкость +']) {
-      await expect(remote(page).getByRole('button', { name, exact: true })).toBeInViewport();
+      const button = remote(page).getByRole('button', { name, exact: true });
+      await expect(button).toBeInViewport();
+      await expect(button).toHaveAttribute('title', name);
+      expect(await button.innerText()).toBe(name === 'OK' ? 'OK' : '');
     }
+    const ok = (await remote(page).getByRole('button', { name: 'OK', exact: true }).boundingBox())!;
+    expect(Math.abs(ok.width - ok.height)).toBeLessThanOrEqual(1);
+    for (const button of await page.locator('.tv-card button, .header-actions button').all()) {
+      if (await button.locator('svg').count() === 0) continue;
+      const control = (await button.boundingBox())!;
+      const icon = (await button.locator('svg').boundingBox())!;
+      expect(Math.abs(icon.x + icon.width / 2 - control.x - control.width / 2)).toBeLessThanOrEqual(1);
+      expect(Math.abs(icon.y + icon.height / 2 - control.y - control.height / 2)).toBeLessThanOrEqual(1);
+    }
+    expect(await card.getByRole('status').count()).toBe(0);
+    expect(await card.getByRole('alert').count()).toBe(0);
+    expect(await card.locator('p, details').count()).toBe(0);
+    await expect(card).not.toContainText('Synthetic TV', { useInnerText: true });
     await expect(card).not.toContainText('192.168.50.20', { useInnerText: true });
     await expect(card).not.toContainText('02:00:00:00:00:03', { useInnerText: true });
     expect(await card.getByRole('button', { name: 'Настройки', exact: true }).count()).toBe(0);
@@ -89,11 +107,18 @@ for (const width of [320, 1280]) {
       await page.setViewportSize({ width, height: 960 });
       const { reads, mutations } = await fixture(page, mode);
       if (mode.endsWith('error')) await expect(page.getByRole('alert')).toContainText(longError);
+      const card = page.locator('.tv-card');
+      expect(await card.getByRole('status').count()).toBe(0);
+      expect(await card.getByRole('alert').count()).toBe(0);
+      const activity = page.locator('.tv-activity');
+      await expect(activity.getByRole('status', { name: 'Соединение с телевизором', exact: true })).toBeVisible();
+      if (mode.endsWith('error')) await expect(activity.getByRole('alert')).toContainText(longError);
+      if (mode.endsWith('running')) await expect(activity.getByText(/Осталось:/)).toBeVisible();
+      expect((await activity.boundingBox())!.y + (await activity.boundingBox())!.height).toBeLessThanOrEqual((await card.boundingBox())!.y);
       await noOverflow(page);
       // Initial diagnostic autofocus can scroll the document. Measure the modal
       // transition from the same viewport, with its opener already on screen.
       await page.evaluate(() => window.scrollTo(0, 0));
-      const card = page.locator('.tv-card');
       const before = [await card.boundingBox(), await remote(page).boundingBox()];
       const initialReads = [...reads];
       await page.getByRole('button', { name: 'Настройки', exact: true }).click();
@@ -127,8 +152,10 @@ for (const width of [320, 1280]) {
 for (const key of ['Enter', 'Space']) {
   test(`keyboard help toggles with native ${key} without a TV command`, async ({ page }) => {
     const { mutations } = await fixture(page);
-    const help = remote(page).locator('details');
+    const help = page.locator('.app-header details');
     const summary = help.locator('summary');
+    await expect(summary).toHaveAccessibleName('Управление с клавиатуры');
+    expect(await summary.innerText()).toBe('?');
     await summary.focus();
     await expect(summary).toBeFocused();
     await expect(help).toHaveJSProperty('open', false);
@@ -137,8 +164,41 @@ for (const key of ['Enter', 'Space']) {
     await page.keyboard.press(key);
     await expect(help).toHaveJSProperty('open', false);
     expect(mutations).toEqual([]);
+});
+}
+
+for (const [mode, text] of [['version-known', 'webOS 6.5.3'], ['version-missing', 'Версия неизвестна']] as const) {
+  test(`${mode} shows model and platform version above the remote without using firmware`, async ({ page }) => {
+    await fixture(page, mode);
+    const info = page.locator('.tv-info');
+    await expect(info.getByText('Synthetic TV', { exact: true })).toBeVisible();
+    await expect(info.getByText(text, { exact: true })).toBeVisible();
+    await expect(info).not.toContainText('99.8');
+    const box = (await info.boundingBox())!;
+    expect(box.y + box.height).toBeLessThanOrEqual((await page.locator('.tv-card').boundingBox())!.y);
   });
 }
+
+test('header keyboard help stays readable inside a 320px viewport without sending commands', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 960 });
+  const { mutations } = await fixture(page);
+  await page.locator('.app-header summary').click();
+  const help = page.locator('#remote-help');
+  await expect(help).toBeVisible();
+  const box = (await help.boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(320);
+  await noOverflow(page);
+  expect(mutations).toEqual([]);
+});
+
+test('remote command failure remains visible above the controls and never retries', async ({ page }) => {
+  const { mutations } = await fixture(page);
+  await remote(page).getByRole('button', { name: 'Домой', exact: true }).click();
+  await expect(page.locator('.tv-activity').getByRole('alert')).toContainText('Результат команды неизвестен');
+  expect(await page.locator('.tv-card').getByRole('alert').count()).toBe(0);
+  expect(mutations).toEqual([{ path: '/api/tv/commands', data: { id: expect.any(String), button: 'HOME' } }]);
+});
 
 test('native settings trap focus, block pointer and TV keys, then restore gear focus', async ({ page }) => {
   const { mutations } = await fixture(page);

@@ -20,6 +20,8 @@ export function TvSetup({ csrfToken, onSessionExpired, settingsOpen, onCloseSett
   const [busy, setBusy] = useState(false);
   const [powerState, setPowerState] = useState<TvPowerState | null>(null);
   const [settingsTarget, setSettingsTarget] = useState<HTMLDivElement | null>(null);
+  const [powerActivityTarget, setPowerActivityTarget] = useState<HTMLDivElement | null>(null);
+  const [remoteActivityTarget, setRemoteActivityTarget] = useState<HTMLDivElement | null>(null);
   const [accepted, setAccepted] = useState<{ operation: TvOperation; afterReadVersion: number } | null>(null);
   const [now, setNow] = useState(Date.now);
   const saved = useRef<SavedTvView | null>(null);
@@ -107,16 +109,23 @@ export function TvSetup({ csrfToken, onSessionExpired, settingsOpen, onCloseSett
       <button type="button" disabled={controlsBusy} onClick={() => start({ action: 'repair' })}>Повторить сопряжение</button>
     </div>}
   </>;
-  return <section className="tv-card">
-    <div className={tv ? 'tv-summary' : undefined}>
+  return <section className={tv ? 'tv-layout' : 'form-card'}>
+    <div className={tv ? 'tv-info' : undefined}>
       <h1>{tv ? 'Телевизор' : 'Телевизор ещё не настроен'}</h1>
       {tv && <p className="tv-model">{tv.identity.model}</p>}
-      <p className="connection-status" data-connection={error ? 'unknown' : status?.connection} role="status" aria-label="Соединение с телевизором" aria-live="polite">{connectionText}</p>
+      {tv && <p className="tv-version">{tv.identity.platformVersion ? `webOS ${tv.identity.platformVersion}` : 'Версия неизвестна'}</p>}
     </div>
-    <div className={settingsOpen ? 'reserved-activity' : undefined} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{activity(true)}</div>
+    <div className="tv-activity">
+      <p className="connection-status" data-connection={error ? 'unknown' : status?.connection} role="status" aria-label="Соединение с телевизором" aria-live="polite">{connectionText}</p>
+      <div className={settingsOpen ? 'reserved-activity' : undefined} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{activity(true)}</div>
+      <div className="power-activity" ref={setPowerActivityTarget} />
+      <div ref={setRemoteActivityTarget} />
+    </div>
     {!tv && <>{addressForm}<button type="button" disabled={loading} onClick={refresh}>Обновить статус</button></>}
-    {tv && <PowerControls csrfToken={csrfToken} active settingsOpen={settingsOpen} settingsTarget={settingsTarget} {...(onConfirmationChange ? { onConfirmationChange } : {})} onSessionExpired={onSessionExpired} onStateChange={setPowerState} />}
-    {tv && <Remote csrfToken={csrfToken} active interactionBlocked={settingsOpen} onSessionExpired={onSessionExpired} />}
+    {tv && <div className="tv-card">
+      <PowerControls csrfToken={csrfToken} active settingsOpen={settingsOpen} settingsTarget={settingsTarget} activityTarget={powerActivityTarget} {...(onConfirmationChange ? { onConfirmationChange } : {})} onSessionExpired={onSessionExpired} onStateChange={setPowerState} />
+      <Remote csrfToken={csrfToken} active interactionBlocked={settingsOpen} activityTarget={remoteActivityTarget} onSessionExpired={onSessionExpired} />
+    </div>}
     <SettingsDialog open={settingsOpen} onClose={onCloseSettings}>
       {settingsOpen && activity(false)}
       {tv ? <><p>Текущий телевизор: {tv.identity.model}</p><p>Соединение: {connectionText}</p><p>Сохранённый IP: {tv.host}</p>{addressForm}
