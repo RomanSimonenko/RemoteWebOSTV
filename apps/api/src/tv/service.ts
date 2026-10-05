@@ -581,8 +581,9 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
   }
 
   function remoteState(): TvRemoteState {
-    // A probe can disconnect the adapter on failure, so it owns the same gate.
-    if (work || cleanup || command || probe) return { enabled: false, reason: 'BUSY' };
+    // Background reads do not disable the remote. An admitted command retains
+    // ownership while awaiting their result before touching the transport.
+    if (work || cleanup || command) return { enabled: false, reason: 'BUSY' };
     if (closed || unsafeCleanup || connection !== 'available' || !activeAdapter || remoteCapability?.generation !== generation) return { enabled: false, reason: 'UNAVAILABLE' };
     if (remoteCapability.pointer !== true) return { enabled: false, reason: 'UNSUPPORTED' };
     return { enabled: true, reason: null };
@@ -615,8 +616,17 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     // Acquire ownership synchronously; cancellation before this worker runs is
     // proven not_sent. Once adapter work starts, an unsettled cancellation is unknown.
     const pending = Promise.resolve().then(async () => {
+      if (probe) {
+        try { await abortable(probe.promise, controller.signal); }
+        catch (cause) {
+          if (!controller.signal.aborted) throw cause;
+          return rejectTvCommand(input.id, 'COMMAND_NOT_SENT');
+        }
+      }
       if (closed || version !== generation || controller.signal.aborted) return rejectTvCommand(input.id, 'COMMAND_NOT_SENT');
       if (scheduler.now() >= expiresAt) { expire(); return rejectTvCommand(input.id, 'COMMAND_NOT_SENT'); }
+      if (unsafeCleanup || cleanup || connection !== 'available' || activeAdapter !== adapter || remoteCapability?.generation !== version) return rejectTvCommand(input.id, 'TV_UNAVAILABLE');
+      if (remoteCapability.pointer !== true) return rejectTvCommand(input.id, 'UNSUPPORTED_CAPABILITY');
       started = true;
       const result = await executeTvCommand(input, adapter, controller.signal);
       if (scheduler.now() >= expiresAt && !controller.signal.aborted) expire();
