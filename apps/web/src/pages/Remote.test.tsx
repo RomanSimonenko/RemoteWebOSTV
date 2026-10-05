@@ -58,6 +58,11 @@ test('icon controls retain accessible names and tooltips without visible labels'
     const button = screen.getByRole('button', { name: label });
     expect(button.title).toBe(label);
     expect(button.textContent).toBe(label === 'OK' ? 'OK' : '');
+    if (label !== 'OK') {
+      const icon = button.querySelector('svg');
+      expect(icon?.classList.contains('tabler-icon')).toBe(true);
+      expect(icon?.getAttribute('aria-hidden')).toBe('true');
+    }
   }
 });
 

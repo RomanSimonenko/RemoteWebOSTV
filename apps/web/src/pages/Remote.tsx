@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
+import { IconChevronUp, IconChevronDown, IconChevronLeft, IconChevronRight, IconHome, IconArrowBackUp, IconMinus, IconPlus, IconVolumeOff, type Icon } from '@tabler/icons-react';
 import type { BasicTvButton, TvRemoteState, TvCommandResult } from '@remote-webos-tv/contracts';
 import { api, ApiFailure } from '../api.js';
 import { requestId } from '../requestId.js';
@@ -23,11 +24,10 @@ const buttons: ReadonlyArray<readonly [BasicTvButton, string]> = [
   ['UP', 'Вверх'], ['LEFT', 'Влево'], ['ENTER', 'OK'], ['RIGHT', 'Вправо'], ['DOWN', 'Вниз'],
   ['HOME', 'Домой'], ['BACK', 'Назад'], ['VOLUME_DOWN', 'Громкость −'], ['MUTE', 'Без звука'], ['VOLUME_UP', 'Громкость +'],
 ];
-const iconPaths: Partial<Record<BasicTvButton, string>> = {
-  UP: 'm6 15 6-6 6 6', DOWN: 'm6 9 6 6 6-6', LEFT: 'm15 6-6 6 6 6', RIGHT: 'm9 6 6 6-6 6',
-  HOME: 'm3 11 9-8 9 8M6 9v12h12V9', BACK: 'm9 5-6 6 6 6M3 11h11a6 6 0 0 1 0 12',
-  VOLUME_DOWN: 'M3 10h4l5-4v12l-5-4H3zM16 12h6', VOLUME_UP: 'M3 10h4l5-4v12l-5-4H3zM16 12h6M19 9v6',
-  MUTE: 'M3 10h4l5-4v12l-5-4H3zM17 9l5 6M22 9l-5 6',
+const icons: Partial<Record<BasicTvButton, Icon>> = {
+  UP: IconChevronUp, DOWN: IconChevronDown, LEFT: IconChevronLeft, RIGHT: IconChevronRight,
+  HOME: IconHome, BACK: IconArrowBackUp,
+  VOLUME_DOWN: IconMinus, VOLUME_UP: IconPlus, MUTE: IconVolumeOff,
 };
 const keys: Readonly<Record<string, BasicTvButton>> = {
   ArrowUp: 'UP', ArrowDown: 'DOWN', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT', Enter: 'ENTER',
@@ -132,10 +132,13 @@ export function Remote({ csrfToken, active, onSessionExpired, interactionBlocked
   if (!active) return null;
   const disabled = interactionBlocked || busy || !state?.enabled;
   const explanation = readError || (state ? state.enabled ? '' : reasons[state.reason] : 'Проверяем доступность пульта…');
-  const controls = (entries: typeof buttons) => entries.map(([button, label]) => <button type="button" key={button} aria-label={label} title={label} className={button === 'ENTER' ? 'ok-button' : undefined} style={{ gridArea: button }} disabled={disabled} onClick={() => void send(button)}>
-    {iconPaths[button] && <svg aria-hidden="true" viewBox="0 0 24 24"><path d={iconPaths[button]} /></svg>}
+  const controls = (entries: typeof buttons) => entries.map(([button, label]) => {
+    const ButtonIcon = icons[button];
+    return <button type="button" key={button} aria-label={label} title={label} className={button === 'ENTER' ? 'ok-button' : undefined} style={{ gridArea: button }} disabled={disabled} onClick={() => void send(button)}>
+    {ButtonIcon && <ButtonIcon aria-hidden="true" />}
     {button === 'ENTER' && 'OK'}
-  </button>);
+  </button>;
+  });
   const activity = <div className="remote-activity">
     {explanation && <p>{explanation}</p>}
     <p role="status" aria-label="Команды телевизора" aria-live="polite">{busy ? 'Отправляем команду…' : feedback && !feedback.alert ? feedback.text : ''}</p>
