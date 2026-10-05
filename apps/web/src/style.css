@@ -56,6 +56,14 @@ svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width:
 .home-back { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "HOME BACK"; margin-top: 16px; }
 .volume { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-areas: "VOLUME_DOWN MUTE VOLUME_UP"; margin-top: 16px; padding-top: 16px; border-top: 1px solid #39474f; }
 .remote-activity p[role="status"] { color: #9fc7d5; }
+.channels { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "CHANNEL_DOWN CHANNEL_UP"; margin-top: 12px; }
+.channels button { flex-direction: row; }
+.color-buttons { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 12px; }
+.color-mark { width: 22px; height: 10px; border-radius: 3px; background: var(--button-color); }
+[data-color="RED"] { --button-color: #ff626b; }
+[data-color="GREEN"] { --button-color: #60d994; }
+[data-color="YELLOW"] { --button-color: #f4d35e; }
+[data-color="BLUE"] { --button-color: #66aaff; }
 .keyboard-help { font-size: .75rem; color: #a8b6bf; }
 .keyboard-help summary { display: flex; align-items: center; justify-content: center; width: 42px; height: 42px; border: 1px solid #42525d; border-radius: 14px; background: #27343d; color: #f1f5f8; font-size: 1rem; font-weight: 600; cursor: pointer; list-style: none; }
 .keyboard-help summary::-webkit-details-marker { display: none; }

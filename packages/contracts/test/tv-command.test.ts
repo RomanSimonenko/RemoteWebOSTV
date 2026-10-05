@@ -14,13 +14,14 @@ describe('basic remote command contracts', () => {
     'UP', 'DOWN', 'LEFT', 'RIGHT', 'ENTER', 'BACK', 'HOME',
     'VOLUME_UP', 'VOLUME_DOWN', 'MUTE',
     '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+    'CHANNEL_DOWN', 'CHANNEL_UP', 'RED', 'GREEN', 'YELLOW', 'BLUE',
   ])('accepts basic button %s', (button) => {
     expect(basicTvButtonSchema.parse(button)).toBe(button);
     expect(tvCommandRequestSchema.parse({ id, button })).toEqual({ id, button });
   });
 
   test.each([
-    'EXIT', 'MENU', 'CHANNEL_UP', 'CHANNEL_DOWN', 'RED', 'PLAY',
+    'EXIT', 'MENU', 'PLAY',
     'LIST', 'GUIDE', 'INPUT', 'UNKNOWN', '', 'up',
     null, 0,
   ])('rejects excluded button %j', (button) => {

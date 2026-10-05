@@ -25,10 +25,13 @@ const buttons: ReadonlyArray<readonly [BasicTvButton, string]> = [
   ['HOME', 'Домой'], ['BACK', 'Назад'], ['VOLUME_DOWN', 'Громкость −'], ['MUTE', 'Без звука'], ['VOLUME_UP', 'Громкость +'],
 ];
 const numericButtons: ReadonlyArray<BasicTvButton> = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
+const channelButtons = [['CHANNEL_DOWN', 'Канал −'], ['CHANNEL_UP', 'Канал +']] as const;
+const colorButtons = [['RED', 'Красная'], ['GREEN', 'Зелёная'], ['YELLOW', 'Жёлтая'], ['BLUE', 'Синяя']] as const;
 const icons: Partial<Record<BasicTvButton, Icon>> = {
   UP: IconChevronUp, DOWN: IconChevronDown, LEFT: IconChevronLeft, RIGHT: IconChevronRight,
   HOME: IconHome, BACK: IconArrowBackUp,
   VOLUME_DOWN: IconMinus, VOLUME_UP: IconPlus, MUTE: IconVolumeOff,
+  CHANNEL_DOWN: IconMinus, CHANNEL_UP: IconPlus,
 };
 const keys: Readonly<Record<string, BasicTvButton>> = {
   ArrowUp: 'UP', ArrowDown: 'DOWN', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT', Enter: 'ENTER',
@@ -146,6 +149,7 @@ export function Remote({ csrfToken, active, onSessionExpired, onBusyChange, inte
     return <button type="button" key={button} aria-label={label} title={label} className={button === 'ENTER' ? 'ok-button' : undefined} style={{ gridArea: button }} disabled={disabled} onClick={() => void send(button)}>
     {ButtonIcon && <ButtonIcon aria-hidden="true" />}
     {button === 'ENTER' && 'OK'}
+    {(button === 'CHANNEL_DOWN' || button === 'CHANNEL_UP') && 'CH'}
   </button>;
   });
   const activity = <div className="remote-activity">
@@ -159,5 +163,7 @@ export function Remote({ csrfToken, active, onSessionExpired, onBusyChange, inte
     <div role="group" aria-label="Навигация" className="remote-buttons d-pad">{controls(buttons.slice(0, 5))}</div>
     <div role="group" aria-label="Домой и назад" className="remote-buttons home-back">{controls(buttons.slice(5, 7))}</div>
     <div role="group" aria-label="Громкость" className="remote-buttons volume">{controls(buttons.slice(7))}</div>
+    <div role="group" aria-label="Каналы" className="remote-buttons channels">{controls(channelButtons)}</div>
+    <div role="group" aria-label="Цветные кнопки" className="remote-buttons color-buttons">{colorButtons.map(([button, label]) => <button type="button" key={button} aria-label={label} title={label} data-color={button} disabled={disabled} onClick={() => void send(button)}><span aria-hidden="true" className="color-mark" /></button>)}</div>
   </div>{activityTarget ? createPortal(activity, activityTarget) : activity}</>;
 }

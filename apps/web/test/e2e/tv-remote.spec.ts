@@ -90,6 +90,22 @@ test('all ten browser controls reach the pointer once; saved TV remains usable a
   expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
 });
 
+test('channel and color buttons send exact pointer frames once without replay', async ({ page, tv }) => {
+  await pair(page, tv);
+  const entries = [['Канал −', 'CHANNEL_DOWN', 'CHANNELDOWN'], ['Канал +', 'CHANNEL_UP', 'CHANNELUP'], ['Красная', 'RED', 'RED'], ['Зелёная', 'GREEN', 'GREEN'], ['Жёлтая', 'YELLOW', 'YELLOW'], ['Синяя', 'BLUE', 'BLUE']];
+  for (const [label, button, wire] of entries) {
+    const response = commandResponse(page, tv);
+    await remote(page).getByRole('button', { name: label!, exact: true }).click();
+    const result = await response; await sent(result);
+    expect(result.request().postDataJSON().button).toBe(button);
+    await tv.tv.waitForPointerFrameCount(entries.findIndex((entry) => entry[0] === label) + 1);
+    expect(tv.tv.pointerFrames.at(-1)).toBe(frame(wire!));
+  }
+  expect(tv.tv.pointerFrames).toEqual(entries.map((entry) => frame(entry[2]!)));
+  await page.reload(); await ready(page);
+  expect(tv.tv.pointerFrames).toEqual(entries.map((entry) => frame(entry[2]!)));
+});
+
 test('numeric keypad sends each digit once through authenticated API and pointer without replay', async ({ page, tv }) => {
   await pair(page, tv);
   const digits = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];

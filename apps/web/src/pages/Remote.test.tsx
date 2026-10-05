@@ -53,6 +53,15 @@ async function mount(command = (input: { id: string; button: string }) => Promis
 }
 const buttons = [['Вверх', 'UP'], ['Вниз', 'DOWN'], ['Влево', 'LEFT'], ['Вправо', 'RIGHT'], ['OK', 'ENTER'], ['Назад', 'BACK'], ['Домой', 'HOME'], ['Громкость +', 'VOLUME_UP'], ['Громкость −', 'VOLUME_DOWN'], ['Без звука', 'MUTE']] as const;
 const digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] as const;
+test.each([
+  ['Канал −', 'CHANNEL_DOWN'], ['Канал +', 'CHANNEL_UP'],
+  ['Красная', 'RED'], ['Зелёная', 'GREEN'], ['Жёлтая', 'YELLOW'], ['Синяя', 'BLUE'],
+])('new remote button %s sends exactly one protected command', async (label, button) => {
+  const view = await mount();
+  fireEvent.click(screen.getByRole('button', { name: label })); await act(async () => {});
+  expect(view.commands()).toHaveLength(1);
+  expect(JSON.parse(view.commands()[0]![1]!.body as string)).toEqual({ id: expect.any(String), button });
+});
 test('successful feedback expires after two seconds and a new success resets its timer', async () => {
   vi.useFakeTimers(); const view = await mount();
   const status = () => screen.getByRole('status', { name: 'Команды телевизора' }).textContent;
@@ -121,7 +130,7 @@ test.each(['UNAVAILABLE', 'BUSY', 'UNSUPPORTED'])('numeric keypad stays visible 
 });
 test('icon controls retain accessible names and tooltips without visible labels', async () => {
   await mount();
-  expect(within(screen.getByRole('group', { name: 'Пульт' })).getAllByRole('button')).toHaveLength(20);
+  expect(within(screen.getByRole('group', { name: 'Пульт' })).getAllByRole('button')).toHaveLength(26);
   for (const [label] of buttons) {
     const button = screen.getByRole('button', { name: label });
     expect(button.title).toBe(label);
