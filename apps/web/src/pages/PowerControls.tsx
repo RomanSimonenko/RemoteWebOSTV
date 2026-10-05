@@ -75,17 +75,17 @@ export function PowerControls({ csrfToken, active, onSessionExpired, onStateChan
       {operation.action !== 'recover' && <button type="button" disabled={busy} onClick={() => cancel(operation.id)}>Отменить ожидание</button>}
     </div>}
   </>;
-  const settings = <>
+  const settings = <section className="settings-section"><h3>Питание и WOL</h3>
     {settingsOpen && activity(false)}
     <form onSubmit={(event) => { event.preventDefault(); saveMac(mac.trim() || null); }} noValidate>
       <label>MAC-адрес телевизора<input autoComplete="off" value={mac} disabled={disabled} onChange={(event) => setMac(event.target.value)} /></label>
-      <button type="submit" disabled={disabled}>Сохранить MAC</button>
+      <button className="settings-primary" type="submit" disabled={disabled}>Сохранить MAC</button>
       <button type="button" disabled={disabled || !state?.mac} onClick={() => saveMac(null)}>Очистить MAC</button>
     </form>
     <p>Для включения нужен MAC-адрес телевизора. После изменения IP проверьте, что MAC принадлежит этому телевизору.</p>
     <p>Отправка сигнала не гарантирует включение. Сервер должен находиться в сети телевизора; WOL зависит от модели и настроек питания.</p>
     <button type="button" disabled={loading} onClick={refresh}>Обновить статус питания</button>
-  </>;
+  </section>;
   const backgroundActivity = <div className={settingsOpen ? 'reserved-activity' : undefined} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{activity(true)}</div>;
   const powerConfirmation = confirming && <div className="power-confirmation" role="dialog" aria-label="Выключить телевизор?" aria-describedby="power-confirm-help">
     <p id="power-confirm-help">Выключить телевизор? Потеря соединения не подтверждает фактическое выключение.</p>

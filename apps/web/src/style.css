@@ -57,10 +57,17 @@ svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width:
 .settings-dialog::backdrop { background: #060c13ba; backdrop-filter: blur(4px); }
 .settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
 .settings-heading h2 { min-width: 0; }
-.settings-heading button { width: 44px; padding: 0; font-size: 1.5rem; flex-shrink: 0; }
+.settings-heading button { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0; flex-shrink: 0; }
 .settings-dialog p { font-size: .85rem; }
-.settings-dialog form + div { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-.settings-dialog > button { margin-top: 12px; }
+.settings-section { margin-top: 20px; padding-top: 20px; border-top: 1px solid #39474f; }
+.settings-section h3 { margin: 0 0 12px; font-size: 1rem; }
+.settings-dialog input, .settings-dialog .settings-section button { height: 48px; min-height: 48px; border-radius: 10px; padding: 10px 12px; font-size: .85rem; line-height: 1.2; }
+.settings-dialog .settings-section button { width: 100%; }
+.settings-dialog form { gap: 12px; margin-top: 16px; }
+.settings-dialog .settings-actions { display: grid; gap: 8px; margin: 12px 0; }
+.settings-dialog .settings-section > button { margin-top: 12px; }
+.settings-dialog .settings-primary { background: #135569; border-color: #438fa2; }
+.settings-dialog .settings-primary:hover:not(:disabled) { background: #1b6b80; border-color: #71defa; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 @media (max-width: 400px) {
   .shell { padding: 16px 12px 28px; }

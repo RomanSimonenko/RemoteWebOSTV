@@ -63,6 +63,38 @@ async function noOverflow(page: Page) {
 }
 
 for (const width of [320, 1280]) {
+  test(`settings sections and controls stay consistent at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 960 });
+    const { mutations } = await fixture(page);
+    await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+    const dialog = settings(page);
+    const close = dialog.getByRole('button', { name: 'Закрыть настройки' });
+    expect(await close.locator('svg').count()).toBe(1);
+    const closeBox = (await close.boundingBox())!;
+    const iconBox = (await close.locator('svg').boundingBox())!;
+    expect(Math.abs(closeBox.x + closeBox.width / 2 - iconBox.x - iconBox.width / 2)).toBeLessThanOrEqual(1);
+    expect(Math.abs(closeBox.y + closeBox.height / 2 - iconBox.y - iconBox.height / 2)).toBeLessThanOrEqual(1);
+    await expect(close.locator('svg')).toHaveAttribute('aria-hidden', 'true');
+    for (const heading of ['Телевизор', 'Подключение', 'Питание и WOL']) await expect(dialog.getByRole('heading', { name: heading, exact: true })).toBeVisible();
+    const controls = dialog.locator('input, button:not([aria-label="Закрыть настройки"])');
+    const dimensions = await controls.evaluateAll((elements) => elements.map((element) => ({ height: element.getBoundingClientRect().height, radius: getComputedStyle(element).borderRadius })));
+    expect(new Set(dimensions.map(({ height }) => height)).size).toBe(1);
+    expect(new Set(dimensions.map(({ radius }) => radius)).size).toBe(1);
+    expect(dimensions[0]!.height).toBeGreaterThanOrEqual(44);
+    const secondaryBackground = await dialog.getByRole('button', { name: 'Подключиться снова' }).evaluate((element) => getComputedStyle(element).background);
+    for (const name of ['Изменить адрес', 'Сохранить MAC']) expect(await dialog.getByRole('button', { name, exact: true }).evaluate((element) => getComputedStyle(element).background)).not.toBe(secondaryBackground);
+    const reconnect = (await dialog.getByRole('button', { name: 'Подключиться снова' }).boundingBox())!;
+    const repair = (await dialog.getByRole('button', { name: 'Повторить сопряжение' }).boundingBox())!;
+    expect(repair.y >= reconnect.y + reconnect.height + 8 || repair.x >= reconnect.x + reconnect.width + 8).toBe(true);
+    await noOverflow(page);
+    expect(mutations).toEqual([]);
+    const screenshot = testInfo.outputPath(`settings-${width}.png`);
+    await dialog.screenshot({ path: screenshot });
+    await testInfo.attach(`settings-${width}`, { path: screenshot, contentType: 'image/png' });
+  });
+}
+
+for (const width of [320, 1280]) {
   test(`long model stays beside LG logo without power or navigation overlap at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 960 });
     await fixture(page, 'long-model');
@@ -209,7 +241,7 @@ test('settings retain inside clicks but dismiss on free background', async ({ pa
   const { mutations } = await fixture(page);
   await page.getByRole('button', { name: 'Настройки', exact: true }).click();
   const dialog = page.getByRole('dialog');
-  await dialog.getByRole('heading').click();
+  await dialog.getByRole('heading', { name: 'Настройки телевизора', exact: true }).click();
   await expect(dialog).toBeVisible();
   await page.mouse.click(5, 300);
   await expect(dialog).not.toBeVisible();
@@ -295,7 +327,7 @@ test('native settings trap focus, block pointer and TV keys, then restore gear f
   }
   await settings(page).getByLabel('IP-адрес телевизора').focus();
   for (const key of ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']) await page.keyboard.press(key);
-  await settings(page).getByRole('heading').evaluate((element: HTMLElement) => { element.tabIndex = -1; element.focus(); });
+  await settings(page).getByRole('heading', { name: 'Настройки телевизора', exact: true }).evaluate((element: HTMLElement) => { element.tabIndex = -1; element.focus(); });
   await page.keyboard.press('Enter');
   await expect(remote(page).getByRole('button', { name: 'Вверх', exact: true })).toBeDisabled();
   const backgroundGear = (await gear.boundingBox())!;

@@ -102,9 +102,9 @@ export function TvSetup({ username, csrfToken, onSessionExpired, settingsOpen, o
     {!tv && <p>Телевизор должен быть включён и доступен серверу. Разрешите управление мобильными устройствами в настройках ТВ.</p>}
     <form onSubmit={(event) => { event.preventDefault(); start({ action: tv ? 'change_address' : 'pair', host }); }} noValidate>
       <label>IP-адрес телевизора<input inputMode="decimal" autoComplete="off" value={host} disabled={controlsBusy} onChange={(event) => setHost(event.target.value)} /></label>
-      <button type="submit" disabled={controlsBusy}>{tv ? 'Изменить адрес' : 'Подключить'}</button>
+      <button className="settings-primary" type="submit" disabled={controlsBusy}>{tv ? 'Изменить адрес' : 'Подключить'}</button>
     </form>
-    {tv && <div>
+    {tv && <div className="settings-actions">
       <button type="button" disabled={controlsBusy} onClick={() => start({ action: 'reconnect' })}>Подключиться снова</button>
       <button type="button" disabled={controlsBusy} onClick={() => start({ action: 'repair' })}>Повторить сопряжение</button>
     </div>}
@@ -124,11 +124,13 @@ export function TvSetup({ username, csrfToken, onSessionExpired, settingsOpen, o
     </div>
     {!tv && <>{addressForm}<button type="button" disabled={loading} onClick={refresh}>Обновить статус</button></>}
     <SettingsDialog open={settingsOpen} onClose={onCloseSettings}>
-      {settingsOpen && username && <p className="session-caption">Вы вошли как {username}.</p>}
-      {settingsOpen && activity(false)}
-      {tv ? <><p>Текущий телевизор: {tv.identity.model}</p>{settingsOpen && <p className="tv-version">{tv.identity.platformVersion ? `webOS ${tv.identity.platformVersion}` : 'Версия неизвестна'}</p>}<p>Соединение: {connectionText}</p><p>Сохранённый IP: {tv.host}</p>{addressForm}
+      {tv ? <><section className="settings-section"><h3>Телевизор</h3>
+        {settingsOpen && username && <p className="session-caption">Вы вошли как {username}.</p>}
+        <p>Текущий телевизор: {tv.identity.model}</p>{settingsOpen && <p className="tv-version">{tv.identity.platformVersion ? `webOS ${tv.identity.platformVersion}` : 'Версия неизвестна'}</p>}
+      </section><section className="settings-section"><h3>Подключение</h3>
+        {settingsOpen && activity(false)}<p>Соединение: {connectionText}</p><p>Сохранённый IP: {tv.host}</p>{addressForm}
         <button type="button" disabled={loading} onClick={refresh}>Обновить статус</button>
-      </> : <p>Добавьте телевизор на основном экране.</p>}
+      </section></> : <>{settingsOpen && username && <p className="session-caption">Вы вошли как {username}.</p>}{settingsOpen && activity(false)}<p>Добавьте телевизор на основном экране.</p></>}
       <div ref={setSettingsTarget} />
     </SettingsDialog>
   </section>;
