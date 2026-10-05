@@ -53,6 +53,29 @@ async function mount(command = (input: { id: string; button: string }) => Promis
 }
 const buttons = [['Вверх', 'UP'], ['Вниз', 'DOWN'], ['Влево', 'LEFT'], ['Вправо', 'RIGHT'], ['OK', 'ENTER'], ['Назад', 'BACK'], ['Домой', 'HOME'], ['Громкость +', 'VOLUME_UP'], ['Громкость −', 'VOLUME_DOWN'], ['Без звука', 'MUTE']] as const;
 const digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] as const;
+test('successful feedback expires after two seconds and a new success resets its timer', async () => {
+  vi.useFakeTimers(); const view = await mount();
+  const status = () => screen.getByRole('status', { name: 'Команды телевизора' }).textContent;
+  fireEvent.click(screen.getByRole('button', { name: 'OK' })); await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+  expect(status()).toBe('Команда отправлена');
+  fireEvent.click(screen.getByRole('button', { name: 'OK' })); await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(1999); });
+  expect(status()).toBe('Команда отправлена');
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(status()).toBe(''); expect(view.commands()).toHaveLength(2);
+});
+test('an old success timer never clears a subsequent unknown command result', async () => {
+  vi.useFakeTimers(); let count = 0;
+  const view = await mount((input) => Promise.resolve(response(++count === 1
+    ? { id: input.id, outcome: 'sent' }
+    : { id: input.id, outcome: 'unknown', error: { code: 'COMMAND_RESULT_UNKNOWN', message: 'Unknown result' } })));
+  fireEvent.click(screen.getByRole('button', { name: 'OK' })); await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  fireEvent.click(screen.getByRole('button', { name: 'OK' })); await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+  expect(screen.getByRole('alert').textContent).toBe(unknown); expect(view.commands()).toHaveLength(2);
+});
 test.each(digits)('numeric click %s sends one protected command without a numeric keyboard shortcut', async (digit) => {
   const view = await mount();
   const numeric = screen.getByRole('group', { name: 'Цифры' });

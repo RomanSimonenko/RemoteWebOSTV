@@ -45,6 +45,12 @@ export function Remote({ csrfToken, active, onSessionExpired, interactionBlocked
   expired.current = onSessionExpired;
 
   useEffect(() => {
+    if (!feedback || feedback.alert) return;
+    const timer = setTimeout(() => setFeedback((current) => current === feedback ? null : current), 2000);
+    return () => clearTimeout(timer);
+  }, [feedback]);
+
+  useEffect(() => {
     setState(null); setReadError(''); setFeedback(null); setBusy(false);
     if (!active) return;
     let inFlight = false;
