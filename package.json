@@ -9,7 +9,7 @@
   "scripts": {
     "build": "pnpm --filter @remote-webos-tv/contracts build && pnpm --filter @remote-webos-tv/webos build && pnpm --filter @remote-webos-tv/api build && pnpm --filter @remote-webos-tv/web build && pnpm --filter @remote-webos-tv/protocol-probe build",
     "test": "pnpm -r test",
-    "test:docker": "node scripts/docker/smoke.mjs",
+    "test:docker": "pnpm --filter @remote-webos-tv/webos build && node scripts/docker/smoke.mjs",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {

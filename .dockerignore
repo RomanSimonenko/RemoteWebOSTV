@@ -40,3 +40,6 @@
 **/*.sqlite*
 **/node_modules/**
 **/dist/**
+**/.local/**
+**/.git/**
+**/graft/**

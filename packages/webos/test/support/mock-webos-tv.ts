@@ -28,6 +28,7 @@ export interface RecordedMockRequest {
 
 interface MockWebOsTvOptions {
   readonly scenario: MockScenario;
+  readonly listen?: { readonly host: string; readonly port: number; readonly advertisedHost: string };
 }
 
 interface ProtocolEnvelope {
@@ -41,6 +42,7 @@ type ProtocolResponse = Readonly<Record<string, unknown>>;
 
 export class MockWebOsTv {
   readonly #scenario: MockScenario;
+  readonly #listen: MockWebOsTvOptions['listen'];
   readonly #requests: RecordedMockRequest[] = [];
   readonly #pointerFrames: string[] = [];
   readonly #requestWaiters: Array<{
@@ -62,6 +64,7 @@ export class MockWebOsTv {
 
   constructor(options: MockWebOsTvOptions) {
     this.#scenario = options.scenario;
+    this.#listen = options.listen;
   }
 
   get url(): string {
@@ -92,7 +95,7 @@ export class MockWebOsTv {
       throw new Error('Mock webOS TV is already running');
     }
 
-    const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+    const server = new WebSocketServer({ host: this.#listen?.host ?? '127.0.0.1', port: this.#listen?.port ?? 0 });
     this.#server = server;
     server.on('connection', (socket, request) => {
       this.#sockets.add(socket);
@@ -125,7 +128,7 @@ export class MockWebOsTv {
       await this.stop();
       throw new Error('Mock webOS TV did not receive a TCP address');
     }
-    this.#url = `ws://127.0.0.1:${(address as AddressInfo).port}`;
+    this.#url = `ws://${this.#listen?.advertisedHost ?? '127.0.0.1'}:${(address as AddressInfo).port}`;
   }
 
   async stop(): Promise<void> {
