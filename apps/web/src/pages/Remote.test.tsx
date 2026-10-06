@@ -198,7 +198,7 @@ test.each(['UNAVAILABLE', 'BUSY', 'UNSUPPORTED'])('numeric keypad stays visible 
 });
 test('icon controls retain accessible names and tooltips without visible labels', async () => {
   await mount();
-  expect(within(screen.getByRole('group', { name: 'Пульт' })).getAllByRole('button')).toHaveLength(26);
+  expect(within(screen.getByRole('group', { name: 'Пульт' })).getAllByRole('button')).toHaveLength(27);
   for (const [label] of buttons) {
     const button = screen.getByRole('button', { name: label });
     expect(button.title).toBe(label);
@@ -313,7 +313,8 @@ test('repeat, modifiers, editable targets, outside focus and hidden document nev
 });
 test.each([['UNAVAILABLE', 'Телевизор недоступен'], ['BUSY', 'Телевизор занят'], ['UNSUPPORTED', 'Управление кнопками не поддерживается']])('capability reason %s disables controls with safe explanation', async (reason, text) => {
   const view = await mount(undefined, () => Promise.resolve(response({ enabled: false, reason })));
-  expect(screen.getByText(text, { exact: false })).toBeTruthy();
+  if (reason === 'BUSY') expect(screen.queryByText(text, { exact: false })).toBeNull();
+  else expect(screen.getByText(text, { exact: false })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'OK' })); expect(view.commands()).toHaveLength(0);
 });
 test.each([[409, 'TV_UNAVAILABLE', 'Телевизор недоступен'], [409, 'TV_BUSY', 'Телевизор занят'], [422, 'UNSUPPORTED_CAPABILITY', 'Управление кнопками не поддерживается'], [503, 'COMMAND_NOT_SENT', 'Команда не отправлена'], [429, 'RATE_LIMITED', 'Слишком много команд'], [504, 'COMMAND_RESULT_UNKNOWN', unknown]])('command HTTP %s %s shows its safe outcome without raw server text', async (status, code, text) => {
@@ -445,4 +446,30 @@ test('App logout removes pending remote, then a late unauthorized command cannot
   await act(async () => { pending.resolve(response({ code: 'UNAUTHORIZED', message: 'Unauthorized', requestId: 'synthetic' }, 401)); });
   expect(screen.getByRole('group', { name: 'Пульт' })).toBeTruthy(); expect(screen.queryByRole('heading', { name: 'Вход' })).toBeNull();
   expect(screen.queryByText('Сессия истекла. Войдите снова.')).toBeNull();
+});
+
+test('Wink button submits one app launch with the current CSRF token', async () => {
+  const view = await mount();
+  fireEvent.click(screen.getByRole('button', { name: 'Запустить Wink' })); await act(async () => {});
+  expect(view.commands()).toHaveLength(1);
+  const init = view.commands()[0]![1]!;
+  expect(JSON.parse(init.body as string)).toMatchObject({ app: 'wink' });
+  expect(JSON.parse(init.body as string)).not.toHaveProperty('button');
+  expect(init.headers).toMatchObject({ 'x-csrf-token': csrfToken });
+});
+test('Enter on Wink preserves native activation instead of sending TV ENTER', async () => {
+  const view = await mount(); const button = screen.getByRole('button', { name: 'Запустить Wink' }); button.focus();
+  const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+  fireEvent(button, event); expect(event.defaultPrevented).toBe(false);
+  fireEvent.click(button); await act(async () => {});
+  expect(view.commands()).toHaveLength(1); expect(JSON.parse(view.commands()[0]![1]!.body as string)).toMatchObject({ app: 'wink' });
+});
+
+test('missing Wink shows a specific error and never retries', async () => {
+  vi.useFakeTimers();
+  const view = await mount(async (input) => response({ id: input.id, outcome: 'rejected', error: { code: 'APP_NOT_AVAILABLE', message: 'private producer text' } }, 422));
+  fireEvent.click(screen.getByRole('button', { name: 'Запустить Wink' })); await act(async () => {});
+  expect(screen.getByRole('alert').textContent).toContain('Wink не найден');
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(view.commands()).toHaveLength(1); expect(screen.getByRole('alert').textContent).not.toContain('private');
 });

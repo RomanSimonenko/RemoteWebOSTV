@@ -18,10 +18,10 @@ export type BasicTvButton = z.infer<typeof basicTvButtonSchema>;
 
 const commandIdSchema = z.uuid();
 
-export const tvCommandRequestSchema = z.strictObject({
-  id: commandIdSchema,
-  button: basicTvButtonSchema,
-});
+export const tvCommandRequestSchema = z.union([
+  z.strictObject({ id: commandIdSchema, button: basicTvButtonSchema }),
+  z.strictObject({ id: commandIdSchema, app: z.literal('wink') }),
+]);
 export type TvCommandRequest = Readonly<z.infer<typeof tvCommandRequestSchema>>;
 
 const commandErrorMessageSchema = z.string().trim().min(1).max(1024);
@@ -33,6 +33,8 @@ const rejectedCommandErrorSchema = z.strictObject({
     'UNSUPPORTED_CAPABILITY',
     'COMMAND_NOT_SENT',
     'RATE_LIMITED',
+    'APP_NOT_AVAILABLE',
+    'APP_LIST_UNAVAILABLE',
   ]),
   message: commandErrorMessageSchema,
 });

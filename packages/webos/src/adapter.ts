@@ -37,6 +37,7 @@ export interface WebOsAdapter {
   pair(request: PairingRequest): Promise<PairingResult>;
   readSnapshot(signal: AbortSignal): Promise<TvSnapshot>;
   openPointerSocket(signal: AbortSignal): Promise<void>;
+  launchApp?(id: string, signal: AbortSignal): Promise<void>;
   listApps(signal: AbortSignal): Promise<readonly TvApp[]>;
   listInputs(signal: AbortSignal): Promise<readonly TvInput[]>;
   sendButton(button: TvButton, signal: AbortSignal): Promise<void>;

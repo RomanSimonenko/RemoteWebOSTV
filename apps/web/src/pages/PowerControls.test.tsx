@@ -3,6 +3,46 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { PowerControls } from './PowerControls.js';
 
 const csrfToken = 'c'.repeat(43);
+test('unknown shutdown delivery does not expire with the unconfirmed warning timer', async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(response({ ...wake, operation: { ...operation, action: 'power_off', status: 'failed', phase: 'finished', delivery: 'unknown', error: { code: 'POWER_OFF_UNCONFIRMED', message: 'Synthetic warning' } } }))));
+  await mount();
+  await act(async () => { await vi.advanceTimersByTimeAsync(7000); });
+  expect(screen.getByRole('alert').textContent).toContain('Результат отправки неизвестен');
+});
+test('unconfirmed shutdown warning expires once despite polling and stays available in settings', async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(response({ ...wake, operation: { ...operation, action: 'power_off', status: 'failed', phase: 'finished', delivery: 'sent', error: { code: 'POWER_OFF_UNCONFIRMED', message: 'Synthetic warning' } } }))));
+  const props = { csrfToken, active: true, onSessionExpired: vi.fn() };
+  const view = render(<PowerControls {...props} />);
+  await act(async () => {});
+  expect(screen.getAllByRole('alert')).toHaveLength(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(4999); });
+  expect(screen.getAllByRole('alert')).toHaveLength(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(screen.queryByRole('alert')).toBeNull();
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(screen.queryByRole('alert')).toBeNull();
+  view.rerender(<PowerControls {...props} settingsOpen />);
+  expect(screen.getByRole('alert').textContent).toContain('Не удалось подтвердить выключение');
+});
+test('a later shutdown gets its own warning lifetime and other power failures do not expire', async () => {
+  vi.useFakeTimers();
+  let operationId = id;
+  let code = 'POWER_OFF_UNCONFIRMED';
+  vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(response({ ...wake, operation: { ...operation, id: operationId, action: 'power_off', status: 'failed', phase: 'finished', delivery: 'sent', error: { code, message: 'Synthetic power failure' } } }))));
+  await mount();
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(screen.queryByRole('alert')).toBeNull();
+  operationId = '00000000-0000-4000-8000-000000000002';
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  expect(screen.getByRole('alert').textContent).toContain('Не удалось подтвердить выключение');
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(screen.queryByRole('alert')).toBeNull();
+  code = 'CLEANUP_FAILED';
+  await act(async () => { await vi.advanceTimersByTimeAsync(7000); });
+  expect(screen.getByRole('alert').textContent).toBe('Synthetic power failure');
+});
 test.each(['Escape', 'outside Escape', 'outside', 'close'])('confirmation %s dismisses without a command and returns focus', async (method) => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(off)));
   await mount();
@@ -195,7 +235,7 @@ test.each([
   ['RECOVERY_TIMEOUT', 'Не удалось подключиться к телевизору'],
   ['AUTHORIZATION_FAILED', 'Повторите сопряжение'],
   ['UNSUPPORTED_CAPABILITY', 'не поддерживает'],
-  ['POWER_OFF_UNCONFIRMED', 'Выключение не подтверждено'],
+  ['POWER_OFF_UNCONFIRMED', 'Не удалось подтвердить выключение'],
 ])('terminal %s offers a distinct safe diagnostic', async (code, text) => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ ...wake, operation: { ...operation, action: code === 'POWER_OFF_UNCONFIRMED' ? 'power_off' : 'wake', status: 'failed', phase: 'finished', delivery: 'sent', error: { code, message: 'Synthetic safe diagnostic' } } }))); await mount();
   expect(screen.getByRole('alert').textContent).toContain(text); expect(screen.queryByRole('button', { name: 'Отменить ожидание' })).toBeNull();

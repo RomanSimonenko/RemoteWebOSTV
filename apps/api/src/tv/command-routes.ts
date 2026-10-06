@@ -16,8 +16,8 @@ function resultStatus(result: TvCommandResult): number {
   if (result.outcome === 'unknown') return 504;
   switch (result.error.code) {
     case 'TV_UNAVAILABLE': case 'TV_BUSY': return 409;
-    case 'UNSUPPORTED_CAPABILITY': return 422;
-    case 'COMMAND_NOT_SENT': return 503;
+    case 'UNSUPPORTED_CAPABILITY': case 'APP_NOT_AVAILABLE': return 422;
+    case 'COMMAND_NOT_SENT': case 'APP_LIST_UNAVAILABLE': return 503;
     case 'RATE_LIMITED': return 429;
   }
 }

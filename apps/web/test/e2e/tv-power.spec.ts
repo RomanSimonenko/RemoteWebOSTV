@@ -136,7 +136,10 @@ test('double click and stale second tab admit one wake; unavailable retry recove
   expect(tv.wakes[0]!.macs).toEqual([mac]);
   const acceptedId = (await state(page, tv)).operation!.id;
   await page.reload();
-  await expect(page.locator('.tv-activity').getByRole('button', { name: 'Отменить ожидание', exact: true })).toBeVisible();
+  await expect(page.locator('.tv-activity').getByRole('button', { name: 'Отменить ожидание', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Настройки телевизора' }).getByRole('button', { name: 'Отменить ожидание', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Закрыть настройки', exact: true }).click();
   expect((await state(page, tv)).operation!.id).toBe(acceptedId);
   wake.release();
   await expect.poll(() => tv.clock.nextDelay).toBe(1000);

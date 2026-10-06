@@ -11,6 +11,124 @@ beforeEach(() => {
 });
 
 const csrfToken = 'c'.repeat(43);
+test.each([false, true])('shutdown completion ignores a late stale connection response with an intervening failed power read: %s', async (failedRead) => {
+  vi.useFakeTimers();
+  const staleStatus = barrier<Response>();
+  let statusReads = 0;
+  let powerReads = 0;
+  vi.stubGlobal('fetch', vi.fn((path: string) => {
+    if (path === '/api/tv') {
+      statusReads++;
+      return statusReads === 2 ? staleStatus.promise : Promise.resolve(response({ ...saved, connection: statusReads === 1 ? 'available' : 'unavailable' }));
+    }
+    if (path === '/api/tv/power') {
+      powerReads++;
+      if (failedRead && powerReads === 2) return Promise.reject(new Error('Synthetic network failure'));
+      return Promise.resolve(response({ mac: '02:00:00:00:00:01', canPowerOff: false, canWake: powerReads > 1, operation: { id: '00000000-0000-4000-8000-000000000001', action: 'power_off', status: powerReads === 1 ? 'running' : 'failed', phase: powerReads === 1 ? 'connecting' : 'finished', delivery: 'sent', startedAt: 10000, deadlineAt: 70000, ...(powerReads > 1 ? { error: { code: 'POWER_OFF_UNCONFIRMED', message: 'Synthetic shutdown warning' } } : {}) } }));
+    }
+    return Promise.resolve(response({ enabled: false, reason: 'BUSY' }));
+  }));
+  render(<TvSetup csrfToken={csrfToken} onCloseSettings={vi.fn()} onSessionExpired={vi.fn()} settingsOpen={false} />);
+  await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  const badge = screen.getByRole('status', { name: 'Соединение с телевизором' });
+  expect(badge.textContent).toBe('Выключение');
+  if (failedRead) {
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(badge.textContent).toBe('Выключение');
+  }
+  await act(async () => { staleStatus.resolve(response({ ...saved, connection: 'available' })); });
+  expect(badge.textContent).toBe('Выключение');
+  expect(badge.dataset.connection).not.toBe('available');
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(badge.textContent).toBe('Нет соединения');
+});
+test('shutdown uses a neutral pending badge instead of stale connected state', async () => {
+  vi.useFakeTimers();
+  let finished = false;
+  vi.stubGlobal('fetch', vi.fn((path: string) => Promise.resolve(response(path === '/api/tv'
+    ? { ...saved, connection: finished ? 'unavailable' : 'available' }
+    : path === '/api/tv/power' ? { mac: '02:00:00:00:00:01', canPowerOff: false, canWake: finished, operation: { id: '00000000-0000-4000-8000-000000000001', action: 'power_off', status: finished ? 'failed' : 'running', phase: finished ? 'finished' : 'connecting', delivery: 'sent', startedAt: 10000, deadlineAt: 70000, ...(finished ? { error: { code: 'POWER_OFF_UNCONFIRMED', message: 'Synthetic shutdown warning' } } : {}) } }
+    : { enabled: false, reason: 'BUSY' }))));
+  render(<TvSetup csrfToken={csrfToken} onCloseSettings={vi.fn()} onSessionExpired={vi.fn()} settingsOpen={false} />);
+  await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+  const badge = screen.getByRole('status', { name: 'Соединение с телевизором' });
+  expect(badge.textContent).toBe('Выключение');
+  expect(badge.dataset.connection).not.toBe('available');
+  expect(screen.getByRole('img', { name: 'Выполняется запрос' })).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
+  finished = true;
+  await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
+  expect(badge.textContent).toBe('Выключение');
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(badge.textContent).toBe('Нет соединения');
+  expect(badge.dataset.connection).toBe('unavailable');
+  expect(screen.getAllByRole('alert')).toHaveLength(1);
+});
+test('power warning arriving before connection snapshot stays a single warning', async () => {
+  vi.useFakeTimers();
+  const pendingStatus = barrier<Response>();
+  const error = { code: 'POWER_OFF_UNCONFIRMED', message: 'Выключение телевизора не подтверждено.' };
+  let initialStatus = true;
+  vi.stubGlobal('fetch', vi.fn((path: string) => {
+    if (path === '/api/tv') {
+      if (!initialStatus) return pendingStatus.promise;
+      initialStatus = false;
+      return Promise.resolve(response({ ...saved, connection: 'available' }));
+    }
+    return Promise.resolve(response(path === '/api/tv/power'
+      ? { mac: '02:00:00:00:00:01', canPowerOff: false, canWake: true, operation: { id: '00000000-0000-4000-8000-000000000001', action: 'power_off', status: 'failed', phase: 'finished', delivery: 'sent', startedAt: 10000, deadlineAt: 70000, error } }
+      : { enabled: false, reason: 'UNAVAILABLE' }));
+  }));
+  render(<TvSetup csrfToken={csrfToken} onCloseSettings={vi.fn()} onSessionExpired={vi.fn()} settingsOpen={false} />);
+  await act(async () => {});
+  expect(screen.getAllByRole('alert')).toHaveLength(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(screen.getAllByRole('alert')).toHaveLength(1);
+  await act(async () => { pendingStatus.resolve(response({ ...saved, error })); });
+  expect(screen.getAllByRole('alert')).toHaveLength(1);
+  expect(screen.getByRole('alert').textContent).toBe('Не удалось подтвердить выключение. Проверьте телевизор');
+});
+test('connection warning arriving before power result is not briefly announced', async () => {
+  const pendingPower = barrier<Response>();
+  const error = { code: 'POWER_OFF_UNCONFIRMED', message: 'Выключение телевизора не подтверждено.' };
+  vi.stubGlobal('fetch', vi.fn((path: string) => path === '/api/tv/power' ? pendingPower.promise : Promise.resolve(response(path === '/api/tv' ? { ...saved, error } : { enabled: false, reason: 'UNAVAILABLE' }))));
+  render(<TvSetup csrfToken={csrfToken} onCloseSettings={vi.fn()} onSessionExpired={vi.fn()} settingsOpen={false} />);
+  await act(async () => {});
+  expect(screen.queryByRole('alert')).toBeNull();
+  await act(async () => { pendingPower.resolve(response({ mac: '02:00:00:00:00:01', canPowerOff: false, canWake: true, operation: { id: '00000000-0000-4000-8000-000000000001', action: 'power_off', status: 'failed', phase: 'finished', delivery: 'sent', startedAt: 10000, deadlineAt: 70000, error } })); });
+  expect(screen.getAllByRole('alert')).toHaveLength(1);
+  expect(screen.getByRole('alert').textContent).toBe('Не удалось подтвердить выключение. Проверьте телевизор');
+  expect(screen.getByRole('status', { name: 'Соединение с телевизором' }).textContent).toBe('Нет соединения');
+});
+test('unconfirmed shutdown has one warning owned by power controls', async () => {
+  const error = { code: 'POWER_OFF_UNCONFIRMED', message: 'Выключение телевизора не подтверждено.' };
+  vi.stubGlobal('fetch', vi.fn((path: string) => Promise.resolve(response(path === '/api/tv'
+    ? { ...saved, error }
+    : path === '/api/tv/power' ? { mac: '02:00:00:00:00:01', canPowerOff: false, canWake: true, operation: { id: '00000000-0000-4000-8000-000000000001', action: 'power_off', status: 'failed', phase: 'finished', delivery: 'sent', startedAt: 10000, deadlineAt: 70000, error } }
+    : { enabled: false, reason: 'UNAVAILABLE' }))));
+  render(<TvSetup csrfToken={csrfToken} onCloseSettings={vi.fn()} onSessionExpired={vi.fn()} settingsOpen={false} />);
+  await act(async () => {});
+  expect(screen.getAllByRole('alert')).toHaveLength(1);
+  expect(screen.getByRole('alert').textContent).toBe('Не удалось подтвердить выключение. Проверьте телевизор');
+});
+test('running wake shows only connection and spinner outside settings, with cancellation inside settings', async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal('fetch', vi.fn((path: string) => Promise.resolve(response(path === '/api/tv'
+    ? { ...saved, connection: 'reconnecting' }
+    : path === '/api/tv/power' ? { mac: '02:00:00:00:00:01', canPowerOff: false, canWake: false, operation: { id: '00000000-0000-4000-8000-000000000001', action: 'wake', status: 'running', phase: 'connecting', delivery: 'unknown', startedAt: 10000, deadlineAt: 70000 } }
+    : { enabled: false, reason: 'BUSY' }))));
+  const props = { csrfToken, onCloseSettings: vi.fn(), onSessionExpired: vi.fn() };
+  const view = render(<TvSetup {...props} settingsOpen={false} />);
+  await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+  expect(view.container.querySelector('.tv-activity')?.textContent).toBe('Подключение');
+  expect(screen.getByRole('img', { name: 'Выполняется запрос' })).toBeTruthy();
+  view.rerender(<TvSetup {...props} settingsOpen />);
+  await act(async () => {});
+  expect(within(screen.getByRole('dialog', { name: 'Настройки телевизора' })).getByRole('button', { name: 'Отменить ожидание' })).toBeTruthy();
+});
 test('offline background recovery shows only the connection badge and keeps details in settings', async () => {
   const failure = { ...operation, action: 'reconnect', status: 'failed', error: { code: 'RECOVERY_TIMEOUT', message: 'Connection timed out.' } };
   vi.stubGlobal('fetch', vi.fn((path: string) => Promise.resolve(response(path === '/api/tv'

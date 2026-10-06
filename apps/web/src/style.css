@@ -113,3 +113,6 @@ svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width:
   .power-button { top: 18px; right: 18px; width: 56px; height: 56px; padding: 15px; }
   .settings-dialog { padding: 18px; }
 }
+
+.remote .wink-button { display: flex; align-items: center; justify-content: center; gap: .5rem; width: 100%; margin-top: 12px; background: #24201e; border-color: #ff5f00; color: #fff; font-weight: 700; }
+.remote .wink-button:disabled { opacity: .45; }

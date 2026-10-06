@@ -7,6 +7,8 @@ const messages: Record<RejectionCode | 'COMMAND_RESULT_UNKNOWN', string> = {
   TV_BUSY: 'Другая операция с телевизором ещё не завершена.',
   UNSUPPORTED_CAPABILITY: 'Телевизор не поддерживает управление кнопками.',
   COMMAND_NOT_SENT: 'Команда не отправлена.',
+  APP_LIST_UNAVAILABLE: 'Не удалось получить список приложений телевизора. Запуск не выполнен.',
+  APP_NOT_AVAILABLE: 'Wink не найден среди установленных приложений или найдено несколько вариантов.',
   RATE_LIMITED: 'Слишком много команд. Повторите позже.',
   COMMAND_RESULT_UNKNOWN: 'Результат команды неизвестен. Автоматический повтор не выполняется.',
 };
@@ -30,7 +32,16 @@ export function unknownTvCommand(id: string): TvCommandResult {
 export async function executeTvCommand(input: TvCommandRequest, adapter: WebOsAdapter, signal: AbortSignal): Promise<TvCommandResult> {
   if (signal.aborted) return rejectTvCommand(input.id, 'COMMAND_NOT_SENT');
   try {
-    await adapter.sendButton(input.button, signal);
+    if ('app' in input) {
+      if (!adapter.launchApp) return rejectTvCommand(input.id, 'UNSUPPORTED_CAPABILITY');
+      let apps;
+      try { apps = await adapter.listApps(signal); }
+      catch { return rejectTvCommand(input.id, 'APP_LIST_UNAVAILABLE'); }
+      if (signal.aborted) return rejectTvCommand(input.id, 'COMMAND_NOT_SENT');
+      const matches = apps.filter((app) => app.name.trim().toLowerCase() === 'wink');
+      if (matches.length !== 1) return rejectTvCommand(input.id, 'APP_NOT_AVAILABLE');
+      await adapter.launchApp(matches[0]!.id, signal);
+    } else await adapter.sendButton(input.button, signal);
     return signal.aborted ? unknownTvCommand(input.id) : { id: input.id, outcome: 'sent' };
   } catch (cause) {
     if (cause instanceof TvButtonSendError && cause.delivery === 'not_sent') {

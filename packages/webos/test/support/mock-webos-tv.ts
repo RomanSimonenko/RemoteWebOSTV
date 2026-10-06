@@ -12,7 +12,7 @@ import {
 
 export type MockScenario =
   | { readonly kind: 'hello-release' }
-  | { readonly kind: 'success' }
+  | { readonly kind: 'success'; readonly apps?: readonly { readonly id: string; readonly title: string }[] }
   | { readonly kind: 'reject-pairing' }
   | { readonly kind: 'deferred-pairing'; readonly gate: Promise<void> }
   | { readonly kind: 'pointer-forbidden' }
@@ -331,7 +331,9 @@ export class MockWebOsTv {
     return {
       id,
       type: 'response',
-      payload: this.#scenario.kind === 'hello-release' && uri === mockUris.softwareInfo
+      payload: this.#scenario.kind === 'success' && this.#scenario.apps && uri === mockUris.apps
+        ? { returnValue: true, launchPoints: this.#scenario.apps }
+        : this.#scenario.kind === 'hello-release' && uri === mockUris.softwareInfo
         ? { major_ver: '03', minor_ver: '40.85' } : mockResponses[uri],
     };
   }

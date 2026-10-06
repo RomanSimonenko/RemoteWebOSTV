@@ -18,6 +18,8 @@ const rejectionMessages = {
   TV_BUSY: reasons.BUSY,
   UNSUPPORTED_CAPABILITY: reasons.UNSUPPORTED,
   COMMAND_NOT_SENT: 'Команда не отправлена. Попробуйте снова.',
+  APP_LIST_UNAVAILABLE: 'Не удалось получить список приложений телевизора. Запуск не выполнен.',
+  APP_NOT_AVAILABLE: 'Wink не найден среди установленных приложений или найдено несколько вариантов.',
   RATE_LIMITED: 'Слишком много команд. Попробуйте позже.',
 };
 const buttons: ReadonlyArray<readonly [BasicTvButton, string]> = [
@@ -135,7 +137,7 @@ export function Remote({ csrfToken, active, onSessionExpired, onBusyChange, inte
     };
   }, [active, csrfToken]);
 
-  async function send(button: BasicTvButton) {
+  async function send(button: BasicTvButton | 'wink') {
     const current = runtime.current;
     if (interactionBlocked || !active || !current?.active || current.pending || !state?.enabled || document.visibilityState === 'hidden') return;
     current.pending = true; current.command = new AbortController();
@@ -149,7 +151,7 @@ export function Remote({ csrfToken, active, onSessionExpired, onBusyChange, inte
         setFeedback({ text: 'Команда не отправлена. Не удалось подготовить идентификатор команды.', alert: true });
         return;
       }
-      const result: TvCommandResult = await api.sendCommand({ id, button }, csrfToken, current.command.signal);
+      const result: TvCommandResult = await api.sendCommand(button === 'wink' ? { id, app: 'wink' } : { id, button }, csrfToken, current.command.signal);
       if (!current.active) return;
       if (result.outcome !== 'sent') stopHold();
       setFeedback({ text: result.outcome === 'sent' ? 'Команда отправлена' : result.outcome === 'unknown' ? unknownMessage : rejectionMessages[result.error.code], alert: result.outcome !== 'sent' });
@@ -175,6 +177,7 @@ export function Remote({ csrfToken, active, onSessionExpired, onBusyChange, inte
     if (event.ctrlKey || event.altKey || event.metaKey) stopHold();
     const target = event.target as HTMLElement;
     if (!event.currentTarget.contains(document.activeElement) || target.closest('summary, input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
+    if ((event.key === 'Enter' || event.key === ' ') && target.closest('button[data-app]')) { stopHold(); if (event.repeat || event.ctrlKey || event.altKey || event.metaKey) event.preventDefault(); return; }
     const focusedButton = target.closest<HTMLButtonElement>('button[data-command]');
     const spaceButton = event.key === ' ' ? focusedButton?.dataset.command as BasicTvButton | undefined : undefined;
     const button = keys[event.key] ?? (spaceButton && repeatable.has(spaceButton) ? spaceButton : undefined);
@@ -211,7 +214,7 @@ export function Remote({ csrfToken, active, onSessionExpired, onBusyChange, inte
   </button>;
   });
   const activity = <div className="remote-activity">
-    {explanation && <p>{explanation}</p>}
+    {explanation && !(state?.reason === 'BUSY' && !readError) && <p>{explanation}</p>}
     <p role="status" aria-label="Команды телевизора" aria-live="polite">{!busy && feedback && !feedback.alert ? feedback.text : ''}</p>
     {feedback?.alert && <p role="alert" className="error">{feedback.text}</p>}
   </div>;
@@ -223,5 +226,8 @@ export function Remote({ csrfToken, active, onSessionExpired, onBusyChange, inte
     <div role="group" aria-label="Громкость" className="remote-buttons volume">{controls(buttons.slice(7))}</div>
     <div role="group" aria-label="Каналы" className="remote-buttons channels">{controls(channelButtons)}</div>
     <div role="group" aria-label="Цветные кнопки" className="remote-buttons color-buttons">{colorButtons.map(([button, label]) => <button type="button" key={button} aria-label={label} title={label} data-color={button} disabled={disabled} onClick={() => void send(button)}><span aria-hidden="true" className="color-mark" /></button>)}</div>
+    <button type="button" className="wink-button" data-app="wink" aria-label="Запустить Wink" title="Запустить Wink" disabled={disabled} onClick={() => { stopHold(); void send('wink'); }}>
+      <img src="/wink-logo.svg" alt="" aria-hidden="true" width="100" height="27" />
+    </button>
   </div>{activityTarget ? createPortal(activity, activityTarget) : activity}</>;
 }

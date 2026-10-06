@@ -27,7 +27,7 @@ function terminalError(operation: TvPowerOperation | null | undefined): string {
     AUTHORIZATION_FAILED: 'Телевизор отклонил сохранённый ключ. Повторите сопряжение.',
     INVALID_TV_RESPONSE: 'Ошибка совместимости с телевизором. Проверьте его поддержку.',
     UNSUPPORTED_CAPABILITY: 'Телевизор не поддерживает эту команду.',
-    POWER_OFF_UNCONFIRMED: 'Выключение не подтверждено. Проверьте телевизор перед повтором.',
+    POWER_OFF_UNCONFIRMED: 'Не удалось подтвердить выключение. Проверьте телевизор',
     CANCELLED: 'Операция отменена. Уже отправленный сигнал отменить нельзя.',
   };
   const detail = messages[operation.error?.code ?? ''] || operation.error?.message || 'Операция не завершена.';
@@ -59,6 +59,12 @@ export function PowerControls({ csrfToken, active, onSessionExpired, onStateChan
   }, [confirming]);
   const operation = state?.operation;
   const running = operation?.status === 'running';
+  const [expiredShutdownWarning, setExpiredShutdownWarning] = useState<string | null>(null);
+  useEffect(() => {
+    if (!active || operation?.status !== 'failed' || operation.delivery !== 'sent' || operation.error?.code !== 'POWER_OFF_UNCONFIRMED') return;
+    const timer = setTimeout(() => setExpiredShutdownWarning(operation.id), 5000);
+    return () => clearTimeout(timer);
+  }, [active, operation?.id, operation?.status, operation?.delivery, operation?.error?.code]);
   const activityBusy = active && (busy || loading || !!state?.busy || running);
   useEffect(() => { onBusyChange?.(activityBusy); }, [activityBusy, onBusyChange]);
   useEffect(() => () => onBusyChange?.(false), [onBusyChange]);
@@ -67,6 +73,7 @@ export function PowerControls({ csrfToken, active, onSessionExpired, onStateChan
   const disabled = busy || loading || !!error || !state || running;
   const powerDisabled = settingsOpen || disabled || !powerAction;
   const diagnostic = message || error || (conflicting ? 'Сервер вернул противоречивые разрешения питания. Обновите статус.' : terminalError(operation));
+  const backgroundDiagnostic = !message && !error && !conflicting && operation?.delivery === 'sent' && operation.error?.code === 'POWER_OFF_UNCONFIRMED' && operation.id === expiredShutdownWarning ? '' : diagnostic;
   useEffect(() => { onStateChange?.(state); }, [state, onStateChange]);
   useEffect(() => { if (state) setMac(state.mac ?? ''); }, [state?.mac, settingsOpen]);
   useEffect(() => { onConfirmationChange?.(confirming); }, [confirming, onConfirmationChange]);
@@ -74,7 +81,7 @@ export function PowerControls({ csrfToken, active, onSessionExpired, onStateChan
   useEffect(() => { if (!active || powerAction !== 'power_off' || powerDisabled) setConfirming(false); }, [active, powerAction, powerDisabled]);
   useEffect(() => { if (confirming) confirmation.current?.focus(); }, [confirming]);
   // Modal transitions do not refocus an existing background diagnostic.
-  useEffect(() => { if (diagnostic && !settingsOpen) alert.current?.focus({ preventScroll: true }); }, [diagnostic]);
+  useEffect(() => { if (backgroundDiagnostic && !settingsOpen) alert.current?.focus({ preventScroll: true }); }, [backgroundDiagnostic]);
 
   if (!active) return null;
   const unavailable = !state?.mac ? 'Для включения сохраните MAC-адрес телевизора в настройках.' : 'Питание сейчас недоступно. Обновите статус.';
@@ -82,7 +89,7 @@ export function PowerControls({ csrfToken, active, onSessionExpired, onStateChan
   // must not clear its ref while the background paragraph remains mounted.
   const activity = (withFocusRef: boolean) => <>
     <p role="status" aria-label="Питание телевизора" aria-live="polite">{error ? 'Статус питания неизвестен' : operation && (running || operation.status === 'succeeded') ? progress(operation) : !activityBusy && !powerAction && !diagnostic ? unavailable : ''}</p>
-    {diagnostic && <p ref={withFocusRef ? alert : undefined} tabIndex={-1} role="alert" className="error">{diagnostic}</p>}
+    {(withFocusRef ? backgroundDiagnostic : diagnostic) && <p ref={withFocusRef ? alert : undefined} tabIndex={-1} role="alert" className="error">{withFocusRef ? backgroundDiagnostic : diagnostic}</p>}
     {running && <div>
       {operation.action !== 'recover' && <button type="button" disabled={busy} onClick={() => cancel(operation.id)}>Отменить ожидание</button>}
     </div>}
@@ -103,7 +110,7 @@ export function PowerControls({ csrfToken, active, onSessionExpired, onStateChan
     <button type="button" disabled={loading} onClick={refresh}>Обновить статус питания</button>
   </section>;
   const quietRecovery = quietOffline && !message && !error && !conflicting && (!operation || (operation.action === 'recover' && (!operation.error || ['RECOVERY_TIMEOUT', 'CONNECTION_LOST', 'TV_UNAVAILABLE'].includes(operation.error.code))));
-  const backgroundActivity = <div className={settingsOpen ? 'reserved-activity' : undefined} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{!quietRecovery && activity(true)}</div>;
+  const backgroundActivity = <div className={settingsOpen ? 'reserved-activity' : undefined} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{!quietRecovery && !(activityTarget && running) && activity(true)}</div>;
   const powerConfirmation = confirming && <div ref={confirmationPanel} className="power-confirmation" role="dialog" aria-label="Выключить телевизор?">
     <div className="power-confirm-heading"><IconPower aria-hidden="true" /><h3>Выключить ТВ?</h3><button className="power-confirm-close" type="button" aria-label="Закрыть подтверждение" onClick={dismissConfirmation}><IconX aria-hidden="true" /></button></div>
     <div className="power-confirm-actions"><button ref={confirmation} type="button" onClick={dismissConfirmation}>Отмена</button><button className="power-confirm-submit" type="button" disabled={powerDisabled} onClick={() => { setConfirming(false); start('power_off'); }}>Выключить</button></div>
