@@ -1,0 +1,1 @@
+Wink wordmark supplied by the existing Wink application asset. Used solely to identify the installed application launched by the button. The asset is bundled locally; no remote image requests are made.

@@ -281,3 +281,22 @@ test('lost genuine command response after pointer receipt shows uncertainty and 
     expect(tv.promptCount).toBe(1);
   } finally { loseResponse.release(); }
 });
+
+test('branded Wink launches installed app once through SSAP and reports missing installation', async ({ page, tv }, testInfo) => {
+  await pair(page, tv);
+  await tv.replaceTv({ kind: 'success', apps: [{ id: 'synthetic.wink', title: 'Wink' }, { id: 'synthetic.wink.dev', title: 'Wink Dev' }] });
+  await tv.restart(); await page.reload(); await ready(page);
+  const wink = remote(page).getByRole('button', { name: 'Запустить Wink', exact: true });
+  await expect(wink).toBeVisible();
+  await expect(wink.locator('img')).toHaveJSProperty('complete', true);
+  expect(await wink.locator('img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
+  const response = commandResponse(page, tv); await wink.focus(); await page.keyboard.press('Enter'); await sent(await response);
+  expect(tv.tv.requests.filter((request) => request.uri === 'ssap://com.webos.applicationManager/launch').map((request) => request.payload)).toEqual([{ id: 'synthetic.wink' }]);
+  expect(tv.tv.pointerFrames).toEqual([]);
+  await page.screenshot({ path: testInfo.outputPath('wink-preview.png'), fullPage: true });
+  await tv.replaceTv({ kind: 'success' }); await tv.restart(); await page.reload(); await ready(page);
+  const missingResponse = commandResponse(page, tv); await wink.click();
+  expect((await missingResponse).status()).toBe(422);
+  await expect(page.locator('.remote-activity').getByRole('alert')).toContainText('Wink не найден');
+  expect(tv.tv.requests.filter((request) => request.uri === 'ssap://com.webos.applicationManager/launch')).toEqual([]);
+});

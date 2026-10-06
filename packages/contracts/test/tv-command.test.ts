@@ -104,3 +104,8 @@ describe('basic remote command contracts', () => {
     expect(tvRemoteStateSchema.safeParse(state).success).toBe(false);
   });
 });
+
+test('accepts only an exclusive Wink launch request', () => {
+  expect(tvCommandRequestSchema.parse({ id, app: 'wink' })).toEqual({ id, app: 'wink' });
+  for (const value of [{ id, app: 'other' }, { id, app: 'wink', button: 'HOME' }, { id, app: 'wink', appId: 'arbitrary' }]) expect(tvCommandRequestSchema.safeParse(value).success).toBe(false);
+});

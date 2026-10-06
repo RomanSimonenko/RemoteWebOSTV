@@ -554,6 +554,20 @@ describe('Lgtv2Adapter', () => {
     ]);
   });
 
+  test('launch cancellation retains request ownership until the raw response settles', async () => {
+    let resolve!: (value: unknown) => void;
+    const deferred = new Promise<unknown>((done) => { resolve = done; });
+    const { adapter } = createUnitAdapter({ request: async (uri) => uri === mockMutationUris.launchApp ? deferred : responseForPairing(uri) });
+    await pair(adapter);
+    const controller = new AbortController(); let settled = false;
+    const pending = adapter.launchApp('synthetic.wink', controller.signal).then(() => { settled = true; }, () => { settled = true; });
+    controller.abort();
+    for (let index = 0; index < 10; index++) await Promise.resolve();
+    const earlySettlement = settled;
+    resolve({ returnValue: true }); await pending;
+    expect(earlySettlement).toBe(false);
+  });
+
   test('does not send a mutating request when the signal is already aborted', async () => {
     const mock = await startMock({ kind: 'success' });
     const { adapter, clients } = createHarness(mock, new MemoryKeyStore());

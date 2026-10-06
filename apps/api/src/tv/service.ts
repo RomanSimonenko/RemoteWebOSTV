@@ -632,7 +632,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       const result = await executeTvCommand(input, adapter, controller.signal);
       if (scheduler.now() >= expiresAt && !controller.signal.aborted) expire();
       if (controller.signal.aborted && result.outcome === 'sent') return unknownTvCommand(input.id);
-      if (!closed && version === generation && result.outcome === 'rejected' && result.error.code === 'UNSUPPORTED_CAPABILITY') remoteCapability = { generation: version, pointer: false, powerOff: remoteCapability?.powerOff === true };
+      if (!('app' in input) && !closed && version === generation && result.outcome === 'rejected' && result.error.code === 'UNSUPPORTED_CAPABILITY') remoteCapability = { generation: version, pointer: false, powerOff: remoteCapability?.powerOff === true };
       return result;
     });
     const current: Command = { controller, promise: pending.finally(() => {

@@ -344,6 +344,7 @@ export class Lgtv2Adapter implements WebOsAdapter {
       'launch-app',
       signal,
       () => client.request(uris.launchApp, { id }),
+      'owner',
     );
   }
 

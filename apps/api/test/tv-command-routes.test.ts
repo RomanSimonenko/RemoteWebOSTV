@@ -341,3 +341,18 @@ test('real HTTP body completion permits a command, while disconnect during admis
     expect(charges).toBe(1);
   } finally { abandoned.client.destroy(); release.resolve(); await failure; }
 });
+
+test('Wink uses the protected command route and missing app returns a validated 422 result', async () => {
+  const { post, h, headers } = await fixture(); const launched: string[] = [];
+  Object.assign(h.adapters[0]!, { listApps: async () => [{ id: 'synthetic.wink', name: 'Wink' }, { id: 'synthetic.dev', name: 'Wink Dev' }], launchApp: async (id: string) => { launched.push(id); } });
+  const input = { id: command.id, app: 'wink' };
+  expect((await post(input, { ...headers, 'x-csrf-token': 'invalid' })).statusCode).toBe(403);
+  expect(launched).toEqual([]);
+  const result = await post(input);
+  expect(result.statusCode).toBe(200); expect(tvCommandResultSchema.parse(result.json())).toEqual({ id: input.id, outcome: 'sent' });
+  expect(result.headers['cache-control']).toBe('no-store'); expect(launched).toEqual(['synthetic.wink']);
+  Object.assign(h.adapters[0]!, { listApps: async () => [] });
+  const missing = await post({ ...input, id: '00000000-0000-4000-8000-000000000002' });
+  expect(missing.statusCode).toBe(422); expect(tvCommandResultSchema.parse(missing.json())).toMatchObject({ outcome: 'rejected', error: { code: 'APP_NOT_AVAILABLE' } });
+  expect(launched).toEqual(['synthetic.wink']);
+});
