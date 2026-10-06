@@ -49,7 +49,7 @@ async function saveMac(page: Page) {
 
 async function confirmOff(page: Page) {
   await power(page).getByRole('button', { name: 'Выключить ТВ', exact: true }).click();
-  await page.getByRole('button', { name: 'Подтвердить выключение', exact: true }).click();
+  await page.getByRole('button', { name: 'Выключить', exact: true }).click();
 }
 
 async function intentionalOff(page: Page, tv: TvFixture) {
@@ -66,7 +66,7 @@ test('cancelled confirmation sends nothing; confirmed power-off sends exact SSAP
   await tv.replaceTv({ kind: 'close-after-response', uri: off });
   await pair(page, tv);
   await power(page).getByRole('button', { name: 'Выключить ТВ', exact: true }).click();
-  await page.getByRole('button', { name: 'Не выключать', exact: true }).click();
+  await page.getByRole('button', { name: 'Отмена', exact: true }).click();
   expect(offRequests(tv)).toEqual([]);
   expect((await state(page, tv)).operation).toBeNull();
   await confirmOff(page);
@@ -160,7 +160,7 @@ test('unexpected disconnect runs one bounded recovery without WOL or PROMPT and 
   await tv.status(page);
   await expect.poll(() => tv.clock.nextDelay).toBe(1000);
   await page.reload();
-  await expect(page.getByRole('status', { name: 'Питание телевизора', exact: true })).toHaveText('Восстанавливаем соединение с телевизором');
+  await expect(page.locator('.power-activity')).toHaveText('');
   await expect(page.locator('.tv-activity').getByRole('button', { name: 'Отменить ожидание', exact: true })).toHaveCount(0);
   await openSettings(page);
   await expect(settings(page).getByRole('button', { name: 'Подключиться снова', exact: true })).toBeDisabled();
@@ -187,7 +187,8 @@ test('recovery deadline ends retries and status reads never start another cycle'
   tv.clock.advance(120_000);
   await tv.status(page);
   await page.reload();
-  await expect(page.locator('.power-activity').getByRole('alert')).toContainText('Не удалось подключиться');
+  await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Нет соединения');
+  await expect(page.locator('.power-activity').getByRole('alert')).toHaveCount(0);
   expect(tv.policies).toHaveLength(attempts);
   expect(tv.wakes).toEqual([]);
 });

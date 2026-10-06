@@ -11,6 +11,40 @@ beforeEach(() => {
 });
 
 const csrfToken = 'c'.repeat(43);
+test('offline background recovery shows only the connection badge and keeps details in settings', async () => {
+  const failure = { ...operation, action: 'reconnect', status: 'failed', error: { code: 'RECOVERY_TIMEOUT', message: 'Connection timed out.' } };
+  vi.stubGlobal('fetch', vi.fn((path: string) => Promise.resolve(response(path === '/api/tv'
+    ? { ...saved, operation: failure, error: failure.error }
+    : path === '/api/tv/power' ? { mac: '02:00:00:00:00:01', canPowerOff: false, canWake: true, operation: { ...failure, id: '00000000-0000-4000-8000-000000000001', action: 'recover', delivery: 'not_sent', phase: 'finished', error: { code: 'RECOVERY_TIMEOUT', message: 'Recovery timed out.' } } }
+    : { enabled: false, reason: 'UNAVAILABLE' }))));
+  const props = { csrfToken, onCloseSettings: vi.fn(), onSessionExpired: vi.fn() };
+  const view = render(<TvSetup {...props} settingsOpen={false} />);
+  await act(async () => {});
+  expect(screen.getByText('Нет соединения')).toBeTruthy();
+  expect(view.container.querySelector('.tv-activity')?.textContent).toBe('Нет соединения');
+  expect(screen.getByRole('button', { name: 'Включить ТВ' }).hasAttribute('disabled')).toBe(false);
+  view.rerender(<TvSetup {...props} settingsOpen />);
+  await act(async () => {});
+  expect(screen.getByRole('dialog', { name: 'Настройки телевизора' }).textContent).toContain('Connection timed out.');
+});
+test('manual reconnect failure remains visible after closing settings', async () => {
+  const failed = { ...operation, action: 'reconnect', status: 'failed', error: { code: 'RECOVERY_TIMEOUT', message: 'Manual connection timed out.' } };
+  let attempted = false;
+  vi.stubGlobal('fetch', vi.fn((path: string, init?: RequestInit) => {
+    if (init?.method === 'POST') { attempted = true; return Promise.resolve(response(failed, 202)); }
+    return Promise.resolve(response(path === '/api/tv' ? { ...saved, operation: attempted ? failed : null }
+      : path === '/api/tv/power' ? { mac: null, canPowerOff: false, canWake: false, operation: null }
+      : { enabled: false, reason: 'UNAVAILABLE' }));
+  }));
+  const props = { csrfToken, onCloseSettings: vi.fn(), onSessionExpired: vi.fn() };
+  const view = render(<TvSetup {...props} settingsOpen />);
+  await act(async () => {});
+  fireEvent.click(screen.getByRole('button', { name: 'Подключиться снова' }));
+  await act(async () => {});
+  view.rerender(<TvSetup {...props} settingsOpen={false} />);
+  await act(async () => {});
+  expect(screen.getByRole('alert').textContent).toBe('Manual connection timed out.');
+});
 const empty = { tv: null, connection: 'unconfigured', operation: null };
 const saved = { tv: { host: '192.168.1.20', identity: { model: 'Synthetic TV' } }, connection: 'unavailable', operation: null };
 const operation = { id: 'synthetic-operation', action: 'pair', status: 'running', startedAt: 10000, deadlineAt: 70000 };
@@ -402,9 +436,9 @@ test('power confirmation disables settings until dismissed and settings disable 
   vi.stubGlobal('fetch', fetch);
   render(<Home username="alice" csrfToken={csrfToken} tvActive busy={false} error={null} onLogout={vi.fn()} onSessionExpired={vi.fn()} />); await act(async () => {});
   fireEvent.click(screen.getByRole('button', { name: 'Выключить ТВ' }));
-  const gear = screen.getByRole<HTMLButtonElement>('button', { name: 'Настройки' }); expect(gear.disabled).toBe(true); fireEvent.click(gear);
+  const gear = screen.getByRole<HTMLButtonElement>('button', { name: 'Настройки' }); expect(gear.disabled).toBe(true);
   expect(screen.queryByRole('dialog', { name: 'Настройки телевизора' })).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Не выключать' })); expect(gear.disabled).toBe(false); fireEvent.click(gear);
+  fireEvent.click(screen.getByRole('button', { name: 'Отмена' })); expect(gear.disabled).toBe(false); fireEvent.click(gear);
   expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Выключить ТВ' }).disabled).toBe(true);
   expect(fetch).toHaveBeenCalledTimes(3);
 });
