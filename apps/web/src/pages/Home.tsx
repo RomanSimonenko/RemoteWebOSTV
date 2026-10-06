@@ -22,7 +22,18 @@ export function Home({ username, csrfToken, tvActive, busy, error, onLogout, onS
     <header className="app-header">
       <div className="header-identity"><p className="eyebrow">Remote WebOS TV</p><div ref={setIdentityTarget} /></div>
       <div className="header-actions">
-        <details ref={help} className="keyboard-help"><summary aria-label="Управление с клавиатуры" title="Управление с клавиатуры"><IconInfoCircle aria-hidden="true" /></summary><p id="remote-help">Клавиатура при фокусе на пульте: стрелки, Enter — OK, Escape — назад, Home — домой, +/− — громкость, M — без звука.</p></details>
+        <details ref={help} className="keyboard-help"><summary aria-label="Управление с клавиатуры" title="Управление с клавиатуры"><IconInfoCircle aria-hidden="true" /></summary><div id="remote-help" className="help-panel">
+          <p>Нажмите Tab, чтобы перейти к пульту, или нажмите на свободное место внутри него.</p>
+          <dl className="keyboard-shortcuts">
+            <div><dt><kbd>↑ ↓ ← →</kbd></dt><dd>Навигация</dd></div>
+            <div><dt><kbd>Enter</kbd></dt><dd>OK</dd></div>
+            <div><dt><kbd>Escape</kbd></dt><dd>Назад</dd></div>
+            <div><dt><kbd>Home</kbd></dt><dd>Домой</dd></div>
+            <div><dt><kbd>+</kbd></dt><dd>Громче</dd></div>
+            <div><dt><kbd>−</kbd></dt><dd>Тише</dd></div>
+            <div><dt><kbd>M</kbd></dt><dd>Без звука</dd></div>
+          </dl>
+        </div></details>
         <button ref={settingsButton} type="button" aria-label="Настройки" title="Настройки" aria-haspopup="dialog" disabled={!tvActive || confirmingPower} onClick={() => { settingsButton.current?.focus(); setSettingsOpen(true); }}><IconSettings aria-hidden="true" /></button>
         <button type="button" disabled={busy} onClick={onLogout}>{busy ? 'Выход…' : 'Выйти'}</button>
       </div>

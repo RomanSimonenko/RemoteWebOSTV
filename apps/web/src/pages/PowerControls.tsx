@@ -102,12 +102,14 @@ export function PowerControls({ csrfToken, active, onSessionExpired, onStateChan
       </div>
     </div>
     {settingsOpen && activity(false)}
-    <form onSubmit={(event) => { event.preventDefault(); saveMac(mac.trim() || null); }} noValidate>
+    <form className="settings-edit-row" onSubmit={(event) => { event.preventDefault(); saveMac(mac.trim() || null); }} noValidate>
       <label>MAC-адрес телевизора<input autoComplete="off" value={mac} disabled={disabled} onChange={(event) => setMac(event.target.value)} /></label>
       <button className="settings-primary" type="submit" disabled={disabled}>Сохранить MAC</button>
-      <button type="button" disabled={disabled || !state?.mac} onClick={() => saveMac(null)}>Очистить MAC</button>
     </form>
+    <div className="settings-actions">
+    <button type="button" disabled={disabled || !state?.mac} onClick={() => saveMac(null)}>Очистить MAC</button>
     <button type="button" disabled={loading} onClick={refresh}>Обновить статус питания</button>
+    </div>
   </section>;
   const quietRecovery = quietOffline && !message && !error && !conflicting && (!operation || (operation.action === 'recover' && (!operation.error || ['RECOVERY_TIMEOUT', 'CONNECTION_LOST', 'TV_UNAVAILABLE'].includes(operation.error.code))));
   const backgroundActivity = <div className={settingsOpen ? 'reserved-activity' : undefined} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{!quietRecovery && !(activityTarget && running) && activity(true)}</div>;

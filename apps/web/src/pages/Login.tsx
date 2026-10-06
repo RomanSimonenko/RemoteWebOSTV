@@ -14,7 +14,7 @@ export function Login({ busy, error, feedback, onSubmit }: Props) {
       <label>Пароль<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" required /></label>
       {error}
       <p role="status" aria-live="polite">{busy ? 'Выполняется вход…' : ''}</p>
-      <button disabled={busy} type="submit">{busy ? 'Вход…' : 'Войти'}</button>
+      <button className="settings-primary" disabled={busy} type="submit">{busy ? 'Вход…' : 'Войти'}</button>
     </form>
   </section>;
 }

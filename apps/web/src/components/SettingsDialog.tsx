@@ -19,12 +19,12 @@ export function SettingsDialog({ open, onClose, children }: Props) {
       if (opener.current?.isConnected) opener.current.focus();
     }
   }, [open]);
-  return <dialog ref={dialog} aria-label="Настройки телевизора" className="settings-dialog" onCancel={(event) => { event.preventDefault(); onClose(); }} onClick={(event) => {
+  return <dialog ref={dialog} tabIndex={0} aria-label="Настройки телевизора" className="settings-dialog" onCancel={(event) => { event.preventDefault(); onClose(); }} onClick={(event) => {
     if (event.target !== event.currentTarget) return;
     const bounds = event.currentTarget.getBoundingClientRect();
     if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) onClose();
   }}>
     <div className="settings-heading"><h2>Настройки телевизора</h2><button ref={closeButton} type="button" aria-label="Закрыть настройки" onClick={onClose}><IconX aria-hidden="true" /></button></div>
-    {children}
+    <div className="settings-content">{children}</div>
   </dialog>;
 }

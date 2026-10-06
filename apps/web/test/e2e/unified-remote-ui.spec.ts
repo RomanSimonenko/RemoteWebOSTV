@@ -64,12 +64,54 @@ async function noOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 }
 
+test('settings pairs related controls and confines scroll to content below its heading', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await fixture(page);
+  await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+  const dialog = settings(page);
+  const content = dialog.locator('.settings-content');
+  await expect(content).toBeVisible();
+  for (const [first, second] of [['Подключиться снова', 'Обновить статус'], ['Очистить MAC', 'Обновить статус питания']] as const) {
+    const a = (await dialog.getByRole('button', { name: first, exact: true }).boundingBox())!;
+    const b = (await dialog.getByRole('button', { name: second, exact: true }).boundingBox())!;
+    expect(Math.abs(a.y - b.y)).toBeLessThanOrEqual(1);
+    expect(b.x).toBeGreaterThan(a.x + a.width);
+  }
+  const heading = (await dialog.locator('.settings-heading').boundingBox())!;
+  const scroll = (await content.boundingBox())!;
+  const bounds = (await dialog.boundingBox())!;
+  expect(scroll.y).toBeGreaterThanOrEqual(heading.y + heading.height);
+  expect(scroll.y + scroll.height).toBeLessThan(bounds.y + bounds.height - 8);
+  await dialog.getByRole('button', { name: 'Закрыть настройки' }).focus();
+  for (let index = 0; index < 24; index++) {
+    await page.keyboard.press(index % 2 ? 'Tab' : 'Shift+Tab');
+    expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+  }
+});
+
+test('settings keeps its heading visible while scrolling and hides repair behind advanced controls', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await fixture(page);
+  await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+  const dialog = settings(page);
+  await expect(dialog.getByRole('button', { name: 'Повторить сопряжение' })).toBeHidden();
+  await dialog.getByText('Дополнительно', { exact: true }).click();
+  await expect(dialog.getByRole('button', { name: 'Повторить сопряжение' })).toBeVisible();
+  const heading = dialog.getByRole('heading', { name: 'Настройки телевизора' });
+  const initial = (await heading.boundingBox())!;
+  await dialog.getByRole('button', { name: 'Обновить статус питания' }).scrollIntoViewIfNeeded();
+  const after = (await heading.boundingBox())!;
+  expect(Math.abs(initial.y - after.y)).toBeLessThanOrEqual(1);
+  await expect(dialog.getByRole('button', { name: 'Закрыть настройки' })).toBeVisible();
+});
+
 for (const width of [320, 1280]) {
   test(`settings sections and controls stay consistent at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 960 });
     const { mutations } = await fixture(page);
     await page.getByRole('button', { name: 'Настройки', exact: true }).click();
     const dialog = settings(page);
+    await dialog.getByText('Дополнительно', { exact: true }).click();
     const close = dialog.getByRole('button', { name: 'Закрыть настройки' });
     expect(await close.locator('svg').count()).toBe(1);
     const closeBox = (await close.boundingBox())!;
@@ -120,6 +162,8 @@ for (const width of [320, 1280]) {
     await dialog.getByRole('heading', { name: 'Настройки телевизора', exact: true }).hover();
     await expect(tooltip).toBeHidden();
     await dialog.getByRole('button', { name: 'Обновить статус', exact: true }).focus();
+    await page.keyboard.press('Tab');
+    await expect(dialog.locator('.settings-advanced summary')).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(info).toBeFocused();
     await expect(tooltip).toBeVisible();
@@ -339,7 +383,11 @@ for (const width of [320, 1280]) {
       await expect(card.locator('.connection-led')).toHaveAttribute('data-color', mode.endsWith('error') && mode === 'connection-error' ? 'red' : mode === 'connection-running' ? 'gray' : 'green');
       await expect(activity.getByRole('status', { name: 'Соединение с телевизором', exact: true })).toHaveCount(0);
       if (mode.endsWith('error')) await expect(activity.getByRole('alert')).toContainText(longError);
-      if (mode === 'connection-running') await expect(activity.getByText(/Осталось:/)).toBeVisible();
+      if (mode === 'connection-running') {
+        const progress = page.locator('.connection-progress');
+        await expect(progress.getByText(/Осталось:/)).toBeVisible();
+        expect((await progress.boundingBox())!.y + (await progress.boundingBox())!.height).toBeLessThanOrEqual((await card.boundingBox())!.y);
+      }
       if (mode === 'power-running') await expect(activity.getByText(/Осталось:/)).toHaveCount(0);
       expect((await activity.boundingBox())!.y).toBeGreaterThanOrEqual((await card.boundingBox())!.y + (await card.boundingBox())!.height);
       await noOverflow(page);
@@ -470,12 +518,32 @@ for (const [mode, text] of [['version-known', 'webOS 6.5.3'], ['version-missing'
   });
 }
 
+test('connection indicator explains its state on hover and keyboard focus without sending commands', async ({ page }) => {
+  const { mutations } = await fixture(page);
+  const led = page.locator('.connection-led');
+  const tooltip = led.getByRole('tooltip');
+  await expect(tooltip).not.toBeVisible();
+  await led.hover();
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip).toContainText('Подключён');
+  await page.locator('.eyebrow').hover();
+  await expect(tooltip).not.toBeVisible();
+  await page.keyboard.press('Tab');
+  await led.focus();
+  await expect(tooltip).toBeVisible();
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('ArrowUp');
+  expect(mutations).toEqual([]);
+});
+
 test('header keyboard help stays readable inside a 320px viewport without sending commands', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 960 });
   const { mutations } = await fixture(page);
   await page.locator('.app-header summary').click();
   const help = page.locator('#remote-help');
   await expect(help).toBeVisible();
+  await expect(help.locator('kbd')).toHaveCount(7);
+  await expect(help).toContainText('Нажмите Tab');
   const box = (await help.boundingBox())!;
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(320);
@@ -498,7 +566,7 @@ test('native settings trap focus, block pointer and TV keys, then restore gear f
   await expect(settings(page).getByRole('button', { name: 'Закрыть настройки' })).toBeFocused();
   for (let index = 0; index < 18; index++) {
     await page.keyboard.press(index % 2 ? 'Tab' : 'Shift+Tab');
-    expect(await settings(page).evaluate((element) => element.contains(document.activeElement))).toBe(true);
+    expect(await settings(page).evaluate((element) => ({ inside: element.contains(document.activeElement), active: document.activeElement?.tagName })), `focus step ${index}`).toMatchObject({ inside: true });
   }
   await settings(page).getByLabel('IP-адрес телевизора').focus();
   for (const key of ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']) await page.keyboard.press(key);
