@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { startTvOperationSchema, type StartTvOperation, type TvConnectionState, type TvOperation, type SavedTvView, type TvPowerState } from '@remote-webos-tv/contracts';
 import { api, ApiFailure, friendlyError } from '../api.js';
 import { useTvStatus } from '../useTvStatus.js';
@@ -6,14 +7,14 @@ import { Remote } from './Remote.js';
 import { PowerControls } from './PowerControls.js';
 import { SettingsDialog } from '../components/SettingsDialog.js';
 
-interface Props { username?: string; csrfToken: string; onSessionExpired(): void; settingsOpen: boolean; onCloseSettings(): void; onConfirmationChange?(confirming: boolean): void }
+interface Props { username?: string; csrfToken: string; identityTarget?: HTMLElement | null; onSessionExpired(): void; settingsOpen: boolean; onCloseSettings(): void; onConfirmationChange?(confirming: boolean): void }
 const connections: Record<TvConnectionState, string> = {
   unconfigured: 'Введите IP-адрес телевизора', pairing: 'Сопряжение', connecting: 'Подключение',
   available: 'Подключён', unavailable: 'Нет соединения', reconnecting: 'Подключение',
   authorization_error: 'Ошибка авторизации', compatibility_error: 'Ошибка совместимости',
 };
 
-export function TvSetup({ username, csrfToken, onSessionExpired, settingsOpen, onCloseSettings, onConfirmationChange }: Props) {
+export function TvSetup({ username, csrfToken, identityTarget, onSessionExpired, settingsOpen, onCloseSettings, onConfirmationChange }: Props) {
   const { status, statusReadVersion, getReadVersion, loading, refreshing, error, refresh } = useTvStatus(onSessionExpired);
   const [host, setHost] = useState('');
   const [message, setMessage] = useState('');
@@ -143,15 +144,21 @@ export function TvSetup({ username, csrfToken, onSessionExpired, settingsOpen, o
       <button type="button" disabled={controlsBusy} onClick={() => start({ action: 'repair' })}>Повторить сопряжение</button>
     </div>}
   </>;
-  return <section className={tv ? 'tv-layout' : 'form-card'}>
+  const identity = tv && <div className="tv-info"><img className="tv-brand" src="/lg-logo.svg" alt="LG" /><p className="tv-model">{tv.identity.model}</p></div>;
+  const ledColor = error || status?.connection === 'authorization_error' || status?.connection === 'compatibility_error' || backgroundDiagnostic ? 'red' : progress || poweringOff ? 'gray' : connectionAppearance === 'available' ? 'green' : 'gray';
+  const connectionIndicator = <div className={tv ? 'connection-led' : 'connection-row'} data-color={ledColor} data-active={activityBusy && showActivity || undefined} title={connectionText}>
+    <p className={tv ? 'visually-hidden' : 'connection-status'} data-connection={connectionAppearance} role="status" aria-label="Соединение с телевизором" aria-live="polite">{connectionText}</p>
+    <span className="activity-slot">{activityBusy && showActivity && <span className="led-activity" role="img" aria-label="Выполняется запрос" />}</span>
+  </div>;
+  return <>{identityTarget ? createPortal(identity, identityTarget) : identity}<section className={tv ? 'tv-layout' : 'form-card'}>
     {!tv && <h1>Телевизор ещё не настроен</h1>}
     {tv && <div className="tv-card">
-      <div className="tv-info"><img className="tv-brand" src="/lg-logo.svg" alt="LG" /><p className="tv-model">{tv.identity.model}</p></div>
+      <div className="remote-top">{connectionIndicator}</div>
       <PowerControls csrfToken={csrfToken} active quietOffline={quietOffline} settingsOpen={settingsOpen} settingsTarget={settingsTarget} activityTarget={powerActivityTarget} {...(onConfirmationChange ? { onConfirmationChange } : {})} onSessionExpired={onSessionExpired} onStateChange={observePowerState} onBusyChange={setPowerBusy} />
       <Remote csrfToken={csrfToken} active quietOffline={quietOffline} interactionBlocked={settingsOpen} activityTarget={remoteActivityTarget} onSessionExpired={onSessionExpired} onBusyChange={setRemoteBusy} />
     </div>}
     <div className="tv-activity">
-      <div className="connection-row"><p className="connection-status" data-connection={connectionAppearance} role="status" aria-label="Соединение с телевизором" aria-live="polite">{connectionText}</p><span className="activity-slot">{activityBusy && showActivity && <span className="activity-spinner" role="img" aria-label="Выполняется запрос" />}</span></div>
+      {!tv && connectionIndicator}
       <div className={settingsOpen ? 'reserved-activity' : undefined} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{activity(true)}</div>
       <div className="power-activity" ref={setPowerActivityTarget} />
       <div ref={setRemoteActivityTarget} />
@@ -167,5 +174,5 @@ export function TvSetup({ username, csrfToken, onSessionExpired, settingsOpen, o
       </section></> : <>{settingsOpen && username && <p className="session-caption">Вы вошли как {username}.</p>}{settingsOpen && activity(false)}<p>Добавьте телевизор на основном экране.</p></>}
       <div ref={setSettingsTarget} />
     </SettingsDialog>
-  </section>;
+  </section></>;
 }
