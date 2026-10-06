@@ -221,8 +221,7 @@ export function Remote({ csrfToken, active, onSessionExpired, onBusyChange, inte
   return <><div role="group" aria-label="Пульт" aria-describedby="remote-help" aria-busy={busy} tabIndex={0} className="remote" onKeyDown={keyDown} onBlur={stopHold}>
     <h2 className="visually-hidden">Пульт</h2>
     <div role="group" aria-label="Цифры" className="remote-buttons numeric-pad">{numericButtons.map((button) => <button type="button" key={button} aria-label={button} title={button} disabled={disabled} onClick={() => void send(button)}>{button}</button>)}</div>
-    <div role="group" aria-label="Навигация" className="remote-buttons d-pad">{controls(buttons.slice(0, 5))}</div>
-    <div role="group" aria-label="Домой и назад" className="remote-buttons home-back">{controls(buttons.slice(5, 7))}</div>
+    <div role="group" aria-label="Навигация" className="remote-buttons d-pad">{controls([buttons[5]!, buttons[0]!, buttons[6]!, ...buttons.slice(1, 5)])}</div>
     <div role="group" aria-label="Громкость" className="remote-buttons volume">{controls(buttons.slice(7))}</div>
     <div role="group" aria-label="Каналы" className="remote-buttons channels">{controls(channelButtons)}</div>
     <div role="group" aria-label="Цветные кнопки" className="remote-buttons color-buttons">{colorButtons.map(([button, label]) => <button type="button" key={button} aria-label={label} title={label} data-color={button} disabled={disabled} onClick={() => void send(button)}><span aria-hidden="true" className="color-mark" /></button>)}</div>

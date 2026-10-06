@@ -21,7 +21,8 @@ async function fixture(page: Page, mode = 'idle') {
   const power: { -readonly [Key in keyof TvPowerState]: TvPowerState[Key] } = { mac: '02:00:00:00:00:03', canPowerOff: true, canWake: false, operation: null };
   if (mode === 'power-busy') { power.busy = true; power.canPowerOff = false; }
   if (mode === 'connection-running') {
-    status.connection = 'connecting';
+    // The last snapshot can remain available while a new operation runs.
+    status.connection = 'available';
     status.operation = { id: 'synthetic-operation', action: 'reconnect', status: 'running', startedAt: now, deadlineAt: now + 60_000 };
   }
   if (mode === 'connection-error') status.error = { code: 'TV_UNAVAILABLE', message: longError };
@@ -150,7 +151,7 @@ for (const width of [320, 1280]) {
     const modelBox = (await page.locator('.tv-model').boundingBox())!;
     const powerBox = (await page.getByRole('button', { name: 'Выключить ТВ', exact: true }).boundingBox())!;
     expect(modelBox.x).toBeGreaterThanOrEqual(logoBox.x + logoBox.width);
-    expect(modelBox.x + modelBox.width).toBeLessThanOrEqual(powerBox.x);
+    expect(modelBox.y + modelBox.height).toBeLessThanOrEqual(powerBox.y);
     expect(modelBox.y + modelBox.height).toBeLessThanOrEqual((await remote(page).boundingBox())!.y);
     await noOverflow(page);
   });
@@ -186,6 +187,8 @@ for (const width of [320, 1280]) {
     await expect(spinner).toHaveCount(0);
     await page.clock.runFor(400);
     await expect(spinner).toBeVisible();
+    await expect(page.locator('.connection-led')).toHaveAttribute('data-active', 'true');
+    await expect(page.locator('.activity-spinner')).toHaveCount(0);
     await expect(page.getByText('Питание сейчас недоступно. Обновите статус.', { exact: true })).toHaveCount(0);
     const card = await page.locator('.tv-card').boundingBox();
     const slot = await page.locator('.activity-slot').boundingBox();
@@ -202,10 +205,12 @@ for (const width of [320, 1280]) {
     await noOverflow(page);
     const card = page.locator('.tv-card');
     const box = (await card.boundingBox())!;
-    expect(Math.abs(box.width - 296)).toBeLessThanOrEqual(1);
-    expect(await card.evaluate((element) => getComputedStyle(element).borderRadius)).toBe('40px');
-    const logo = (await card.locator('.tv-brand').boundingBox())!;
+    expect(Math.abs(box.width - 194)).toBeLessThanOrEqual(1);
+    expect(await card.evaluate((element) => getComputedStyle(element).borderRadius)).toBe('24px');
+    const logo = (await page.locator('.app-header .tv-brand').boundingBox())!;
     expect(logo.width).toBe(60); expect(logo.height).toBe(28);
+    expect((await page.locator('.app-header .tv-model').boundingBox())!.height).toBeLessThanOrEqual(28);
+    expect(await page.locator('.app-header .tv-model').evaluate((element) => getComputedStyle(element).fontSize)).toBe('16px');
     const channels = remote(page).getByRole('group', { name: 'Каналы', exact: true });
     const colors = remote(page).getByRole('group', { name: 'Цветные кнопки', exact: true });
     await expect(channels.getByRole('button')).toHaveCount(2);
@@ -217,7 +222,18 @@ for (const width of [320, 1280]) {
     const power = page.getByRole('button', { name: 'Выключить ТВ', exact: true });
     expect((await power.boundingBox())!.y).toBeLessThan((await up.boundingBox())!.y);
     await expect(remote(page).getByRole('group', { name: 'Навигация', exact: true })).toBeVisible();
-    await expect(remote(page).getByRole('group', { name: 'Домой и назад', exact: true })).toBeVisible();
+    const home = (await remote(page).getByRole('button', { name: 'Домой', exact: true }).boundingBox())!;
+    const back = (await remote(page).getByRole('button', { name: 'Назад', exact: true }).boundingBox())!;
+    const right = (await remote(page).getByRole('button', { name: 'Вправо', exact: true }).boundingBox())!;
+    const upBox = (await up.boundingBox())!;
+    expect(home.y).toBe(upBox.y);
+    expect(home.x + home.width).toBeLessThan(upBox.x);
+    expect(back.x).toBe(right.x);
+    expect(back.y + back.height).toBeLessThan(right.y);
+    for (const bounds of [home, back, upBox, right]) {
+      expect(bounds.width).toBe(48);
+      expect(bounds.height).toBe(bounds.width);
+    }
     await expect(remote(page).getByRole('group', { name: 'Громкость', exact: true })).toBeVisible();
     const keypad = remote(page).getByRole('group', { name: 'Цифры', exact: true });
     await expect(keypad).toBeVisible();
@@ -227,6 +243,8 @@ for (const width of [320, 1280]) {
       await expect(button).toBeInViewport();
       expect(await button.innerText()).toBe(digit);
       digitBounds.push((await button.boundingBox())!);
+      expect(digitBounds.at(-1)!.width).toBe(48);
+      expect(digitBounds.at(-1)!.height).toBe(48);
     }
     for (let row = 0; row < 3; row++) {
       const [left, middle, right] = digitBounds.slice(row * 3, row * 3 + 3);
@@ -238,6 +256,35 @@ for (const width of [320, 1280]) {
     expect(Math.abs(digitBounds[9]!.x - digitBounds[1]!.x)).toBeLessThanOrEqual(1);
     expect(digitBounds[9]!.y).toBeGreaterThan(digitBounds[6]!.y);
     expect(digitBounds[9]!.y + digitBounds[9]!.height).toBeLessThan((await up.boundingBox())!.y);
+    const keypadBox = (await keypad.boundingBox())!;
+    expect(keypadBox.width).toBe(156);
+    const powerBox = (await power.boundingBox())!;
+    expect(powerBox.x + powerBox.width).toBe(digitBounds[2]!.x + digitBounds[2]!.width);
+    expect(powerBox.width).toBe(powerBox.height);
+    const powerIcon = (await power.locator('svg').boundingBox())!;
+    expect(powerIcon.width).toBe(28);
+    expect(powerIcon.height).toBe(28);
+    expect(await power.evaluate((element) => getComputedStyle(element).borderRadius)).toBe('11px');
+    for (const button of [keypad.getByRole('button', { name: '1', exact: true }), channels.getByRole('button').first()]) {
+      expect(await button.evaluate((element) => getComputedStyle(element).fontSize)).toBe('18px');
+    }
+    await expect(page.locator('.connection-led')).toHaveAttribute('data-color', 'green');
+    const led = (await page.locator('.connection-led').boundingBox())!;
+    expect(led.x + led.width / 2).toBe(digitBounds[0]!.x + digitBounds[0]!.width / 2);
+    for (const button of await colors.getByRole('button').all()) {
+      const bounds = (await button.boundingBox())!;
+      expect(bounds.height).toBe(24);
+      const mark = (await button.locator('.color-mark').boundingBox())!;
+      expect(mark.x - bounds.x).toBeGreaterThanOrEqual(8);
+      expect(mark.y - bounds.y).toBeGreaterThanOrEqual(8);
+      expect(Math.abs(bounds.x + bounds.width / 2 - mark.x - mark.width / 2)).toBeLessThanOrEqual(1);
+      expect(Math.abs(bounds.y + bounds.height / 2 - mark.y - mark.height / 2)).toBeLessThanOrEqual(1);
+    }
+    for (const group of [channels, colors, remote(page).getByRole('group', { name: 'Громкость', exact: true }), remote(page).getByRole('button', { name: 'Запустить Wink', exact: true })]) {
+      const bounds = (await group.boundingBox())!;
+      expect(bounds.width).toBe(keypadBox.width);
+      expect(bounds.x).toBe(keypadBox.x);
+    }
     for (const name of ['Вверх', 'Вниз', 'Влево', 'Вправо', 'OK', 'Домой', 'Назад', 'Громкость −', 'Без звука', 'Громкость +']) {
       const button = remote(page).getByRole('button', { name, exact: true });
       await expect(button).toBeInViewport();
@@ -266,11 +313,11 @@ for (const width of [320, 1280]) {
       } else expect(Math.abs(icon.x + icon.width / 2 - control.x - control.width / 2)).toBeLessThanOrEqual(1);
       expect(Math.abs(icon.y + icon.height / 2 - control.y - control.height / 2)).toBeLessThanOrEqual(1);
     }
-    expect(await card.getByRole('status').count()).toBe(0);
+    expect(await card.getByRole('status').count()).toBe(1);
     expect(await card.getByRole('alert').count()).toBe(0);
     expect(await card.locator('details').count()).toBe(0);
-    await expect(card.locator('.tv-model')).toHaveText('Synthetic TV');
-    await expect(card.getByRole('img', { name: 'LG', exact: true })).toBeVisible();
+    await expect(page.locator('.app-header .tv-model')).toHaveText('Synthetic TV');
+    await expect(page.locator('.app-header').getByRole('img', { name: 'LG', exact: true })).toBeVisible();
     await expect(card).not.toContainText('192.168.50.20', { useInnerText: true });
     await expect(card).not.toContainText('02:00:00:00:00:03', { useInnerText: true });
     expect(await card.getByRole('button', { name: 'Настройки', exact: true }).count()).toBe(0);
@@ -285,10 +332,12 @@ for (const width of [320, 1280]) {
       const { reads, mutations } = await fixture(page, mode);
       if (mode.endsWith('error')) await expect(page.getByRole('alert')).toContainText(longError);
       const card = page.locator('.tv-card');
-      expect(await card.getByRole('status').count()).toBe(0);
+      expect(await card.getByRole('status').count()).toBe(1);
       expect(await card.getByRole('alert').count()).toBe(0);
       const activity = page.locator('.tv-activity');
-      await expect(activity.getByRole('status', { name: 'Соединение с телевизором', exact: true })).toBeVisible();
+      await expect(card.locator('.connection-led')).toBeVisible();
+      await expect(card.locator('.connection-led')).toHaveAttribute('data-color', mode.endsWith('error') && mode === 'connection-error' ? 'red' : mode === 'connection-running' ? 'gray' : 'green');
+      await expect(activity.getByRole('status', { name: 'Соединение с телевизором', exact: true })).toHaveCount(0);
       if (mode.endsWith('error')) await expect(activity.getByRole('alert')).toContainText(longError);
       if (mode === 'connection-running') await expect(activity.getByText(/Осталось:/)).toBeVisible();
       if (mode === 'power-running') await expect(activity.getByText(/Осталось:/)).toHaveCount(0);
@@ -325,6 +374,26 @@ for (const width of [320, 1280]) {
       await noOverflow(page);
     });
   }
+}
+
+for (const width of [320, 1280]) {
+  test(`power popover content fits narrow remote at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 960 });
+    const { mutations } = await fixture(page);
+    await page.getByRole('button', { name: 'Выключить ТВ', exact: true }).click();
+    const popover = page.getByRole('dialog', { name: 'Выключить телевизор?' });
+    const box = (await popover.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(width);
+    for (const child of await popover.locator('h3, button').all()) {
+      const bounds = (await child.boundingBox())!;
+      expect(bounds.x).toBeGreaterThanOrEqual(box.x);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(box.x + box.width);
+    }
+    await noOverflow(page);
+    await popover.screenshot({ path: testInfo.outputPath(`popover-${width}.png`) });
+    expect(mutations).toEqual([]);
+  });
 }
 
 for (const activation of ['pointer', 'keyboard']) {
@@ -393,7 +462,7 @@ for (const [mode, text] of [['version-known', 'webOS 6.5.3'], ['version-missing'
     await expect(page.getByText('Вы вошли как synthetic-owner.', { exact: true })).toHaveCount(0);
     await expect(info).not.toContainText('99.8');
     const box = (await info.boundingBox())!;
-    expect(box.y).toBeGreaterThan((await page.locator('.tv-card').boundingBox())!.y);
+    expect(box.y + box.height).toBeLessThan((await page.locator('.tv-card').boundingBox())!.y);
     await page.getByRole('button', { name: 'Настройки', exact: true }).click();
     await expect(settings(page).getByText(text, { exact: true })).toBeVisible();
     await expect(settings(page).getByText('Вы вошли как synthetic-owner.', { exact: true })).toBeVisible();

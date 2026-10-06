@@ -123,7 +123,8 @@ test('running wake shows only connection and spinner outside settings, with canc
   const view = render(<TvSetup {...props} settingsOpen={false} />);
   await act(async () => {});
   await act(async () => { await vi.advanceTimersByTimeAsync(400); });
-  expect(view.container.querySelector('.tv-activity')?.textContent).toBe('Подключение');
+  expect(view.container.querySelector('.tv-activity')?.textContent).toBe('');
+  expect(view.container.querySelector('.connection-led')?.getAttribute('data-color')).toBe('gray');
   expect(screen.getByRole('img', { name: 'Выполняется запрос' })).toBeTruthy();
   view.rerender(<TvSetup {...props} settingsOpen />);
   await act(async () => {});
@@ -139,7 +140,8 @@ test('offline background recovery shows only the connection badge and keeps deta
   const view = render(<TvSetup {...props} settingsOpen={false} />);
   await act(async () => {});
   expect(screen.getByText('Нет соединения')).toBeTruthy();
-  expect(view.container.querySelector('.tv-activity')?.textContent).toBe('Нет соединения');
+  expect(view.container.querySelector('.tv-activity')?.textContent).toBe('');
+  expect(view.container.querySelector('.connection-led')?.getAttribute('data-color')).toBe('gray');
   expect(screen.getByRole('button', { name: 'Включить ТВ' }).hasAttribute('disabled')).toBe(false);
   view.rerender(<TvSetup {...props} settingsOpen />);
   await act(async () => {});
@@ -224,8 +226,9 @@ test.each([
   expect(screen.queryByText('Вы вошли как synthetic-owner.')).toBeNull();
   expect(info.textContent).not.toContain('99.8');
   const card = view.container.querySelector('.tv-card') as HTMLElement;
-  expect(within(card).queryByRole('status')).toBeNull();
-  expect(card.contains(info)).toBe(true);
+  expect(within(card).getByRole('status', { name: 'Соединение с телевизором' }).className).toBe('visually-hidden');
+  expect(card.contains(info)).toBe(false);
+  expect(view.container.querySelector('.app-header')?.contains(info)).toBe(true);
   expect(screen.queryByRole('heading', { name: /^Телевизор$/ })).toBeNull();
   const activity = view.container.querySelector('.tv-activity')!;
   expect(card.compareDocumentPosition(activity) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
