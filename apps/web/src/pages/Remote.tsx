@@ -214,7 +214,7 @@ export function Remote({ csrfToken, active, onSessionExpired, onBusyChange, inte
   </button>;
   });
   const activity = <div className="remote-activity">
-    {explanation && <p>{explanation}</p>}
+    {explanation && !(state?.reason === 'BUSY' && !readError) && <p>{explanation}</p>}
     <p role="status" aria-label="Команды телевизора" aria-live="polite">{!busy && feedback && !feedback.alert ? feedback.text : ''}</p>
     {feedback?.alert && <p role="alert" className="error">{feedback.text}</p>}
   </div>;

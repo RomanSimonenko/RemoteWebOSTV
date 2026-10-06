@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { startTvOperationSchema, type StartTvOperation, type TvConnectionState, type TvOperation, type SavedTvView, type TvPowerState } from '@remote-webos-tv/contracts';
 import { api, ApiFailure, friendlyError } from '../api.js';
 import { useTvStatus } from '../useTvStatus.js';
@@ -19,7 +19,17 @@ export function TvSetup({ username, csrfToken, onSessionExpired, settingsOpen, o
   const [message, setMessage] = useState('');
   const [manualOperationId, setManualOperationId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [powerState, setPowerState] = useState<TvPowerState | null>(null);
+  const [powerObservation, setPowerObservation] = useState<{ state: TvPowerState | null; shutdownAfterReadVersion: number | null }>({ state: null, shutdownAfterReadVersion: null });
+  const powerState = powerObservation.state;
+  const observePowerState = useCallback((state: TvPowerState | null) => {
+    const readVersion = getReadVersion();
+    setPowerObservation((previous) => {
+      const oldOperation = previous.state?.operation;
+      const operation = state?.operation;
+      const completedShutdown = oldOperation?.action === 'power_off' && oldOperation.status === 'running' && operation?.id === oldOperation.id && operation.status !== 'running';
+      return { state, shutdownAfterReadVersion: completedShutdown ? readVersion : operation?.action === 'wake' ? null : previous.shutdownAfterReadVersion };
+    });
+  }, [getReadVersion]);
   const [powerBusy, setPowerBusy] = useState(false);
   const [remoteBusy, setRemoteBusy] = useState(false);
   const [settingsTarget, setSettingsTarget] = useState<HTMLDivElement | null>(null);
@@ -42,8 +52,12 @@ export function TvSetup({ username, csrfToken, onSessionExpired, settingsOpen, o
   const operation = accepted && !hasObservedAccepted ? accepted.operation : observed;
   const running = operation?.status === 'running';
   const powerRunning = powerState?.operation?.status === 'running';
+  // A connection read already in flight when shutdown completes can still
+  // carry "available". Only a subsequently started read ends the transition.
+  const awaitingShutdownStatus = powerObservation.shutdownAfterReadVersion !== null && statusReadVersion <= powerObservation.shutdownAfterReadVersion;
+  const poweringOff = (powerRunning && powerState.operation?.action === 'power_off') || awaitingShutdownStatus;
   const controlsBusy = busy || powerRunning;
-  const activityBusy = refreshing || busy || running || powerBusy || remoteBusy;
+  const activityBusy = refreshing || busy || running || powerBusy || remoteBusy || awaitingShutdownStatus;
   const [showActivity, setShowActivity] = useState(false);
   useEffect(() => {
     if (!activityBusy) { setShowActivity(false); return; }
@@ -51,7 +65,10 @@ export function TvSetup({ username, csrfToken, onSessionExpired, settingsOpen, o
     return () => clearTimeout(timer);
   }, [activityBusy]);
   const progress = running ? (operation.action === 'pair' || operation.action === 'repair' ? 'Сопряжение' : 'Подключение') : null;
-  const diagnostic = message || error || status?.error?.message || operation?.error?.message || '';
+  // Power controls own this terminal warning; the connection snapshot also
+  // carries it, but must not announce the same result a second time.
+  const connectionDiagnostic = (failure: TvOperation['error']) => failure?.code === 'POWER_OFF_UNCONFIRMED' ? '' : failure?.message;
+  const diagnostic = message || error || connectionDiagnostic(status?.error) || connectionDiagnostic(operation?.error) || '';
   const quietOffline = status?.connection === 'unavailable';
   const connectionFailure = status?.error ?? operation?.error;
   const routineConnectionFailure = ['CONNECTION_LOST', 'RECOVERY_TIMEOUT', 'TV_UNAVAILABLE'].includes(connectionFailure?.code ?? '');
@@ -102,7 +119,8 @@ export function TvSetup({ username, csrfToken, onSessionExpired, settingsOpen, o
     void mutate((signal) => api.startTvOperation(parsed.data, csrfToken, signal));
   }
 
-  const connectionText = error ? 'Статус неизвестен' : progress || (status ? connections[status.connection] : 'Загрузка статуса…');
+  const connectionText = error ? 'Статус неизвестен' : poweringOff ? 'Выключение' : progress || (status ? connections[status.connection] : 'Загрузка статуса…');
+  const connectionAppearance = error ? 'unknown' : poweringOff ? 'connecting' : status?.connection;
   // Keep autofocus ownership on the retained background diagnostic, separate
   // from the modal copy that unmounts when settings close.
   const activity = (withFocusRef: boolean) => <>
@@ -128,11 +146,11 @@ export function TvSetup({ username, csrfToken, onSessionExpired, settingsOpen, o
     {!tv && <h1>Телевизор ещё не настроен</h1>}
     {tv && <div className="tv-card">
       <div className="tv-info"><img className="tv-brand" src="/lg-logo.svg" alt="LG" /><p className="tv-model">{tv.identity.model}</p></div>
-      <PowerControls csrfToken={csrfToken} active quietOffline={quietOffline} settingsOpen={settingsOpen} settingsTarget={settingsTarget} activityTarget={powerActivityTarget} {...(onConfirmationChange ? { onConfirmationChange } : {})} onSessionExpired={onSessionExpired} onStateChange={setPowerState} onBusyChange={setPowerBusy} />
+      <PowerControls csrfToken={csrfToken} active quietOffline={quietOffline} settingsOpen={settingsOpen} settingsTarget={settingsTarget} activityTarget={powerActivityTarget} {...(onConfirmationChange ? { onConfirmationChange } : {})} onSessionExpired={onSessionExpired} onStateChange={observePowerState} onBusyChange={setPowerBusy} />
       <Remote csrfToken={csrfToken} active quietOffline={quietOffline} interactionBlocked={settingsOpen} activityTarget={remoteActivityTarget} onSessionExpired={onSessionExpired} onBusyChange={setRemoteBusy} />
     </div>}
     <div className="tv-activity">
-      <div className="connection-row"><p className="connection-status" data-connection={error ? 'unknown' : status?.connection} role="status" aria-label="Соединение с телевизором" aria-live="polite">{connectionText}</p><span className="activity-slot">{activityBusy && showActivity && <span className="activity-spinner" role="img" aria-label="Выполняется запрос" />}</span></div>
+      <div className="connection-row"><p className="connection-status" data-connection={connectionAppearance} role="status" aria-label="Соединение с телевизором" aria-live="polite">{connectionText}</p><span className="activity-slot">{activityBusy && showActivity && <span className="activity-spinner" role="img" aria-label="Выполняется запрос" />}</span></div>
       <div className={settingsOpen ? 'reserved-activity' : undefined} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{activity(true)}</div>
       <div className="power-activity" ref={setPowerActivityTarget} />
       <div ref={setRemoteActivityTarget} />

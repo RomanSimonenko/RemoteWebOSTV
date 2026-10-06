@@ -313,7 +313,8 @@ test('repeat, modifiers, editable targets, outside focus and hidden document nev
 });
 test.each([['UNAVAILABLE', 'Телевизор недоступен'], ['BUSY', 'Телевизор занят'], ['UNSUPPORTED', 'Управление кнопками не поддерживается']])('capability reason %s disables controls with safe explanation', async (reason, text) => {
   const view = await mount(undefined, () => Promise.resolve(response({ enabled: false, reason })));
-  expect(screen.getByText(text, { exact: false })).toBeTruthy();
+  if (reason === 'BUSY') expect(screen.queryByText(text, { exact: false })).toBeNull();
+  else expect(screen.getByText(text, { exact: false })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'OK' })); expect(view.commands()).toHaveLength(0);
 });
 test.each([[409, 'TV_UNAVAILABLE', 'Телевизор недоступен'], [409, 'TV_BUSY', 'Телевизор занят'], [422, 'UNSUPPORTED_CAPABILITY', 'Управление кнопками не поддерживается'], [503, 'COMMAND_NOT_SENT', 'Команда не отправлена'], [429, 'RATE_LIMITED', 'Слишком много команд'], [504, 'COMMAND_RESULT_UNKNOWN', unknown]])('command HTTP %s %s shows its safe outcome without raw server text', async (status, code, text) => {
