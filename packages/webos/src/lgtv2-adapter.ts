@@ -82,6 +82,7 @@ export interface Lgtv2AdapterOptions {
   readonly now: () => Date;
   /** Explicit setup may authorize PROMPT; saved-key reconnection must fail closed. */
   readonly allowPairingPrompt?: boolean;
+  readonly wolBroadcastAddress?: string;
 }
 
 interface Lgtv2AdapterDependencies {
@@ -89,6 +90,7 @@ interface Lgtv2AdapterDependencies {
   readonly wake: (
     macAddresses: readonly string[],
     signal: AbortSignal,
+    broadcastAddress?: string,
   ) => Promise<void>;
 }
 
@@ -98,7 +100,7 @@ type MutableCapabilities = {
 
 const defaultDependencies: Lgtv2AdapterDependencies = {
   createClient: createLgtv2Client,
-  wake: sendWakeOnLan,
+  wake: (macAddresses, signal, broadcastAddress) => sendWakeOnLan(macAddresses, signal, undefined, broadcastAddress),
 };
 
 export class Lgtv2Adapter implements WebOsAdapter {
@@ -402,7 +404,7 @@ export class Lgtv2Adapter implements WebOsAdapter {
       await this.#execute('wake', signal, () => {
         throwIfAborted(signal);
         delivery = 'unknown';
-        return this.#dependencies.wake(macAddresses, signal);
+        return this.#dependencies.wake(macAddresses, signal, this.#options.wolBroadcastAddress);
       }, 'owner');
     } catch (cause) {
       // The actual UDP owner can prove a pre-send failure more precisely.

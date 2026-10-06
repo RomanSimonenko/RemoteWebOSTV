@@ -72,6 +72,7 @@ export function TvSetup({ username, csrfToken, identityTarget, onSessionExpired,
   const connectionDiagnostic = (failure: TvOperation['error']) => failure?.code === 'POWER_OFF_UNCONFIRMED' ? '' : failure?.message;
   const diagnostic = message || error || connectionDiagnostic(status?.error) || connectionDiagnostic(operation?.error) || '';
   const quietOffline = status?.connection === 'unavailable';
+  const quietRemoteUnavailable = quietOffline || poweringOff || powerRunning || status?.connection === 'connecting' || status?.connection === 'reconnecting';
   const connectionFailure = status?.error ?? operation?.error;
   const routineConnectionFailure = ['CONNECTION_LOST', 'RECOVERY_TIMEOUT', 'TV_UNAVAILABLE'].includes(connectionFailure?.code ?? '');
   const backgroundDiagnostic = quietOffline && routineConnectionFailure && !message && !error && operation?.id !== manualOperationId ? '' : diagnostic;
@@ -155,7 +156,7 @@ export function TvSetup({ username, csrfToken, identityTarget, onSessionExpired,
     {tv && <div className="tv-card">
       <div className="remote-top">{connectionIndicator}</div>
       <PowerControls csrfToken={csrfToken} active quietOffline={quietOffline} settingsOpen={settingsOpen} settingsTarget={settingsTarget} activityTarget={powerActivityTarget} {...(onConfirmationChange ? { onConfirmationChange } : {})} onSessionExpired={onSessionExpired} onStateChange={observePowerState} onBusyChange={setPowerBusy} />
-      <Remote csrfToken={csrfToken} active quietOffline={quietOffline} interactionBlocked={settingsOpen} activityTarget={remoteActivityTarget} onSessionExpired={onSessionExpired} onBusyChange={setRemoteBusy} />
+      <Remote csrfToken={csrfToken} active quietOffline={quietRemoteUnavailable} interactionBlocked={settingsOpen} activityTarget={remoteActivityTarget} onSessionExpired={onSessionExpired} onBusyChange={setRemoteBusy} />
     </div>}
     <div className="tv-activity">
       {!tv && connectionIndicator}

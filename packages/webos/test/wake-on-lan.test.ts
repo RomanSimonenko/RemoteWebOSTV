@@ -10,6 +10,7 @@ import {
 
 class FakeWakeSocket extends EventEmitter implements WakeSocket {
   readonly packets: Buffer[] = [];
+  readonly destinations: string[] = [];
   closed = false;
   closeError: Error | undefined;
   closeRequested = false;
@@ -31,6 +32,7 @@ class FakeWakeSocket extends EventEmitter implements WakeSocket {
     callback: (error?: Error | null) => void,
   ): void {
     this.packets.push(Buffer.from(packet));
+    this.destinations.push(_address);
     if (!this.holdSend) {
       callback(this.sendError);
     }
@@ -67,6 +69,14 @@ function createDependencies(socket: FakeWakeSocket): WakeOnLanDependencies {
 }
 
 describe('sendWakeOnLan', () => {
+  test.each([undefined, '192.0.2.255'])('sends all magic packets to the configured destination %j', async (address) => {
+    const socket = new FakeWakeSocket();
+    const pending = sendWakeOnLan(['02:00:00:00:00:01'], new AbortController().signal, createDependencies(socket), address);
+    socket.emitClose();
+    await pending;
+    expect(socket.destinations).toEqual(Array(3).fill(address ?? '255.255.255.255'));
+    expect(socket.packets[0]).toHaveLength(102);
+  });
   test.each([true, false])('UDP close failure has distinct cleanup provenance after send failure %j', async (sendFails) => {
     const socket = new FakeWakeSocket(); const cleanupCause = new Error('synthetic UDP cleanup'); socket.closeError = cleanupCause;
     const primary = new Error('synthetic UDP send'); if (sendFails) socket.sendError = primary;

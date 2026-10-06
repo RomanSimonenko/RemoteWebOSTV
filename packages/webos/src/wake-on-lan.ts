@@ -42,6 +42,7 @@ export async function sendWakeOnLan(
   macAddresses: readonly string[],
   signal: AbortSignal,
   dependencies: WakeOnLanDependencies = defaultDependencies,
+  broadcastAddress: string = wakeAddress,
 ): Promise<void> {
   let delivery: 'not_sent' | 'unknown' = 'not_sent';
   try {
@@ -146,7 +147,7 @@ export async function sendWakeOnLan(
             0,
             packet.length,
             wakePort,
-            wakeAddress,
+            broadcastAddress,
             (error) => {
               if (error) {
                 closeWith({ status: 'error', error });

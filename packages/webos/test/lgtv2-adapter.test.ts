@@ -108,6 +108,19 @@ function pair(adapter: Lgtv2Adapter, signal = new AbortController().signal) {
 }
 
 describe('Lgtv2Adapter', () => {
+  test('wake routes the configured destination to the UDP owner without connecting', async () => {
+    const wake = vi.fn(async () => undefined);
+    const createClient = vi.fn(() => { throw new Error('Wake must not connect'); });
+    const signal = new AbortController().signal;
+    const adapter = new Lgtv2Adapter({
+      host: 'tv.invalid', keyStore: new MemoryKeyStore(), requestTimeoutMs: 1000,
+      handshakeTimeoutMs: 1000, now: () => new Date(0), wolBroadcastAddress: '192.0.2.255',
+    }, { wake, createClient });
+    createdAdapters.push(adapter);
+    await adapter.wake(['02:00:00:00:00:01'], signal);
+    expect(wake).toHaveBeenCalledWith(['02:00:00:00:00:01'], signal, '192.0.2.255');
+    expect(createClient).not.toHaveBeenCalled();
+  });
   test('reads hello through the real lgtv2 wire without another registration', async () => {
     const mock = await startMock({ kind: 'hello-release' });
     const { adapter } = createHarness(mock, new MemoryKeyStore(mockClientKey));

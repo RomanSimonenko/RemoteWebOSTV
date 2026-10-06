@@ -11,6 +11,40 @@ beforeEach(() => {
 });
 
 const csrfToken = 'c'.repeat(43);
+test.each(['available', 'reconnecting', 'connecting'] as const)('wake does not announce a stale remote unavailable state while connection is %s', async (connection) => {
+  vi.stubGlobal('fetch', vi.fn((path: string) => Promise.resolve(response(path === '/api/tv'
+    ? { ...saved, connection }
+    : path === '/api/tv/power' ? { mac: '02:00:00:00:00:01', canPowerOff: false, canWake: false,
+      operation: { id: '00000000-0000-4000-8000-000000000001', action: 'wake', status: 'running', phase: 'connecting', delivery: 'sent', startedAt: 10000, deadlineAt: 70000 } }
+    : { enabled: false, reason: 'UNAVAILABLE' }))));
+  render(<TvSetup csrfToken={csrfToken} onCloseSettings={vi.fn()} onSessionExpired={vi.fn()} settingsOpen={false} />);
+  await act(async () => {});
+  expect(screen.queryByText('Телевизор недоступен. Подключитесь снова.')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Вверх' }).hasAttribute('disabled')).toBe(true);
+});
+test('shutdown does not announce remote unavailability before the connection snapshot catches up', async () => {
+  vi.useFakeTimers();
+  const pendingStatus = barrier<Response>();
+  let statusReads = 0;
+  vi.stubGlobal('fetch', vi.fn((path: string) => {
+    if (path === '/api/tv') return ++statusReads === 1
+      ? Promise.resolve(response({ ...saved, connection: 'available' })) : pendingStatus.promise;
+    if (path === '/api/tv/power') return Promise.resolve(response({
+      mac: '02:00:00:00:00:01', canPowerOff: false, canWake: false,
+      operation: { id: '00000000-0000-4000-8000-000000000001', action: 'power_off', status: 'running', phase: 'connecting', delivery: 'sent', startedAt: 10000, deadlineAt: 70000 },
+    }));
+    return Promise.resolve(response({ enabled: false, reason: 'UNAVAILABLE' }));
+  }));
+  render(<TvSetup csrfToken={csrfToken} onCloseSettings={vi.fn()} onSessionExpired={vi.fn()} settingsOpen={false} />);
+  await act(async () => {});
+  expect(screen.getByRole('status', { name: 'Соединение с телевизором' }).textContent).toBe('Выключение');
+  expect(screen.queryByText('Телевизор недоступен. Подключитесь снова.')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Вверх' }).hasAttribute('disabled')).toBe(true);
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(screen.queryByText('Телевизор недоступен. Подключитесь снова.')).toBeNull();
+  await act(async () => { pendingStatus.resolve(response(saved)); });
+  expect(screen.queryByText('Телевизор недоступен. Подключитесь снова.')).toBeNull();
+});
 test.each([false, true])('shutdown completion ignores a late stale connection response with an intervening failed power read: %s', async (failedRead) => {
   vi.useFakeTimers();
   const staleStatus = barrier<Response>();

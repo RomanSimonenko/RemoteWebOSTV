@@ -60,6 +60,7 @@ export async function createApiRuntime(config: AppConfig, options: {
       onVersionDiagnostic: logVersionDiagnostic,
       createAdapter: options.createAdapter ?? ((host, keyStore, requestTimeoutMs, allowPairingPrompt) => new Lgtv2Adapter({
         host, keyStore, requestTimeoutMs, handshakeTimeoutMs: requestTimeoutMs, allowPairingPrompt, now: () => new Date(now()),
+        ...(config.wolBroadcastAddress === undefined ? {} : { wolBroadcastAddress: config.wolBroadcastAddress }),
       })),
     });
     await tv.initialize();
