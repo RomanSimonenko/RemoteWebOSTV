@@ -177,6 +177,7 @@ test('revoked saved key requires explicit repair and reload never starts another
   await tv.replaceTv({ kind: 'deferred-pairing', gate: permission.promise });
   try {
     await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+    await page.getByRole('dialog', { name: 'Настройки телевизора', exact: true }).locator('.settings-advanced summary').click();
     await page.getByRole('button', { name: 'Повторить сопряжение', exact: true }).click();
     await tv.tv.waitForRequestCount(1);
     await expect(page.getByRole('dialog', { name: 'Настройки телевизора', exact: true }).getByText('Подтвердите доступ на экране телевизора.')).toBeVisible();
