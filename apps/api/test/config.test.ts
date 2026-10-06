@@ -10,6 +10,13 @@ const validEnv = {
 };
 
 describe('API configuration', () => {
+  test('loads an explicit IPv4 WOL destination without changing the default', () => {
+    expect(loadConfig(validEnv).wolBroadcastAddress).toBeUndefined();
+    expect(loadConfig({ ...validEnv, REMOTE_WEBOS_WOL_BROADCAST_ADDRESS: '192.0.2.255' }).wolBroadcastAddress).toBe('192.0.2.255');
+  });
+  test.each(['', ' ', 'invalid', '::1', '192.0.2.999', '192.0.2.255:9'])('rejects invalid WOL IPv4 destination %j', (value) => {
+    expect(() => loadConfig({ ...validEnv, REMOTE_WEBOS_WOL_BROADCAST_ADDRESS: value })).toThrow(/REMOTE_WEBOS_WOL_BROADCAST_ADDRESS/);
+  });
   test.each(['0', '999', '300001', '1.5', '-1', 'abc', '', '1000ms'])('rejects invalid recovery budget %j', (value) => {
     expect(() => loadConfig({ ...validEnv, REMOTE_WEBOS_RECOVERY_TIMEOUT_MS: value })).toThrow(/REMOTE_WEBOS_RECOVERY_TIMEOUT_MS/);
   });

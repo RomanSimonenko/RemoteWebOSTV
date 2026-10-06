@@ -1,0 +1,22 @@
+services:
+  app:
+    build: .
+    init: true
+    ports:
+      - "127.0.0.1:${REMOTE_WEBOS_HTTP_PORT:-8080}:8080"
+    environment:
+      REMOTE_WEBOS_DATA_DIR: /data
+      REMOTE_WEBOS_HOST: 0.0.0.0
+      REMOTE_WEBOS_PORT: "8080"
+      REMOTE_WEBOS_PUBLIC_ORIGIN: "http://127.0.0.1:${REMOTE_WEBOS_HTTP_PORT:-8080}"
+      REMOTE_WEBOS_SECURE_COOKIES: "false"
+      REMOTE_WEBOS_WOL_BROADCAST_ADDRESS: "${REMOTE_WEBOS_WOL_BROADCAST_ADDRESS:-255.255.255.255}"
+    volumes:
+      - app-data:/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stop_grace_period: 30s
+volumes:
+  app-data:

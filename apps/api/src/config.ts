@@ -9,6 +9,7 @@ export interface AppConfig {
   readonly secureCookies: boolean;
   readonly trustedProxy: readonly string[];
   readonly recoveryTimeoutMs?: number;
+  readonly wolBroadcastAddress?: string;
 }
 
 export class AppConfigError extends Error {
@@ -41,6 +42,10 @@ function parseTrustedProxy(value: string | undefined): string[] {
 }
 
 export function loadConfig(env: Environment): AppConfig {
+  const wolBroadcastAddress = env.REMOTE_WEBOS_WOL_BROADCAST_ADDRESS;
+  if (wolBroadcastAddress !== undefined && isIP(wolBroadcastAddress) !== 4) {
+    throw new AppConfigError('REMOTE_WEBOS_WOL_BROADCAST_ADDRESS must be an IPv4 address');
+  }
   const recoveryValue = env.REMOTE_WEBOS_RECOVERY_TIMEOUT_MS;
   if (recoveryValue !== undefined && (!/^\d+$/.test(recoveryValue) || Number(recoveryValue) < 1_000 || Number(recoveryValue) > 300_000)) {
     throw new AppConfigError('REMOTE_WEBOS_RECOVERY_TIMEOUT_MS must be an integer from 1000 to 300000');
@@ -80,5 +85,6 @@ export function loadConfig(env: Environment): AppConfig {
     secureCookies: secureCookiesValue === undefined ? parsedOrigin.protocol === 'https:' : secureCookiesValue === 'true',
     trustedProxy: parseTrustedProxy(env.REMOTE_WEBOS_TRUSTED_PROXY),
     recoveryTimeoutMs: recoveryValue === undefined ? 60_000 : Number(recoveryValue),
+    ...(wolBroadcastAddress === undefined ? {} : { wolBroadcastAddress }),
   };
 }
