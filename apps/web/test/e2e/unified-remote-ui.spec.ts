@@ -8,6 +8,44 @@ const longError = 'Синтетическая ошибка соединения:
 const remote = (page: Page) => page.getByRole('group', { name: 'Пульт', exact: true });
 const settings = (page: Page) => page.getByRole('dialog', { name: 'Настройки телевизора', exact: true });
 
+for (const width of [320, 1280]) test(`logout requires confirmation, cancels safely and sends one authenticated logout at ${width}px`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 800 });
+  const { mutations } = await fixture(page);
+  const opener = page.locator('.app-header').getByRole('button', { name: 'Выйти', exact: true });
+  const confirmation = page.getByRole('dialog', { name: 'Выйти из приложения?', exact: true });
+  await page.locator('.keyboard-help summary').click();
+  await opener.click();
+  await expect(confirmation).toBeVisible();
+  await expect(page.locator('#remote-help')).not.toBeVisible();
+  await expect(confirmation.getByRole('button', { name: 'Отмена' })).toBeFocused();
+  const anchor = (await opener.boundingBox())!;
+  const popup = (await confirmation.boundingBox())!;
+  expect(popup.y).toBeGreaterThanOrEqual(anchor.y + anchor.height);
+  expect(popup.x).toBeGreaterThanOrEqual(0);
+  expect(popup.x + popup.width).toBeLessThanOrEqual(width);
+  for (let index = 0; index < 12; index++) {
+    await page.keyboard.press(index < 6 ? 'Tab' : 'Shift+Tab');
+    expect(await confirmation.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+  }
+  await page.keyboard.press('ArrowUp');
+  expect(mutations).toEqual([]);
+  await page.screenshot({ path: test.info().outputPath('logout-confirmation.png') });
+  await page.keyboard.press('Escape');
+  await expect(confirmation).not.toBeVisible();
+  await expect(opener).toBeFocused();
+  await opener.click();
+  await confirmation.getByRole('button', { name: 'Отмена' }).click();
+  await expect(confirmation).not.toBeVisible();
+  await opener.click();
+  await page.mouse.click(4, 400);
+  await expect(confirmation).not.toBeVisible();
+  expect(mutations).toEqual([]);
+  await opener.click();
+  await confirmation.getByRole('button', { name: 'Выйти', exact: true }).click();
+  await expect(page.getByRole('alert')).toBeVisible();
+  expect(mutations).toEqual([{ path: '/api/auth/logout', data: null }]);
+});
+
 // Only HTTP is replaced: built React, native dialog, focus and layout run in Chromium.
 // Full API/SQLite/adapter contracts remain covered by the existing TV fixture specs.
 async function fixture(page: Page, mode = 'idle') {

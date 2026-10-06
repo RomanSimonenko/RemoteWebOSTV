@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { TvSetup } from './TvSetup.js';
 import { IconInfoCircle, IconSettings } from '@tabler/icons-react';
+import { LogoutConfirmation } from '../components/LogoutConfirmation.js';
 
 interface Props { username: string; csrfToken: string; tvActive: boolean; busy: boolean; error: ReactNode; onLogout(): void; onSessionExpired(): void }
 export function Home({ username, csrfToken, tvActive, busy, error, onLogout, onSessionExpired }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [confirmingLogout, setConfirmingLogout] = useState(false);
   const [confirmingPower, setConfirmingPower] = useState(false);
   const [identityTarget, setIdentityTarget] = useState<HTMLDivElement | null>(null);
   const settingsButton = useRef<HTMLButtonElement>(null);
+  const logoutButton = useRef<HTMLButtonElement>(null);
   const help = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
     function dismissHelp(event: PointerEvent) {
@@ -16,7 +19,7 @@ export function Home({ username, csrfToken, tvActive, busy, error, onLogout, onS
     document.addEventListener('pointerdown', dismissHelp);
     return () => document.removeEventListener('pointerdown', dismissHelp);
   }, []);
-  useEffect(() => { if ((settingsOpen || confirmingPower) && help.current) help.current.open = false; }, [settingsOpen, confirmingPower]);
+  useEffect(() => { if ((settingsOpen || confirmingPower || confirmingLogout) && help.current) help.current.open = false; }, [settingsOpen, confirmingPower, confirmingLogout]);
   useEffect(() => { if (!tvActive) { setSettingsOpen(false); setConfirmingPower(false); } }, [tvActive]);
   return <section>
     <header className="app-header">
@@ -35,9 +38,10 @@ export function Home({ username, csrfToken, tvActive, busy, error, onLogout, onS
           </dl>
         </div></details>
         <button ref={settingsButton} type="button" aria-label="Настройки" title="Настройки" aria-haspopup="dialog" disabled={!tvActive || confirmingPower} onClick={() => { settingsButton.current?.focus(); setSettingsOpen(true); }}><IconSettings aria-hidden="true" /></button>
-        <button type="button" disabled={busy} onClick={onLogout}>{busy ? 'Выход…' : 'Выйти'}</button>
+        <button ref={logoutButton} type="button" aria-haspopup="dialog" disabled={busy || confirmingPower} onClick={() => { setSettingsOpen(false); setConfirmingLogout(true); }}>{busy ? 'Выход…' : 'Выйти'}</button>
       </div>
     </header>
+    <LogoutConfirmation open={confirmingLogout && !busy} anchor={logoutButton} onClose={() => setConfirmingLogout(false)} onConfirm={() => { setConfirmingLogout(false); onLogout(); }} />
     {tvActive && <TvSetup username={username} csrfToken={csrfToken} identityTarget={identityTarget} settingsOpen={settingsOpen} onCloseSettings={() => setSettingsOpen(false)} onConfirmationChange={setConfirmingPower} onSessionExpired={onSessionExpired} />}
     {error}
   </section>;

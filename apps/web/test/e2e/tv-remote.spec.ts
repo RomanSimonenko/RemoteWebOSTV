@@ -65,6 +65,7 @@ test('all ten browser controls reach the pointer once; saved TV remains usable a
   await page.reload();
   await ready(page);
   await page.getByRole('button', { name: 'Выйти', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Выйти из приложения?' }).getByRole('button', { name: 'Выйти', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Вход', exact: true })).toBeVisible();
   expect((await page.context().request.get(`${tv.origin}/api/tv/remote`)).status()).toBe(401);
   expect((await page.context().request.post(`${tv.origin}/api/tv/commands`, {

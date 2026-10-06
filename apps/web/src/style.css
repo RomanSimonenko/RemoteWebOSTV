@@ -70,6 +70,8 @@ svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width:
 .power-confirm-details summary { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .power-confirm-details summary svg { width: 15px; height: 15px; }
 .power-confirm-details p { margin: 10px 0 0; }
+.logout-confirmation { position: fixed; left: auto; bottom: auto; margin: 0; width: min(280px, calc(100vw - 32px)); padding: 18px; border: 1px solid #34454f; border-radius: 20px; background: #1a272f; color: #f1f5f8; box-shadow: 0 16px 40px #0006; }
+.logout-confirmation::backdrop { background: #0003; }
 .remote { margin: 0; }
 .remote-buttons { display: grid; gap: 6px; width: 156px; margin-left: auto; margin-right: auto; }
 .remote-buttons button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 10px 4px; min-width: 0; }

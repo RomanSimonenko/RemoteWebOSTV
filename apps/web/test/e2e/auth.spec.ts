@@ -106,6 +106,7 @@ test('CLI token claims one owner and browser session survives reload until logou
   expect((await page.context().request.get(`${origin}/api/auth/session`)).status()).toBe(200);
 
   await page.getByRole('button', { name: 'Выйти' }).click();
+  await page.getByRole('dialog', { name: 'Выйти из приложения?' }).getByRole('button', { name: 'Выйти', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Вход' })).toBeVisible();
   expect((await page.context().request.get(`${origin}/api/auth/session`)).status()).toBe(401);
   expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
