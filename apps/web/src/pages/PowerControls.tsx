@@ -1,23 +1,23 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { IconInfoCircle, IconPower } from '@tabler/icons-react';
+import { IconInfoCircle, IconPower, IconX } from '@tabler/icons-react';
 import type { TvPowerOperation, TvPowerState } from '@remote-webos-tv/contracts';
 import { useTvPower } from '../useTvPower.js';
 
-interface Props { csrfToken: string; active: boolean; onSessionExpired(): void; onStateChange?(state: TvPowerState | null): void; onBusyChange?(busy: boolean): void; settingsTarget?: HTMLElement | null; activityTarget?: HTMLElement | null; settingsOpen?: boolean; onConfirmationChange?(confirming: boolean): void }
+interface Props { csrfToken: string; active: boolean; onSessionExpired(): void; onStateChange?(state: TvPowerState | null): void; onBusyChange?(busy: boolean): void; settingsTarget?: HTMLElement | null; activityTarget?: HTMLElement | null; settingsOpen?: boolean; onConfirmationChange?(confirming: boolean): void; quietOffline?: boolean }
 
 function progress(operation: TvPowerOperation): string {
-  if (operation.action === 'recover') return operation.status === 'succeeded' ? 'Соединение с телевизором восстановлено' : 'Восстанавливаем соединение с телевизором';
+  if (operation.action === 'recover') return '';
   if (operation.action === 'wake') {
-    if (operation.status === 'succeeded') return 'Соединение с телевизором восстановлено';
-    if (operation.delivery === 'sent') return 'Сигнал включения отправлен. Ожидаем телевизор';
+    if (operation.status === 'succeeded') return '';
+    if (operation.delivery === 'sent') return '';
     if (operation.delivery === 'unknown') return 'Результат отправки неизвестен. Ожидаем обновления статуса';
-    return 'Отправляем сигнал включения…';
+    return '';
   }
   if (operation.status === 'succeeded') return 'Команда выключения отправлена. Соединение с телевизором потеряно; фактическое выключение не подтверждено.';
-  if (operation.delivery === 'sent') return 'Команда выключения отправлена. Ожидаем потерю соединения';
+  if (operation.delivery === 'sent') return '';
   if (operation.delivery === 'unknown') return 'Выключение не подтверждено. Результат отправки неизвестен';
-  return 'Отправляем команду выключения…';
+  return '';
 }
 
 function terminalError(operation: TvPowerOperation | null | undefined): string {
@@ -34,15 +34,29 @@ function terminalError(operation: TvPowerOperation | null | undefined): string {
   return operation.delivery === 'unknown' ? `Результат отправки неизвестен. ${detail}` : detail;
 }
 
-export function PowerControls({ csrfToken, active, onSessionExpired, onStateChange, onBusyChange, settingsTarget, activityTarget, settingsOpen = false, onConfirmationChange }: Props) {
+export function PowerControls({ csrfToken, active, onSessionExpired, onStateChange, onBusyChange, settingsTarget, activityTarget, settingsOpen = false, onConfirmationChange, quietOffline = false }: Props) {
   const networkHelpId = useId();
   const { state, loading, error, message, busy, refresh, start, saveMac, cancel } = useTvPower(active, csrfToken, onSessionExpired);
   const [mac, setMac] = useState('');
   const [confirming, setConfirming] = useState(false);
-  const [now, setNow] = useState(Date.now);
   const alert = useRef<HTMLParagraphElement>(null);
   const confirmation = useRef<HTMLButtonElement>(null);
   const powerButton = useRef<HTMLButtonElement>(null);
+  const confirmationPanel = useRef<HTMLDivElement>(null);
+  function dismissConfirmation() { setConfirming(false); powerButton.current?.focus(); }
+  useEffect(() => {
+    if (!confirming) return;
+    function outside(event: MouseEvent) {
+      if (event.target instanceof Node && !confirmationPanel.current?.contains(event.target) && !powerButton.current?.contains(event.target)) dismissConfirmation();
+    }
+    function escape(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return;
+      event.preventDefault(); event.stopPropagation(); dismissConfirmation();
+    }
+    document.addEventListener('click', outside);
+    document.addEventListener('keydown', escape, true);
+    return () => { document.removeEventListener('click', outside); document.removeEventListener('keydown', escape, true); };
+  }, [confirming]);
   const operation = state?.operation;
   const running = operation?.status === 'running';
   const activityBusy = active && (busy || loading || !!state?.busy || running);
@@ -61,11 +75,6 @@ export function PowerControls({ csrfToken, active, onSessionExpired, onStateChan
   useEffect(() => { if (confirming) confirmation.current?.focus(); }, [confirming]);
   // Modal transitions do not refocus an existing background diagnostic.
   useEffect(() => { if (diagnostic && !settingsOpen) alert.current?.focus({ preventScroll: true }); }, [diagnostic]);
-  useEffect(() => {
-    if (!active || !running) return;
-    setNow(Date.now()); const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [active, running, operation?.id]);
 
   if (!active) return null;
   const unavailable = !state?.mac ? 'Для включения сохраните MAC-адрес телевизора в настройках.' : 'Питание сейчас недоступно. Обновите статус.';
@@ -75,7 +84,6 @@ export function PowerControls({ csrfToken, active, onSessionExpired, onStateChan
     <p role="status" aria-label="Питание телевизора" aria-live="polite">{error ? 'Статус питания неизвестен' : operation && (running || operation.status === 'succeeded') ? progress(operation) : !activityBusy && !powerAction && !diagnostic ? unavailable : ''}</p>
     {diagnostic && <p ref={withFocusRef ? alert : undefined} tabIndex={-1} role="alert" className="error">{diagnostic}</p>}
     {running && <div>
-      <p>Осталось: {Math.max(0, Math.ceil((operation.deadlineAt - now) / 1000))} с</p>
       {operation.action !== 'recover' && <button type="button" disabled={busy} onClick={() => cancel(operation.id)}>Отменить ожидание</button>}
     </div>}
   </>;
@@ -94,17 +102,18 @@ export function PowerControls({ csrfToken, active, onSessionExpired, onStateChan
     </form>
     <button type="button" disabled={loading} onClick={refresh}>Обновить статус питания</button>
   </section>;
-  const backgroundActivity = <div className={settingsOpen ? 'reserved-activity' : undefined} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{activity(true)}</div>;
-  const powerConfirmation = confirming && <div className="power-confirmation" role="dialog" aria-label="Выключить телевизор?" aria-describedby="power-confirm-help">
-    <p id="power-confirm-help">Выключить телевизор? Потеря соединения не подтверждает фактическое выключение.</p>
-    <button ref={confirmation} type="button" disabled={powerDisabled} onClick={() => { setConfirming(false); start('power_off'); }}>Подтвердить выключение</button>
-    <button type="button" onClick={() => { setConfirming(false); powerButton.current?.focus(); }}>Не выключать</button>
+  const quietRecovery = quietOffline && !message && !error && !conflicting && (!operation || (operation.action === 'recover' && (!operation.error || ['RECOVERY_TIMEOUT', 'CONNECTION_LOST', 'TV_UNAVAILABLE'].includes(operation.error.code))));
+  const backgroundActivity = <div className={settingsOpen ? 'reserved-activity' : undefined} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{!quietRecovery && activity(true)}</div>;
+  const powerConfirmation = confirming && <div ref={confirmationPanel} className="power-confirmation" role="dialog" aria-label="Выключить телевизор?">
+    <div className="power-confirm-heading"><IconPower aria-hidden="true" /><h3>Выключить ТВ?</h3><button className="power-confirm-close" type="button" aria-label="Закрыть подтверждение" onClick={dismissConfirmation}><IconX aria-hidden="true" /></button></div>
+    <div className="power-confirm-actions"><button ref={confirmation} type="button" onClick={dismissConfirmation}>Отмена</button><button className="power-confirm-submit" type="button" disabled={powerDisabled} onClick={() => { setConfirming(false); start('power_off'); }}>Выключить</button></div>
+    <details className="power-confirm-details"><summary><IconInfoCircle aria-hidden="true" />О статусе питания</summary><p>Потеря соединения не подтверждает фактическое выключение телевизора.</p></details>
   </div>;
   return <div className="power-controls" role="group" aria-label="Питание телевизора" aria-busy={busy}>
     <h2 className="visually-hidden">Питание телевизора</h2>
     {activityTarget ? createPortal(backgroundActivity, activityTarget) : backgroundActivity}
     <button className="power-button" ref={powerButton} type="button" aria-label={powerAction === 'power_off' ? 'Выключить ТВ' : powerAction === 'wake' ? 'Включить ТВ' : 'Питание ТВ'} title={powerAction === 'power_off' ? 'Выключить ТВ' : powerAction === 'wake' ? 'Включить ТВ' : 'Питание ТВ'} disabled={powerDisabled} onClick={() => { if (powerDisabled) return; if (powerAction === 'power_off') setConfirming(true); else if (powerAction === 'wake') start('wake'); }}><IconPower aria-hidden="true" /></button>
-    {activityTarget ? createPortal(powerConfirmation, activityTarget) : powerConfirmation}
+    {powerConfirmation}
     {settingsTarget ? createPortal(settings, settingsTarget) : settings}
   </div>;
 }

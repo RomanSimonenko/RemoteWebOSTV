@@ -17,6 +17,7 @@ export function TvSetup({ username, csrfToken, onSessionExpired, settingsOpen, o
   const { status, statusReadVersion, getReadVersion, loading, refreshing, error, refresh } = useTvStatus(onSessionExpired);
   const [host, setHost] = useState('');
   const [message, setMessage] = useState('');
+  const [manualOperationId, setManualOperationId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [powerState, setPowerState] = useState<TvPowerState | null>(null);
   const [powerBusy, setPowerBusy] = useState(false);
@@ -51,6 +52,10 @@ export function TvSetup({ username, csrfToken, onSessionExpired, settingsOpen, o
   }, [activityBusy]);
   const progress = running ? (operation.action === 'pair' || operation.action === 'repair' ? 'Сопряжение' : 'Подключение') : null;
   const diagnostic = message || error || status?.error?.message || operation?.error?.message || '';
+  const quietOffline = status?.connection === 'unavailable';
+  const connectionFailure = status?.error ?? operation?.error;
+  const routineConnectionFailure = ['CONNECTION_LOST', 'RECOVERY_TIMEOUT', 'TV_UNAVAILABLE'].includes(connectionFailure?.code ?? '');
+  const backgroundDiagnostic = quietOffline && routineConnectionFailure && !message && !error && operation?.id !== manualOperationId ? '' : diagnostic;
 
   useEffect(() => {
     if (hasObservedAccepted) setAccepted(null);
@@ -67,7 +72,7 @@ export function TvSetup({ username, csrfToken, onSessionExpired, settingsOpen, o
     return () => clearInterval(timer);
   }, [running, operation?.deadlineAt]);
   // Opening or closing presentation alone must not refocus a historical error.
-  useEffect(() => { if (diagnostic && !settingsOpen) alert.current?.focus({ preventScroll: true }); }, [diagnostic]);
+  useEffect(() => { if (backgroundDiagnostic && !settingsOpen) alert.current?.focus({ preventScroll: true }); }, [backgroundDiagnostic]);
   useEffect(() => { if (settingsOpen && tv) setHost(tv.host); }, [settingsOpen, tv?.host]);
 
   async function mutate(action: (signal: AbortSignal) => Promise<TvOperation>) {
@@ -79,6 +84,7 @@ export function TvSetup({ username, csrfToken, onSessionExpired, settingsOpen, o
       const next = await action(controller.current.signal);
       if (!active.current) return;
       setAccepted({ operation: next, afterReadVersion: getReadVersion() });
+      setManualOperationId(next.id);
       refresh();
     } catch (cause) {
       if (!active.current) return;
@@ -100,7 +106,7 @@ export function TvSetup({ username, csrfToken, onSessionExpired, settingsOpen, o
   // Keep autofocus ownership on the retained background diagnostic, separate
   // from the modal copy that unmounts when settings close.
   const activity = (withFocusRef: boolean) => <>
-    {diagnostic && <p ref={withFocusRef ? alert : undefined} tabIndex={-1} role="alert" className="error">{diagnostic}</p>}
+    {(withFocusRef ? backgroundDiagnostic : diagnostic) && <p ref={withFocusRef ? alert : undefined} tabIndex={-1} role="alert" className="error">{withFocusRef ? backgroundDiagnostic : diagnostic}</p>}
     {running && !powerRunning && <div>
       {(operation.action === 'pair' || operation.action === 'repair') && <p>Подтвердите доступ на экране телевизора.</p>}
       <p>Осталось: {Math.max(0, Math.ceil((operation.deadlineAt - now) / 1000))} с</p>
@@ -122,8 +128,8 @@ export function TvSetup({ username, csrfToken, onSessionExpired, settingsOpen, o
     {!tv && <h1>Телевизор ещё не настроен</h1>}
     {tv && <div className="tv-card">
       <div className="tv-info"><img className="tv-brand" src="/lg-logo.svg" alt="LG" /><p className="tv-model">{tv.identity.model}</p></div>
-      <PowerControls csrfToken={csrfToken} active settingsOpen={settingsOpen} settingsTarget={settingsTarget} activityTarget={powerActivityTarget} {...(onConfirmationChange ? { onConfirmationChange } : {})} onSessionExpired={onSessionExpired} onStateChange={setPowerState} onBusyChange={setPowerBusy} />
-      <Remote csrfToken={csrfToken} active interactionBlocked={settingsOpen} activityTarget={remoteActivityTarget} onSessionExpired={onSessionExpired} onBusyChange={setRemoteBusy} />
+      <PowerControls csrfToken={csrfToken} active quietOffline={quietOffline} settingsOpen={settingsOpen} settingsTarget={settingsTarget} activityTarget={powerActivityTarget} {...(onConfirmationChange ? { onConfirmationChange } : {})} onSessionExpired={onSessionExpired} onStateChange={setPowerState} onBusyChange={setPowerBusy} />
+      <Remote csrfToken={csrfToken} active quietOffline={quietOffline} interactionBlocked={settingsOpen} activityTarget={remoteActivityTarget} onSessionExpired={onSessionExpired} onBusyChange={setRemoteBusy} />
     </div>}
     <div className="tv-activity">
       <div className="connection-row"><p className="connection-status" data-connection={error ? 'unknown' : status?.connection} role="status" aria-label="Соединение с телевизором" aria-live="polite">{connectionText}</p><span className="activity-slot">{activityBusy && showActivity && <span className="activity-spinner" role="img" aria-label="Выполняется запрос" />}</span></div>

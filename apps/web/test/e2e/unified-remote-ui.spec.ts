@@ -164,7 +164,7 @@ for (const width of [320, 1280]) {
     const scrollBefore = await page.evaluate(() => window.scrollY);
     if (source === 'connection') {
       status.connection = 'unavailable';
-      status.error = { code: 'TV_UNAVAILABLE', message: longError };
+      status.error = { code: 'SYNTHETIC_ERROR', message: longError };
     } else {
       power.operation = { id: '11111111-1111-4111-8111-111111111111', action: 'wake', status: 'failed', phase: 'finished', delivery: 'unknown', startedAt: 0, deadlineAt: 60_000, error: { code: 'SYNTHETIC_ERROR', message: longError } };
     }
@@ -290,7 +290,8 @@ for (const width of [320, 1280]) {
       const activity = page.locator('.tv-activity');
       await expect(activity.getByRole('status', { name: 'Соединение с телевизором', exact: true })).toBeVisible();
       if (mode.endsWith('error')) await expect(activity.getByRole('alert')).toContainText(longError);
-      if (mode.endsWith('running')) await expect(activity.getByText(/Осталось:/)).toBeVisible();
+      if (mode === 'connection-running') await expect(activity.getByText(/Осталось:/)).toBeVisible();
+      if (mode === 'power-running') await expect(activity.getByText(/Осталось:/)).toHaveCount(0);
       expect((await activity.boundingBox())!.y).toBeGreaterThanOrEqual((await card.boundingBox())!.y + (await card.boundingBox())!.height);
       await noOverflow(page);
       // Initial diagnostic autofocus can scroll the document. Measure the modal
@@ -449,15 +450,37 @@ test('native settings trap focus, block pointer and TV keys, then restore gear f
 test('power confirmation excludes settings and sends only the explicitly confirmed power POST', async ({ page }) => {
   const { mutations } = await fixture(page);
   const gear = page.getByRole('button', { name: 'Настройки', exact: true });
+  const power = page.getByRole('button', { name: 'Выключить ТВ', exact: true });
+  const cardBefore = await page.locator('.tv-card').boundingBox();
   await page.getByRole('button', { name: 'Выключить ТВ', exact: true }).click();
+  const popover = page.getByRole('dialog', { name: 'Выключить телевизор?' });
+  const buttonBox = (await power.boundingBox())!;
+  const popoverBox = (await popover.boundingBox())!;
+  expect(popoverBox.y).toBeGreaterThan(buttonBox.y + buttonBox.height);
+  expect(popoverBox.y - buttonBox.y - buttonBox.height).toBeLessThan(32);
+  expect(await page.locator('.tv-card').boundingBox()).toEqual(cardBefore);
+  await page.keyboard.press('Escape');
+  await expect(popover).toHaveCount(0);
+  await expect(power).toBeFocused();
+  await power.click();
+  await page.locator('.remote').focus();
+  await page.keyboard.press('Escape');
+  await expect(popover).toHaveCount(0);
+  expect(mutations).toEqual([]);
+  await power.click();
+  await page.getByLabel('Управление с клавиатуры', { exact: true }).click();
+  await expect(popover).toHaveCount(0);
+  await expect(power).toBeFocused();
+  expect(mutations).toEqual([]);
+  await power.click();
   await expect(gear).toBeDisabled();
-  await page.getByRole('button', { name: 'Не выключать', exact: true }).click();
+  await page.getByRole('button', { name: 'Отмена', exact: true }).click();
   expect(mutations).toEqual([]);
   await expect(gear).toBeEnabled();
   await gear.click();
   await expect(page.getByRole('button', { name: 'Выключить ТВ', exact: true })).toBeDisabled();
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Выключить ТВ', exact: true }).click();
-  await page.getByRole('button', { name: 'Подтвердить выключение', exact: true }).click();
+  await page.getByRole('button', { name: 'Выключить', exact: true }).click();
   await expect.poll(() => mutations).toEqual([{ path: '/api/tv/power', data: { id: expect.any(String), action: 'power_off', confirm: true } }]);
 });

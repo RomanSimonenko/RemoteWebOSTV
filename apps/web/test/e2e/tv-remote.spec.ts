@@ -219,7 +219,7 @@ test('offline remote disables commands and reconnect never replays offline input
   await tv.makeTvUnavailable();
   await tv.expireUnavailableRecovery(page);
   await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Нет соединения');
-  await expect(page.locator('.remote-activity').getByText('Телевизор недоступен. Подключитесь снова.', { exact: true })).toBeVisible();
+  await expect(page.locator('.tv-activity')).toHaveText('Нет соединения');
   for (const [label] of mappings) await expect(remote(page).getByRole('button', { name: label, exact: true })).toBeDisabled();
   await remote(page).focus();
   await page.keyboard.press('ArrowUp');

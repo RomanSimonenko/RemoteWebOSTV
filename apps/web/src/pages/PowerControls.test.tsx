@@ -3,6 +3,26 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { PowerControls } from './PowerControls.js';
 
 const csrfToken = 'c'.repeat(43);
+test.each(['Escape', 'outside Escape', 'outside', 'close'])('confirmation %s dismisses without a command and returns focus', async (method) => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(off)));
+  await mount();
+  fireEvent.click(powerButton());
+  const dialog = screen.getByRole('dialog', { name: 'Выключить телевизор?' });
+  expect(dialog.closest('.power-controls')).not.toBeNull();
+  if (method === 'Escape') fireEvent.keyDown(dialog, { key: 'Escape' });
+  else if (method === 'outside Escape') fireEvent.keyDown(document.body, { key: 'Escape' });
+  else if (method === 'outside') fireEvent.click(document.body);
+  else fireEvent.click(screen.getByRole('button', { name: 'Закрыть подтверждение' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(document.activeElement).toBe(powerButton());
+  expect(screen.queryByText('Отправляем команду выключения…')).toBeNull();
+});
+test('offline presentation retains nonroutine recovery failures', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ ...wake, operation: { ...operation, action: 'recover', status: 'failed', phase: 'finished', error: { code: 'CLEANUP_FAILED', message: 'Cleanup failed.' } } })));
+  render(<PowerControls csrfToken={csrfToken} active quietOffline onSessionExpired={vi.fn()} />);
+  await act(async () => {});
+  expect(screen.getByRole('alert').textContent).toBe('Cleanup failed.');
+});
 const id = '00000000-0000-4000-8000-000000000001';
 const off = { mac: null, canPowerOff: true, canWake: false, operation: null };
 const wake = { mac: '02:00:00:00:00:01', canPowerOff: false, canWake: true, operation: null };
@@ -50,7 +70,7 @@ test.each([
   ['missing MAC', { ...wake, mac: null }, 'MAC-адрес'],
   ['no permitted action', { ...wake, canWake: false }, 'Питание сейчас недоступно'],
   ['conflicting permissions', { ...wake, canPowerOff: true }, 'противоречивые разрешения'],
-  ['running operation', { ...wake, operation }, 'Отправляем сигнал включения'],
+  ['running operation', { ...wake, operation }, 'Отменить ожидание'],
 ])('the power button blocks %s with a visible reason and no command', async (_reason, state, detail) => {
   const fetch = vi.fn().mockResolvedValue(response(state)); vi.stubGlobal('fetch', fetch); await mount();
   expect(powerButton().disabled).toBe(true); expect(screen.getByRole('group', { name: 'Питание телевизора' }).textContent).toContain(detail);
@@ -90,7 +110,7 @@ test('moving MAC settings between targets keeps one power read and the accepted 
     await act(async () => { pending.resolve(response({ ...operation, id: input.id, delivery: 'sent', phase: 'connecting' }, 202)); });
     view.rerender(<PowerControls csrfToken={csrfToken} active onSessionExpired={onSessionExpired} settingsTarget={null} />);
     expect(within(view.container).getByLabelText('MAC-адрес телевизора')).toBeTruthy();
-    expect(screen.getByRole('status', { name: 'Питание телевизора' }).textContent).toContain('Сигнал включения отправлен');
+    expect(screen.getByRole('status', { name: 'Питание телевизора' }).textContent).toBe('');
     expect(screen.getByRole('button', { name: 'Отменить ожидание' })).toBeTruthy(); expect(fetch).toHaveBeenCalledTimes(2); expect(signal.aborted).toBe(false);
   } finally { view.unmount(); first.remove(); second.remove(); }
 });
@@ -128,7 +148,7 @@ test('cancelling explicit power-off confirmation sends no mutation', async () =>
   const fetch = vi.fn().mockResolvedValue(response(off)); vi.stubGlobal('fetch', fetch); await mount();
   fireEvent.click(screen.getByRole('button', { name: 'Выключить ТВ' }));
   expect(screen.getByRole('dialog', { name: 'Выключить телевизор?' })).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: 'Не выключать' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Отмена' }));
   expect(screen.queryByRole('dialog')).toBeNull(); expect(fetch).toHaveBeenCalledTimes(1);
 });
 
@@ -137,7 +157,7 @@ test('two rapid confirmations dispatch exactly one protected operation with an H
   const fetch = vi.fn().mockResolvedValueOnce(response(off)).mockReturnValueOnce(pending.promise); vi.stubGlobal('fetch', fetch);
   vi.spyOn(crypto, 'randomUUID').mockImplementation(() => { throw new Error('Unavailable on HTTP'); }); await mount();
   fireEvent.click(screen.getByRole('button', { name: 'Выключить ТВ' }));
-  const confirm = screen.getByRole('button', { name: 'Подтвердить выключение' }); fireEvent.click(confirm); fireEvent.click(confirm);
+  const confirm = screen.getByRole('button', { name: 'Выключить' }); fireEvent.click(confirm); fireEvent.click(confirm);
   expect(fetch).toHaveBeenCalledTimes(2);
   const [url, init] = fetch.mock.calls[1]!;
   expect(url).toBe('/api/tv/power'); expect(init).toMatchObject({ method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken } });
@@ -166,7 +186,8 @@ test.each([
   ['sent', 'Сигнал включения отправлен. Ожидаем телевизор'],
 ])('running wake delivery %s does not claim Connected', async (delivery, text) => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ ...wake, canWake: false, operation: { ...operation, delivery } }))); await mount();
-  expect(screen.getByRole('status', { name: 'Питание телевизора' }).textContent).toContain(text);
+  if (delivery === 'unknown') expect(screen.getByRole('status', { name: 'Питание телевизора' }).textContent).toContain(text);
+  else expect(screen.getByRole('status', { name: 'Питание телевизора' }).textContent).toBe('');
   expect(screen.queryByText('Подключён')).toBeNull();
 });
 
@@ -184,7 +205,7 @@ test('reload restores deadline and cancellation without starting or replaying wa
   vi.useFakeTimers(); vi.setSystemTime(65000);
   const fetch = vi.fn().mockResolvedValueOnce(response({ ...wake, canWake: false, operation }))
     .mockResolvedValueOnce(response({ ...operation, status: 'cancelled', phase: 'finished', error: { code: 'CANCELLED', message: 'Операция отменена.' } })); vi.stubGlobal('fetch', fetch); await mount();
-  expect(screen.getByText('Осталось: 5 с')).toBeTruthy(); expect(fetch).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText(/Осталось:/)).toBeNull(); expect(fetch).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole('button', { name: 'Отменить ожидание' })); await act(async () => {});
   expect(fetch.mock.calls[1]?.[0]).toBe(`/api/tv/power/${id}/cancel`); expect(screen.getByRole('alert').textContent).toContain('Операция отменена');
 });
@@ -200,15 +221,22 @@ test.each(['network', 'malformed', 'wrong-id', 'wrong-action'])('an uncertain %s
   expect(screen.getByRole('alert').textContent).toContain('Результат операции неизвестен');
   await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
   expect(fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
-  expect(screen.getByRole('status', { name: 'Питание телевизора' }).textContent).toContain('Сигнал включения отправлен');
+  expect(screen.getByRole('status', { name: 'Питание телевизора' }).textContent).toBe('');
 });
 
 test('an accepted deadline reaching zero waits for server completion and never starts another operation', async () => {
   vi.useFakeTimers(); vi.setSystemTime(69000); const pending = barrier<Response>();
   const fetch = vi.fn().mockResolvedValueOnce(response({ ...wake, canWake: false, operation })).mockReturnValueOnce(pending.promise); vi.stubGlobal('fetch', fetch); await mount();
-  await act(async () => { await vi.advanceTimersByTimeAsync(3000); }); expect(screen.getByText('Осталось: 0 с')).toBeTruthy();
+  await act(async () => { await vi.advanceTimersByTimeAsync(3000); }); expect(screen.queryByText(/Осталось:/)).toBeNull();
   expect(powerButton().disabled).toBe(true);
   expect(fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
+});
+
+test.each(['wake', 'recover'])('successful %s leaves connection feedback to the connection badge', async (action) => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ ...off, operation: { ...operation, action, status: 'succeeded', phase: 'finished', delivery: 'sent' } })));
+  await mount();
+  expect(screen.getByRole('status', { name: 'Питание телевизора' }).textContent).toBe('');
+  expect(screen.queryByRole('alert')).toBeNull();
 });
 
 test('power-off acknowledgment with unavailable connection never claims physical power-off', async () => {

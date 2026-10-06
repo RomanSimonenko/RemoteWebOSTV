@@ -5,7 +5,7 @@ import type { BasicTvButton, TvRemoteState, TvCommandResult } from '@remote-webo
 import { api, ApiFailure } from '../api.js';
 import { requestId } from '../requestId.js';
 
-interface Props { csrfToken: string; active: boolean; onSessionExpired(): void; onBusyChange?(busy: boolean): void; interactionBlocked?: boolean; activityTarget?: HTMLElement | null }
+interface Props { csrfToken: string; active: boolean; onSessionExpired(): void; onBusyChange?(busy: boolean): void; interactionBlocked?: boolean; activityTarget?: HTMLElement | null; quietOffline?: boolean }
 interface Runtime { active: boolean; pending: boolean; command: AbortController | null; refresh(): void }
 const unknownMessage = 'Результат команды неизвестен. Автоматический повтор не выполняется';
 const reasons = {
@@ -39,7 +39,7 @@ const keys: Readonly<Record<string, BasicTvButton>> = {
   Escape: 'BACK', Home: 'HOME', '+': 'VOLUME_UP', '-': 'VOLUME_DOWN', m: 'MUTE', M: 'MUTE',
 };
 
-export function Remote({ csrfToken, active, onSessionExpired, onBusyChange, interactionBlocked = false, activityTarget }: Props) {
+export function Remote({ csrfToken, active, onSessionExpired, onBusyChange, interactionBlocked = false, activityTarget, quietOffline = false }: Props) {
   const [state, setState] = useState<TvRemoteState | null>(null);
   const [readError, setReadError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -193,7 +193,7 @@ export function Remote({ csrfToken, active, onSessionExpired, onBusyChange, inte
 
   if (!active) return null;
   const disabled = interactionBlocked || busy || !state?.enabled;
-  const explanation = readError || (state ? state.enabled ? '' : reasons[state.reason] : 'Проверяем доступность пульта…');
+  const explanation = readError || (state ? state.enabled || (quietOffline && state.reason === 'UNAVAILABLE') ? '' : reasons[state.reason] : 'Проверяем доступность пульта…');
   const controls = (entries: typeof buttons) => entries.map(([button, label]) => {
     const ButtonIcon = icons[button];
     return <button type="button" key={button} data-command={button} aria-label={label} title={label} className={button === 'ENTER' ? 'ok-button' : undefined} style={{ gridArea: button, touchAction: repeatable.has(button) ? 'none' : undefined }} disabled={disabled && heldButton !== button}
