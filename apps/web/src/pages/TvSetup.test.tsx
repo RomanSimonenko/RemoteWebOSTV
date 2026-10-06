@@ -11,7 +11,7 @@ beforeEach(() => {
 });
 
 const csrfToken = 'c'.repeat(43);
-test('shutdown completion waits for a connection read started after completion, not a late stale response', async () => {
+test.each([false, true])('shutdown completion ignores a late stale connection response with an intervening failed power read: %s', async (failedRead) => {
   vi.useFakeTimers();
   const staleStatus = barrier<Response>();
   let statusReads = 0;
@@ -23,6 +23,7 @@ test('shutdown completion waits for a connection read started after completion, 
     }
     if (path === '/api/tv/power') {
       powerReads++;
+      if (failedRead && powerReads === 2) return Promise.reject(new Error('Synthetic network failure'));
       return Promise.resolve(response({ mac: '02:00:00:00:00:01', canPowerOff: false, canWake: powerReads > 1, operation: { id: '00000000-0000-4000-8000-000000000001', action: 'power_off', status: powerReads === 1 ? 'running' : 'failed', phase: powerReads === 1 ? 'connecting' : 'finished', delivery: 'sent', startedAt: 10000, deadlineAt: 70000, ...(powerReads > 1 ? { error: { code: 'POWER_OFF_UNCONFIRMED', message: 'Synthetic shutdown warning' } } : {}) } }));
     }
     return Promise.resolve(response({ enabled: false, reason: 'BUSY' }));
@@ -32,6 +33,10 @@ test('shutdown completion waits for a connection read started after completion, 
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
   const badge = screen.getByRole('status', { name: 'Соединение с телевизором' });
   expect(badge.textContent).toBe('Выключение');
+  if (failedRead) {
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(badge.textContent).toBe('Выключение');
+  }
   await act(async () => { staleStatus.resolve(response({ ...saved, connection: 'available' })); });
   expect(badge.textContent).toBe('Выключение');
   expect(badge.dataset.connection).not.toBe('available');

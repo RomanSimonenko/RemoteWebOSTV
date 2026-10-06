@@ -19,15 +19,14 @@ export function TvSetup({ username, csrfToken, onSessionExpired, settingsOpen, o
   const [message, setMessage] = useState('');
   const [manualOperationId, setManualOperationId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [powerObservation, setPowerObservation] = useState<{ state: TvPowerState | null; shutdownAfterReadVersion: number | null }>({ state: null, shutdownAfterReadVersion: null });
-  const powerState = powerObservation.state;
+  const [powerObservation, setPowerObservation] = useState<{ lastOperation: TvPowerState['operation']; shutdownAfterReadVersion: number | null }>({ lastOperation: null, shutdownAfterReadVersion: null });
   const observePowerState = useCallback((state: TvPowerState | null) => {
     const readVersion = getReadVersion();
     setPowerObservation((previous) => {
-      const oldOperation = previous.state?.operation;
+      const oldOperation = previous.lastOperation;
       const operation = state?.operation;
       const completedShutdown = oldOperation?.action === 'power_off' && oldOperation.status === 'running' && operation?.id === oldOperation.id && operation.status !== 'running';
-      return { state, shutdownAfterReadVersion: completedShutdown ? readVersion : operation?.action === 'wake' ? null : previous.shutdownAfterReadVersion };
+      return { lastOperation: state ? state.operation : previous.lastOperation, shutdownAfterReadVersion: completedShutdown ? readVersion : operation?.action === 'wake' ? null : previous.shutdownAfterReadVersion };
     });
   }, [getReadVersion]);
   const [powerBusy, setPowerBusy] = useState(false);
@@ -51,11 +50,13 @@ export function TvSetup({ username, csrfToken, onSessionExpired, settingsOpen, o
   const hasObservedAccepted = accepted && status && statusReadVersion > accepted.afterReadVersion;
   const operation = accepted && !hasObservedAccepted ? accepted.operation : observed;
   const running = operation?.status === 'running';
-  const powerRunning = powerState?.operation?.status === 'running';
+  // A failed power read does not establish that an observed operation ended.
+  const observedPowerOperation = powerObservation.lastOperation;
+  const powerRunning = observedPowerOperation?.status === 'running';
   // A connection read already in flight when shutdown completes can still
   // carry "available". Only a subsequently started read ends the transition.
   const awaitingShutdownStatus = powerObservation.shutdownAfterReadVersion !== null && statusReadVersion <= powerObservation.shutdownAfterReadVersion;
-  const poweringOff = (powerRunning && powerState.operation?.action === 'power_off') || awaitingShutdownStatus;
+  const poweringOff = (powerRunning && observedPowerOperation.action === 'power_off') || awaitingShutdownStatus;
   const controlsBusy = busy || powerRunning;
   const activityBusy = refreshing || busy || running || powerBusy || remoteBusy || awaitingShutdownStatus;
   const [showActivity, setShowActivity] = useState(false);

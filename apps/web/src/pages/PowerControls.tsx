@@ -61,10 +61,10 @@ export function PowerControls({ csrfToken, active, onSessionExpired, onStateChan
   const running = operation?.status === 'running';
   const [expiredShutdownWarning, setExpiredShutdownWarning] = useState<string | null>(null);
   useEffect(() => {
-    if (!active || operation?.status !== 'failed' || operation.error?.code !== 'POWER_OFF_UNCONFIRMED') return;
+    if (!active || operation?.status !== 'failed' || operation.delivery !== 'sent' || operation.error?.code !== 'POWER_OFF_UNCONFIRMED') return;
     const timer = setTimeout(() => setExpiredShutdownWarning(operation.id), 5000);
     return () => clearTimeout(timer);
-  }, [active, operation?.id, operation?.status, operation?.error?.code]);
+  }, [active, operation?.id, operation?.status, operation?.delivery, operation?.error?.code]);
   const activityBusy = active && (busy || loading || !!state?.busy || running);
   useEffect(() => { onBusyChange?.(activityBusy); }, [activityBusy, onBusyChange]);
   useEffect(() => () => onBusyChange?.(false), [onBusyChange]);
@@ -73,7 +73,7 @@ export function PowerControls({ csrfToken, active, onSessionExpired, onStateChan
   const disabled = busy || loading || !!error || !state || running;
   const powerDisabled = settingsOpen || disabled || !powerAction;
   const diagnostic = message || error || (conflicting ? 'Сервер вернул противоречивые разрешения питания. Обновите статус.' : terminalError(operation));
-  const backgroundDiagnostic = !message && !error && !conflicting && operation?.error?.code === 'POWER_OFF_UNCONFIRMED' && operation.id === expiredShutdownWarning ? '' : diagnostic;
+  const backgroundDiagnostic = !message && !error && !conflicting && operation?.delivery === 'sent' && operation.error?.code === 'POWER_OFF_UNCONFIRMED' && operation.id === expiredShutdownWarning ? '' : diagnostic;
   useEffect(() => { onStateChange?.(state); }, [state, onStateChange]);
   useEffect(() => { if (state) setMac(state.mac ?? ''); }, [state?.mac, settingsOpen]);
   useEffect(() => { onConfirmationChange?.(confirming); }, [confirming, onConfirmationChange]);

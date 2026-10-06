@@ -3,6 +3,13 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { PowerControls } from './PowerControls.js';
 
 const csrfToken = 'c'.repeat(43);
+test('unknown shutdown delivery does not expire with the unconfirmed warning timer', async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(response({ ...wake, operation: { ...operation, action: 'power_off', status: 'failed', phase: 'finished', delivery: 'unknown', error: { code: 'POWER_OFF_UNCONFIRMED', message: 'Synthetic warning' } } }))));
+  await mount();
+  await act(async () => { await vi.advanceTimersByTimeAsync(7000); });
+  expect(screen.getByRole('alert').textContent).toContain('Результат отправки неизвестен');
+});
 test('unconfirmed shutdown warning expires once despite polling and stays available in settings', async () => {
   vi.useFakeTimers();
   vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(response({ ...wake, operation: { ...operation, action: 'power_off', status: 'failed', phase: 'finished', delivery: 'sent', error: { code: 'POWER_OFF_UNCONFIRMED', message: 'Synthetic warning' } } }))));
