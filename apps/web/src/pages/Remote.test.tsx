@@ -13,6 +13,7 @@ test('saved television exposes the browser remote beside its setup', async () =>
     : { enabled: true, reason: null }), { status: 200 })));
   render(<Home username="alice" csrfToken={'c'.repeat(43)} tvActive busy={false} error={null} onLogout={vi.fn()} onSessionExpired={vi.fn()} />);
   await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: /^Открыть телевизор / })); await act(async () => {});
   expect(screen.getByRole('group', { name: 'Пульт' })).toBeTruthy();
 });
 
@@ -48,6 +49,8 @@ async function mount(command = (input: { id: string; button: string }) => Promis
   });
   vi.stubGlobal('fetch', fetch);
   const view = render(home(true, expired));
+  await act(async () => {});
+  fireEvent.click(screen.getByRole('button', { name: /^Открыть телевизор / }));
   await act(async () => {});
   return { ...view, fetch, commands: () => fetch.mock.calls.filter(([path]) => path === '/api/tv/commands'), reads: () => fetch.mock.calls.filter(([path]) => path === '/api/tv/remote') };
 }
@@ -441,6 +444,7 @@ test('App logout removes pending remote, then a late unauthorized command cannot
     }
   });
   vi.stubGlobal('fetch', fetch); render(<App />); await act(async () => {});
+  fireEvent.click(screen.getByRole('button', { name: /^Открыть телевизор / })); await act(async () => {});
   fireEvent.click(screen.getByRole('button', { name: 'OK' })); const command = fetch.mock.calls.find(([path]) => path === '/api/tv/commands')!;
   fireEvent.click(screen.getByRole('button', { name: 'Выйти' }));
   expect((command[1]!.signal as AbortSignal).aborted).toBe(false);
@@ -450,6 +454,7 @@ test('App logout removes pending remote, then a late unauthorized command cannot
   fireEvent.change(screen.getByLabelText('Имя владельца'), { target: { value: 'alice' } });
   fireEvent.change(screen.getByLabelText('Пароль'), { target: { value: 'correct horse battery staple' } });
   fireEvent.submit(screen.getByRole('button', { name: 'Войти' }).closest('form')!); await act(async () => {});
+  fireEvent.click(screen.getByRole('button', { name: /^Открыть телевизор / })); await act(async () => {});
   await act(async () => { pending.resolve(response({ code: 'UNAUTHORIZED', message: 'Unauthorized', requestId: 'synthetic' }, 401)); });
   expect(screen.getByRole('group', { name: 'Пульт' })).toBeTruthy(); expect(screen.queryByRole('heading', { name: 'Вход' })).toBeNull();
   expect(screen.queryByText('Сессия истекла. Войдите снова.')).toBeNull();

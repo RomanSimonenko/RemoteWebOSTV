@@ -1,21 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { startTvOperationSchema, type StartTvOperation, type TvConnectionState, type TvOperation, type SavedTvView, type TvPowerState } from '@remote-webos-tv/contracts';
+import { startTvOperationSchema, type StartTvOperation, type TvOperation, type SavedTvView, type TvPowerState } from '@remote-webos-tv/contracts';
 import { api, ApiFailure, friendlyError } from '../api.js';
 import { useTvStatus } from '../useTvStatus.js';
 import { Remote } from './Remote.js';
 import { PowerControls } from './PowerControls.js';
 import { SettingsDialog } from '../components/SettingsDialog.js';
+import { connectionLabels } from '../tv-connection.js';
 
-interface Props { username?: string; csrfToken: string; identityTarget?: HTMLElement | null; onSessionExpired(): void; settingsOpen: boolean; onCloseSettings(): void; onConfirmationChange?(confirming: boolean): void }
-const connections: Record<TvConnectionState, string> = {
-  unconfigured: 'Введите IP-адрес телевизора', pairing: 'Сопряжение', connecting: 'Подключение',
-  available: 'Подключён', unavailable: 'Нет соединения', reconnecting: 'Подключение',
-  authorization_error: 'Ошибка авторизации', compatibility_error: 'Ошибка совместимости',
-};
+interface Props { username?: string; csrfToken: string; identityTarget?: HTMLElement | null; onSessionExpired(): void; settingsOpen: boolean; onCloseSettings(): void; onConfirmationChange?(confirming: boolean): void; statusState?: ReturnType<typeof useTvStatus> }
 
-export function TvSetup({ username, csrfToken, identityTarget, onSessionExpired, settingsOpen, onCloseSettings, onConfirmationChange }: Props) {
-  const { status, statusReadVersion, getReadVersion, loading, refreshing, error, refresh } = useTvStatus(onSessionExpired);
+export function TvSetup(props: Props) {
+  return props.statusState ? <TvSetupContent {...props} statusState={props.statusState} /> : <StandaloneTvSetup {...props} />;
+}
+function StandaloneTvSetup(props: Props) {
+  const statusState = useTvStatus(props.onSessionExpired);
+  return <TvSetupContent {...props} statusState={statusState} />;
+}
+function TvSetupContent({ username, csrfToken, identityTarget, onSessionExpired, settingsOpen, onCloseSettings, onConfirmationChange, statusState }: Props & { statusState: ReturnType<typeof useTvStatus> }) {
+  const { status, statusReadVersion, getReadVersion, loading, refreshing, error, refresh } = statusState;
   const [host, setHost] = useState('');
   const [message, setMessage] = useState('');
   const [manualOperationId, setManualOperationId] = useState<string | null>(null);
@@ -122,7 +125,7 @@ export function TvSetup({ username, csrfToken, identityTarget, onSessionExpired,
     void mutate((signal) => api.startTvOperation(parsed.data, csrfToken, signal));
   }
 
-  const connectionText = error ? 'Статус неизвестен' : poweringOff ? 'Выключение' : progress || (status ? connections[status.connection] : 'Загрузка статуса…');
+  const connectionText = error ? 'Статус неизвестен' : poweringOff ? 'Выключение' : progress || (status ? connectionLabels[status.connection] : 'Загрузка статуса…');
   const connectionAppearance = error ? 'unknown' : poweringOff ? 'connecting' : status?.connection;
   // Keep autofocus ownership on the retained background diagnostic, separate
   // from the modal copy that unmounts when settings close.
@@ -170,11 +173,10 @@ export function TvSetup({ username, csrfToken, identityTarget, onSessionExpired,
     {!tv && <>{addressForm}<button type="button" disabled={loading} onClick={refresh}>Обновить статус</button></>}
     <SettingsDialog open={settingsOpen} onClose={onCloseSettings}>
       {tv ? <><section className="settings-section">
-        {settingsOpen && username && <p className="session-caption">Вы вошли как {username}.</p>}
         <p className="settings-identity"><span className="settings-model">Модель: {tv.identity.model}</span>{settingsOpen && <span className="tv-version">{tv.identity.platformVersion ? `webOS ${tv.identity.platformVersion}` : 'Версия неизвестна'}</span>}</p>
       </section><section className="settings-section"><h3>Подключение</h3>
         {settingsOpen && activity(false)}<p>Соединение: {connectionText}</p><p>Сохранённый IP: {tv.host}</p>{addressForm}
-      </section></> : <>{settingsOpen && username && <p className="session-caption">Вы вошли как {username}.</p>}{settingsOpen && activity(false)}<p>Добавьте телевизор на основном экране.</p></>}
+      </section></> : <>{settingsOpen && activity(false)}<p>Добавьте телевизор на основном экране.</p></>}
       <div ref={setSettingsTarget} />
     </SettingsDialog>
   </section></>;

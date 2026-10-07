@@ -1,9 +1,9 @@
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { IconX } from '@tabler/icons-react';
 
-interface Props { open: boolean; onClose(): void; children: ReactNode }
+interface Props { open: boolean; onClose(): void; children: ReactNode; title?: string }
 
-export function SettingsDialog({ open, onClose, children }: Props) {
+export function SettingsDialog({ open, onClose, children, title = 'Настройки телевизора' }: Props) {
   const dialog = useRef<HTMLDialogElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLElement | null>(null);
@@ -19,12 +19,12 @@ export function SettingsDialog({ open, onClose, children }: Props) {
       if (opener.current?.isConnected) opener.current.focus();
     }
   }, [open]);
-  return <dialog ref={dialog} tabIndex={0} aria-label="Настройки телевизора" className="settings-dialog" onCancel={(event) => { event.preventDefault(); onClose(); }} onClick={(event) => {
+  return <dialog ref={dialog} tabIndex={0} aria-label={title} className="settings-dialog" onCancel={(event) => { event.preventDefault(); onClose(); }} onClick={(event) => {
     if (event.target !== event.currentTarget) return;
     const bounds = event.currentTarget.getBoundingClientRect();
     if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) onClose();
   }}>
-    <div className="settings-heading"><h2>Настройки телевизора</h2><button ref={closeButton} type="button" aria-label="Закрыть настройки" onClick={onClose}><IconX aria-hidden="true" /></button></div>
+    <div className="settings-heading"><h2>{title}</h2><button ref={closeButton} type="button" aria-label="Закрыть настройки" onClick={onClose}><IconX aria-hidden="true" /></button></div>
     <div className="settings-content">{children}</div>
   </dialog>;
 }

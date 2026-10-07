@@ -1,4 +1,5 @@
 import { expect, type Page, type Response } from '@playwright/test';
+import { openTvWorkspace } from "../support/dashboard.js";
 import { test, gate, tvHost, type TvFixture } from '../support/tv-fixture.js';
 
 const mappings = [
@@ -18,10 +19,12 @@ async function ready(page: Page) {
 
 async function pair(page: Page, tv: TvFixture) {
   await tv.setupAndLogin(page);
+  await openTvWorkspace(page);
   await page.getByLabel('IP-адрес телевизора').fill(tvHost);
   await page.getByRole('button', { name: 'Подключить', exact: true }).click();
   await tv.tv.waitForRequestCount(1);
   tv.promptGate.release();
+  await openTvWorkspace(page);
   await ready(page);
 }
 
@@ -58,11 +61,13 @@ test('all ten browser controls reach the pointer once; saved TV remains usable a
   expect(requests).toHaveLength(10);
   expect(new Set(requests.map((raw) => (JSON.parse(raw) as { id: string }).id)).size).toBe(10);
   await page.reload();
+  await openTvWorkspace(page);
   await ready(page);
   // Reopen the real SQLite-backed API as well; no new prompt is permitted.
   await tv.replaceTv({ kind: 'success' });
   await tv.restart();
   await page.reload();
+  await openTvWorkspace(page);
   await ready(page);
   await page.getByRole('button', { name: 'Выйти', exact: true }).click();
   await page.getByRole('dialog', { name: 'Выйти из приложения?' }).getByRole('button', { name: 'Выйти', exact: true }).click();
@@ -72,6 +77,7 @@ test('all ten browser controls reach the pointer once; saved TV remains usable a
     headers: { origin: tv.origin }, data: { id: '11111111-1111-4111-8111-111111111111', button: 'UP' },
   })).status()).toBe(401);
   await tv.login(page);
+  await openTvWorkspace(page);
   await ready(page);
   await remote(page).focus();
   await press(page, tv, 'Home');
@@ -103,7 +109,8 @@ test('channel and color buttons send exact pointer frames once without replay', 
     expect(tv.tv.pointerFrames.at(-1)).toBe(frame(wire!));
   }
   expect(tv.tv.pointerFrames).toEqual(entries.map((entry) => frame(entry[2]!)));
-  await page.reload(); await ready(page);
+  await page.reload();
+  await openTvWorkspace(page); await ready(page);
   expect(tv.tv.pointerFrames).toEqual(entries.map((entry) => frame(entry[2]!)));
 });
 
@@ -126,6 +133,7 @@ test('numeric keypad sends each digit once through authenticated API and pointer
   }
   expect(tv.tv.pointerFrames).toEqual(digits.map(frame));
   await page.reload();
+  await openTvWorkspace(page);
   await ready(page);
   expect(tv.tv.pointerFrames).toEqual(digits.map(frame));
 });
@@ -287,7 +295,8 @@ test('lost genuine command response after pointer receipt shows uncertainty and 
 test('branded Wink launches installed app once through SSAP and reports missing installation', async ({ page, tv }, testInfo) => {
   await pair(page, tv);
   await tv.replaceTv({ kind: 'success', apps: [{ id: 'synthetic.wink', title: 'Wink' }, { id: 'synthetic.wink.dev', title: 'Wink Dev' }] });
-  await tv.restart(); await page.reload(); await ready(page);
+  await tv.restart(); await page.reload();
+  await openTvWorkspace(page); await ready(page);
   const wink = remote(page).getByRole('button', { name: 'Запустить Wink', exact: true });
   await expect(wink).toBeVisible();
   await expect(wink.locator('img')).toHaveJSProperty('complete', true);
@@ -296,7 +305,8 @@ test('branded Wink launches installed app once through SSAP and reports missing 
   expect(tv.tv.requests.filter((request) => request.uri === 'ssap://com.webos.applicationManager/launch').map((request) => request.payload)).toEqual([{ id: 'synthetic.wink' }]);
   expect(tv.tv.pointerFrames).toEqual([]);
   await page.screenshot({ path: testInfo.outputPath('wink-preview.png'), fullPage: true });
-  await tv.replaceTv({ kind: 'success' }); await tv.restart(); await page.reload(); await ready(page);
+  await tv.replaceTv({ kind: 'success' }); await tv.restart(); await page.reload();
+  await openTvWorkspace(page); await ready(page);
   const missingResponse = commandResponse(page, tv); await wink.click();
   expect((await missingResponse).status()).toBe(422);
   await expect(page.locator('.remote-activity').getByRole('alert')).toContainText('Wink не найден');
