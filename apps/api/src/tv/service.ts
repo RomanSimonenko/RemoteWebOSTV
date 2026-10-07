@@ -285,7 +285,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
           finish(context, 'succeeded');
           // A successful manual connection supersedes exhausted automatic recovery,
           // but must retain explicit power-operation delivery receipts.
-          if (power?.operation.action === 'recover' && power.operation.status !== 'running') power = undefined;
+          if (!context.power && power?.operation.action === 'recover' && power.operation.status !== 'running') power = undefined;
           break;
         } catch (cause) {
           adapter = activeAdapter;
