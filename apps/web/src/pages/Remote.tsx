@@ -208,9 +208,9 @@ export function Remote({ csrfToken, active, onSessionExpired, onBusyChange, inte
       onPointerLeave={() => { if (held.current?.button === button && held.current.pointerId !== undefined) stopHold(); }}
       onBlur={stopHold}
       onClick={(event) => { if (event.detail > 0 && suppressedClick.current === button) { suppressedClick.current = null; return; } void send(button); }}>
+    {(button === 'CHANNEL_DOWN' || button === 'CHANNEL_UP') && <span>CH</span>}
     {ButtonIcon && <ButtonIcon aria-hidden="true" />}
     {button === 'ENTER' && 'OK'}
-    {(button === 'CHANNEL_DOWN' || button === 'CHANNEL_UP') && 'CH'}
   </button>;
   });
   const activity = <div className="remote-activity">
