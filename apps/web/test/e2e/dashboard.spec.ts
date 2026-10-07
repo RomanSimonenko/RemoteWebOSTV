@@ -19,6 +19,17 @@ test('dashboard adds the first TV, opens remote and returns without another pair
   await expect(card).toHaveCSS('border-color', 'rgb(131, 189, 206)');
   await expect(page.getByRole('heading', { name: 'Телевизоры', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Добавить ТВ' })).toBeVisible();
+  await page.setViewportSize({ width: 795, height: 1248 });
+  const add = page.getByRole('button', { name: 'Добавить ТВ' });
+  const alignment = await add.evaluate((button) => {
+    const text = [...button.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent?.includes('Добавить ТВ'))!;
+    const range = document.createRange(); range.selectNodeContents(text);
+    const label = range.getBoundingClientRect();
+    const icon = button.querySelector('svg')!.getBoundingClientRect();
+    return { centerDifference: Math.abs(icon.y + icon.height / 2 - label.y - label.height / 2), gap: label.x - icon.right };
+  });
+  expect(alignment.centerDifference).toBeLessThan(2);
+  expect(alignment.gap).toBeGreaterThanOrEqual(8);
   const mutations: string[] = [];
   page.on('request', (request) => { if (request.method() !== 'GET') mutations.push(request.url()); });
   await openTvWorkspace(page);

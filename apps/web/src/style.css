@@ -9,7 +9,9 @@ body { margin: 0; min-width: 320px; min-height: 100vh; background: radial-gradie
 .dashboard-screen .eyebrow { font-size: 1.4rem; }
 .dashboard-screen .app-header { padding-bottom: 24px; }
 .dashboard-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 32px; }
-.dashboard-heading h1 { font-size: 2.5rem; }
+.dashboard-heading h1 { font-size: 2.5rem; margin: 0; }
+.dashboard-heading > button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap; }
+.dashboard-heading > button svg { width: 20px; height: 20px; }
 .device-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
 .device-card { min-width: 0; }
 .device-card-main { display: flex; flex-direction: column; align-items: center; width: 100%; height: 100%; padding: 22px; border: 1px solid #334955; border-radius: 16px; background: #17232b; color: inherit; transition: border-color .18s ease, background-color .18s ease; }
