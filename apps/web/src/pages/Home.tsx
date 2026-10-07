@@ -23,7 +23,7 @@ export function Home({ username, csrfToken, tvActive, busy, error, onLogout, onS
   useEffect(() => { if (!tvActive) { setSettingsOpen(false); setConfirmingPower(false); } }, [tvActive]);
   return <section>
     <header className="app-header">
-      <div className="header-identity"><p className="eyebrow">Remote WebOS TV</p><div ref={setIdentityTarget} /></div>
+      <div className="header-identity"><p className="eyebrow">Smart TV Remote Hub</p><div ref={setIdentityTarget} /></div>
       <div className="header-actions">
         <details ref={help} className="keyboard-help"><summary aria-label="Управление с клавиатуры" title="Управление с клавиатуры"><IconInfoCircle aria-hidden="true" /></summary><div id="remote-help" className="help-panel">
           <p>Нажмите Tab, чтобы перейти к пульту, или нажмите на свободное место внутри него.</p>
