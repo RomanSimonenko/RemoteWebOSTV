@@ -8,7 +8,7 @@ body { margin: 0; min-width: 320px; min-height: 100vh; background: radial-gradie
 .dashboard { margin-top: 44px; }
 .dashboard-screen .eyebrow { font-size: 1.4rem; }
 .dashboard-screen .app-header { padding-bottom: 24px; }
-.dashboard-heading { margin-bottom: 32px; }
+.dashboard-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 32px; }
 .dashboard-heading h1 { font-size: 2.5rem; }
 .device-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
 .device-card { min-width: 0; }

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { IconChevronUp, IconChevronDown, IconChevronLeft, IconChevronRight, IconHome, IconArrowBackUp, IconMinus, IconPlus, IconVolumeOff, type Icon } from '@tabler/icons-react';
-import type { BasicTvButton, TvRemoteState, TvCommandResult } from '@remote-webos-tv/contracts';
+import type { BasicTvButton, TvRemoteState, TvCommandResult, TvId } from '@remote-webos-tv/contracts';
 import { api, ApiFailure } from '../api.js';
 import { requestId } from '../requestId.js';
 
-interface Props { csrfToken: string; active: boolean; onSessionExpired(): void; onBusyChange?(busy: boolean): void; interactionBlocked?: boolean; activityTarget?: HTMLElement | null; quietOffline?: boolean }
+interface Props { tvId?: TvId; csrfToken: string; active: boolean; onSessionExpired(): void; onBusyChange?(busy: boolean): void; interactionBlocked?: boolean; activityTarget?: HTMLElement | null; quietOffline?: boolean }
 interface Runtime { active: boolean; pending: boolean; command: AbortController | null; refresh(): void }
 const unknownMessage = 'Результат команды неизвестен. Автоматический повтор не выполняется';
 const reasons = {
@@ -41,7 +41,7 @@ const keys: Readonly<Record<string, BasicTvButton>> = {
   Escape: 'BACK', Home: 'HOME', '+': 'VOLUME_UP', '-': 'VOLUME_DOWN', m: 'MUTE', M: 'MUTE',
 };
 
-export function Remote({ csrfToken, active, onSessionExpired, onBusyChange, interactionBlocked = false, activityTarget, quietOffline = false }: Props) {
+export function Remote({ tvId, csrfToken, active, onSessionExpired, onBusyChange, interactionBlocked = false, activityTarget, quietOffline = false }: Props) {
   const [state, setState] = useState<TvRemoteState | null>(null);
   const [readError, setReadError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -117,7 +117,7 @@ export function Remote({ csrfToken, active, onSessionExpired, onBusyChange, inte
       inFlight = true;
       readController = new AbortController();
       try {
-        const next = await api.remoteState(readController.signal);
+        const next = await api.remoteState(readController.signal, tvId);
         if (!current.active) return;
         setState(next); setReadError('');
       } catch (cause) {
@@ -135,7 +135,7 @@ export function Remote({ csrfToken, active, onSessionExpired, onBusyChange, inte
       readController?.abort(); current.command?.abort();
       if (runtime.current === current) runtime.current = null;
     };
-  }, [active, csrfToken]);
+  }, [active, csrfToken, tvId]);
 
   async function send(button: BasicTvButton | 'wink') {
     const current = runtime.current;
@@ -151,7 +151,7 @@ export function Remote({ csrfToken, active, onSessionExpired, onBusyChange, inte
         setFeedback({ text: 'Команда не отправлена. Не удалось подготовить идентификатор команды.', alert: true });
         return;
       }
-      const result: TvCommandResult = await api.sendCommand(button === 'wink' ? { id, app: 'wink' } : { id, button }, csrfToken, current.command.signal);
+      const result: TvCommandResult = await api.sendCommand(button === 'wink' ? { id, app: 'wink' } : { id, button }, csrfToken, current.command.signal, tvId);
       if (!current.active) return;
       if (result.outcome !== 'sent') stopHold();
       setFeedback({ text: result.outcome === 'sent' ? 'Команда отправлена' : result.outcome === 'unknown' ? unknownMessage : rejectionMessages[result.error.code], alert: result.outcome !== 'sent' });

@@ -7,6 +7,20 @@ function response(data: unknown, status = 200) { return new Response(JSON.string
 function barrier<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
+test('a reply for an old TV cannot overwrite the selected TV', async () => {
+  const old = barrier<Response>();
+  const first = '00000000-0000-4000-8000-000000000001';
+  const second = '00000000-0000-4000-8000-000000000002';
+  const fetch = vi.fn().mockReturnValueOnce(old.promise).mockResolvedValue(response(available));
+  vi.stubGlobal('fetch', fetch);
+  const { result, rerender } = renderHook(({ id }) => useTvStatus(vi.fn(), id), { initialProps: { id: first } });
+  rerender({ id: second });
+  await act(async () => {});
+  await act(async () => { old.resolve(response({ ...available, tv: { ...available.tv, identity: { model: 'Old TV' } } })); });
+  expect(result.current.status?.tv?.identity.model).toBe('Synthetic TV');
+  expect(fetch.mock.calls.map(([path]) => path)).toEqual([`/api/tvs/${first}`, `/api/tvs/${second}`]);
+});
+
 test('polls after at least two seconds and coalesces manual refresh without overlapping a slow read', async () => {
   vi.useFakeTimers();
   const first = barrier<Response>();

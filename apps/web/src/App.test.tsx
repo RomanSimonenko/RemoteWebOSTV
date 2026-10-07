@@ -3,6 +3,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { App } from './App.js';
 
 const csrfToken = 'c'.repeat(43);
+const tvId = '00000000-0000-4000-8000-000000000001';
+const saved = { tv: { host: '192.168.1.20', identity: { model: 'Synthetic TV' } }, connection: 'unavailable', operation: null };
 beforeEach(() => {
   Object.defineProperties(HTMLDialogElement.prototype, {
     showModal: { configurable: true, value: vi.fn(function (this: HTMLDialogElement) { this.open = true; }) },
@@ -46,7 +48,7 @@ test('claimed installation shows login, then authenticated home after verified s
     .mockResolvedValueOnce(response(401, { code: 'UNAUTHORIZED', message: 'Unauthorized', requestId: 'request-1' }))
     .mockResolvedValueOnce(response(200, { username: 'alice' }))
     .mockResolvedValueOnce(response(200, { username: 'alice', csrfToken }))
-    .mockResolvedValueOnce(response(200, { tv: null, connection: 'unconfigured', operation: null }));
+    .mockResolvedValueOnce(response(200, { devices: [] }));
   vi.stubGlobal('fetch', fetch);
   render(<App />);
   expect(await screen.findByRole('heading', { name: 'Вход' })).toBeTruthy();
@@ -65,7 +67,7 @@ test('claimed installation shows login, then authenticated home after verified s
 test('expired session returns to login when an authenticated operation is rejected', async () => {
   const fetch = vi.fn().mockResolvedValueOnce(response(200, { state: 'claimed' }))
     .mockResolvedValueOnce(response(200, { username: 'alice', csrfToken }))
-    .mockResolvedValueOnce(response(200, { tv: null, connection: 'unconfigured', operation: null }))
+    .mockResolvedValueOnce(response(200, { devices: [] }))
     .mockResolvedValueOnce(response(401, { code: 'UNAUTHORIZED', message: 'Unauthorized', requestId: 'request-2' }));
   vi.stubGlobal('fetch', fetch);
   render(<App />);
@@ -76,10 +78,11 @@ test('expired session returns to login when an authenticated operation is reject
   expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Сессия истекла. Войдите снова.');
 });
 
-test('authenticated reload reads TV status without starting a new pairing', async () => {
+test('authenticated reload reads TV list without starting a new pairing', async () => {
   const fetch = vi.fn().mockResolvedValueOnce(response(200, { state: 'claimed' }))
     .mockResolvedValueOnce(response(200, { username: 'alice', csrfToken }))
-    .mockResolvedValueOnce(response(200, { tv: { host: '192.168.1.20', identity: { model: 'Synthetic TV' } }, connection: 'unavailable', operation: null }))
+    .mockResolvedValueOnce(response(200, { devices: [{ tvId, platform: 'webos', status: saved }] }))
+    .mockResolvedValueOnce(response(200, saved))
     .mockResolvedValueOnce(response(200, { mac: null, canPowerOff: false, canWake: false, operation: null }))
     .mockResolvedValueOnce(response(200, { enabled: false, reason: 'UNAVAILABLE' }));
   vi.stubGlobal('fetch', fetch); render(<App />);
@@ -93,7 +96,7 @@ test('authenticated reload reads TV status without starting a new pairing', asyn
   fireEvent.click(gear);
   expect(screen.getByRole('textbox', { name: 'IP-адрес телевизора' })).toHaveProperty('value', '192.168.1.20');
   expect(screen.getByRole('textbox', { name: 'MAC-адрес телевизора' })).toBeTruthy();
-  expect(fetch.mock.calls.map(([path]) => path)).toEqual(['/api/setup/status', '/api/auth/session', '/api/tv', '/api/tv/power', '/api/tv/remote']);
+  expect(fetch.mock.calls.map(([path]) => path)).toEqual(['/api/setup/status', '/api/auth/session', '/api/tvs', `/api/tvs/${tvId}`, `/api/tvs/${tvId}/power`, `/api/tvs/${tvId}/remote`]);
 });
 
 test('status 401 returns to login through the App session owner', async () => {
@@ -126,7 +129,7 @@ test('logout during pair stops UI requests immediately and ignores late response
   finishLogout(response(204));
   expect(await screen.findByRole('heading', { name: 'Вход' })).toBeTruthy();
   expect(screen.queryByText('Late synthetic TV')).toBeNull();
-  expect(fetch.mock.calls.map(([path]) => path)).toEqual(['/api/setup/status', '/api/auth/session', '/api/tv', '/api/auth/logout']);
+  expect(fetch.mock.calls.map(([path]) => path)).toEqual(['/api/setup/status', '/api/auth/session', '/api/tvs', '/api/auth/logout']);
 });
 
 test('logout stays available while a pair submission is pending and aborts it without an explicit server cancellation', async () => {
@@ -135,7 +138,7 @@ test('logout stays available while a pair submission is pending and aborts it wi
   const pair = new Promise<Response>((resolve) => { finishPair = resolve; });
   const fetch = vi.fn().mockResolvedValueOnce(response(200, { state: 'claimed' }))
     .mockResolvedValueOnce(response(200, { username: 'alice', csrfToken }))
-    .mockResolvedValueOnce(response(200, { tv: null, connection: 'unconfigured', operation: null }))
+    .mockResolvedValueOnce(response(200, { devices: [] }))
     .mockReturnValueOnce(pair).mockResolvedValueOnce(response(204));
   vi.stubGlobal('fetch', fetch); render(<App />);
   await act(async () => {});
@@ -153,7 +156,7 @@ test('logout stays available while a pair submission is pending and aborts it wi
     await vi.advanceTimersByTimeAsync(10000);
   });
   expect(screen.getByRole('heading', { name: 'Вход' })).toBeTruthy();
-  expect(fetch.mock.calls.map(([path]) => path)).toEqual(['/api/setup/status', '/api/auth/session', '/api/tv', '/api/tv/operations', '/api/auth/logout']);
+  expect(fetch.mock.calls.map(([path]) => path)).toEqual(['/api/setup/status', '/api/auth/session', '/api/tvs', '/api/tvs', '/api/auth/logout']);
 });
 
 test('pending login cannot submit twice and reports a safe server error', async () => {

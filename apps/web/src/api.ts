@@ -1,5 +1,6 @@
 import { apiErrorSchema, loginResponseSchema, sessionResponseSchema, setupStatusSchema, tvStatusResponseSchema, tvOperationSchema, tvCommandResultSchema, tvRemoteStateSchema, type LoginRequest, type SetupRequest, type StartTvOperation, type TvOperation, type TvStatusResponse, type TvCommandRequest, type TvCommandResult, type TvRemoteState } from '@remote-webos-tv/contracts';
 import { tvPowerStateSchema, tvPowerOperationSchema, type TvPowerRequest } from '@remote-webos-tv/contracts';
+import { tvDevicesResponseSchema, addTvResponseSchema, type TvId, type AddTvRequest } from '@remote-webos-tv/contracts';
 
 export class ApiFailure extends Error {
   constructor(readonly status: number, readonly code: string) { super('API request failed'); }
@@ -28,8 +29,8 @@ async function request(path: string, init?: RequestInit, resultStatuses: readonl
       const parsed = apiErrorSchema.safeParse(await response.json());
       if (parsed.success) {
         code = parsed.data.code;
-        commandRejected = path === '/tv/commands' && ((response.status === 400 && code === 'BAD_REQUEST') || (response.status === 403 && code === 'FORBIDDEN'));
-        powerRejected = path === '/tv/power' && init?.method === 'POST' && !!powerRejections[response.status]?.includes(code);
+        commandRejected = /^\/(?:tv|tvs\/[^/]+)\/commands$/.test(path) && ((response.status === 400 && code === 'BAD_REQUEST') || (response.status === 403 && code === 'FORBIDDEN'));
+        powerRejected = /^\/(?:tv|tvs\/[^/]+)\/power$/.test(path) && init?.method === 'POST' && !!powerRejections[response.status]?.includes(code);
       }
     } catch { /* Malformed responses remain generic API failures. */ }
     const failure = new ApiFailure(response.status, code);
@@ -46,7 +47,12 @@ async function parsed<T>(response: Response, schema: { parse(value: unknown): T 
 }
 
 const jsonHeaders = { 'content-type': 'application/json' };
+const tvPath = (tvId?: TvId) => tvId ? `/tvs/${encodeURIComponent(tvId)}` : '/tv';
 export const api = {
+  async tvDevices(signal?: AbortSignal) { return parsed(await request('/tvs', { signal: signal ?? null }), tvDevicesResponseSchema); },
+  async addTv(input: AddTvRequest, csrfToken: string, signal?: AbortSignal) {
+    return parsed(await request('/tvs', { method: 'POST', headers: { ...jsonHeaders, 'x-csrf-token': csrfToken }, body: JSON.stringify(input), signal: signal ?? null }), addTvResponseSchema);
+  },
   async status() { return parsed(await request('/setup/status'), setupStatusSchema); },
   async session() { return parsed(await request('/auth/session'), sessionResponseSchema); },
   async setup(input: SetupRequest) { await request('/setup', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(input) }); },
@@ -54,38 +60,38 @@ export const api = {
   async logout(csrfToken: string) { await request('/auth/logout', { method: 'POST', headers: { 'x-csrf-token': csrfToken } }); },
   // JSON cannot carry an explicitly undefined optional property. The validated
   // wire values satisfy the contracts' stricter exact-optional public types.
-  async tvStatus(signal?: AbortSignal): Promise<TvStatusResponse> { return await parsed(await request('/tv', { signal: signal ?? null }), tvStatusResponseSchema) as TvStatusResponse; },
-  async startTvOperation(input: StartTvOperation, csrfToken: string, signal?: AbortSignal) {
-    return await parsed(await request('/tv/operations', { method: 'POST', headers: { ...jsonHeaders, 'x-csrf-token': csrfToken }, body: JSON.stringify(input), signal: signal ?? null }), tvOperationSchema) as TvOperation;
+  async tvStatus(signal?: AbortSignal, tvId?: TvId): Promise<TvStatusResponse> { return await parsed(await request(tvPath(tvId), { signal: signal ?? null }), tvStatusResponseSchema) as TvStatusResponse; },
+  async startTvOperation(input: StartTvOperation, csrfToken: string, signal?: AbortSignal, tvId?: TvId) {
+    return await parsed(await request(`${tvPath(tvId)}/operations`, { method: 'POST', headers: { ...jsonHeaders, 'x-csrf-token': csrfToken }, body: JSON.stringify(input), signal: signal ?? null }), tvOperationSchema) as TvOperation;
   },
-  async cancelTvOperation(id: string, csrfToken: string, signal?: AbortSignal) {
-    return await parsed(await request(`/tv/operations/${encodeURIComponent(id)}/cancel`, { method: 'POST', headers: { 'x-csrf-token': csrfToken }, signal: signal ?? null }), tvOperationSchema) as TvOperation;
+  async cancelTvOperation(id: string, csrfToken: string, signal?: AbortSignal, tvId?: TvId) {
+    return await parsed(await request(`${tvPath(tvId)}/operations/${encodeURIComponent(id)}/cancel`, { method: 'POST', headers: { 'x-csrf-token': csrfToken }, signal: signal ?? null }), tvOperationSchema) as TvOperation;
   },
-  async remoteState(signal?: AbortSignal): Promise<TvRemoteState> {
-    return parsed(await request('/tv/remote', { signal: signal ?? null }), tvRemoteStateSchema);
+  async remoteState(signal?: AbortSignal, tvId?: TvId): Promise<TvRemoteState> {
+    return parsed(await request(`${tvPath(tvId)}/remote`, { signal: signal ?? null }), tvRemoteStateSchema);
   },
-  async powerState(signal?: AbortSignal) {
-    return parsed(await request('/tv/power', { signal: signal ?? null }), tvPowerStateSchema);
+  async powerState(signal?: AbortSignal, tvId?: TvId) {
+    return parsed(await request(`${tvPath(tvId)}/power`, { signal: signal ?? null }), tvPowerStateSchema);
   },
-  async setTvMac(mac: string | null, csrfToken: string, signal?: AbortSignal) {
-    return parsed(await request('/tv/mac', { method: 'PUT', headers: { ...jsonHeaders, 'x-csrf-token': csrfToken }, body: JSON.stringify({ mac }), signal: signal ?? null }), tvPowerStateSchema);
+  async setTvMac(mac: string | null, csrfToken: string, signal?: AbortSignal, tvId?: TvId) {
+    return parsed(await request(`${tvPath(tvId)}/mac`, { method: 'PUT', headers: { ...jsonHeaders, 'x-csrf-token': csrfToken }, body: JSON.stringify({ mac }), signal: signal ?? null }), tvPowerStateSchema);
   },
-  async startPower(input: TvPowerRequest, csrfToken: string, signal?: AbortSignal) {
-    const response = await request('/tv/power', { method: 'POST', headers: { ...jsonHeaders, 'x-csrf-token': csrfToken }, body: JSON.stringify(input), signal: signal ?? null });
+  async startPower(input: TvPowerRequest, csrfToken: string, signal?: AbortSignal, tvId?: TvId) {
+    const response = await request(`${tvPath(tvId)}/power`, { method: 'POST', headers: { ...jsonHeaders, 'x-csrf-token': csrfToken }, body: JSON.stringify(input), signal: signal ?? null });
     const result = await parsed(response, tvPowerOperationSchema);
     if (response.status !== 202 || result.id !== input.id || result.action !== input.action) throw new ApiFailure(response.status, 'INVALID_RESPONSE');
     return result;
   },
-  async cancelPower(id: string, csrfToken: string, signal?: AbortSignal) {
-    const response = await request(`/tv/power/${encodeURIComponent(id)}/cancel`, { method: 'POST', headers: { 'x-csrf-token': csrfToken }, signal: signal ?? null });
+  async cancelPower(id: string, csrfToken: string, signal?: AbortSignal, tvId?: TvId) {
+    const response = await request(`${tvPath(tvId)}/power/${encodeURIComponent(id)}/cancel`, { method: 'POST', headers: { 'x-csrf-token': csrfToken }, signal: signal ?? null });
     const result = await parsed(response, tvPowerOperationSchema);
     if (response.status !== 200 || result.id !== id) throw new ApiFailure(response.status, 'INVALID_RESPONSE');
     return result;
   },
-  async sendCommand(input: TvCommandRequest, csrfToken: string, signal?: AbortSignal): Promise<TvCommandResult> {
+  async sendCommand(input: TvCommandRequest, csrfToken: string, signal?: AbortSignal, tvId?: TvId): Promise<TvCommandResult> {
     // Only this route carries a command result on these non-success statuses.
     // Auth/schema errors continue through the shared API-error handling.
-    const response = await request('/tv/commands', { method: 'POST', headers: { ...jsonHeaders, 'x-csrf-token': csrfToken }, body: JSON.stringify(input), signal: signal ?? null }, [409, 422, 429, 503, 504]);
+    const response = await request(`${tvPath(tvId)}/commands`, { method: 'POST', headers: { ...jsonHeaders, 'x-csrf-token': csrfToken }, body: JSON.stringify(input), signal: signal ?? null }, [409, 422, 429, 503, 504]);
     const result = await parsed(response, tvCommandResultSchema);
     const expectedStatus = result.outcome === 'sent' ? 200 : result.outcome === 'unknown' ? 504 : {
       TV_UNAVAILABLE: 409, TV_BUSY: 409, UNSUPPORTED_CAPABILITY: 422, APP_NOT_AVAILABLE: 422, APP_LIST_UNAVAILABLE: 503, COMMAND_NOT_SENT: 503, RATE_LIMITED: 429,

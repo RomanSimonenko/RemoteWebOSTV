@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { tvMacAddressSchema, type TvPowerState } from '@remote-webos-tv/contracts';
+import { tvMacAddressSchema, type TvPowerState, type TvId } from '@remote-webos-tv/contracts';
 import { api, ApiFailure, friendlyError } from './api.js';
 import { requestId } from './requestId.js';
 
@@ -15,7 +15,7 @@ interface Runtime {
   stop(): void;
 }
 
-export function useTvPower(active: boolean, csrfToken: string, onSessionExpired: () => void) {
+export function useTvPower(active: boolean, csrfToken: string, onSessionExpired: () => void, tvId?: TvId) {
   const [state, setState] = useState<TvPowerState | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -49,7 +49,7 @@ export function useTvPower(active: boolean, csrfToken: string, onSessionExpired:
       const version = ++current.startedReads;
       current.read = new AbortController();
       try {
-        const next = await api.powerState(current.read.signal);
+        const next = await api.powerState(current.read.signal, tvId);
         if (!current.active || version <= current.invalidatedReads) return;
         current.state = next; setState(next); setError(''); setMessage('');
       } catch (cause) {
@@ -63,7 +63,7 @@ export function useTvPower(active: boolean, csrfToken: string, onSessionExpired:
     }
     void read();
     return () => { current.stop(); if (runtime.current === current) runtime.current = null; };
-  }, [active, csrfToken]);
+  }, [active, csrfToken, tvId]);
 
   function expire(current: Runtime) {
     current.stop(); current.state = null;
@@ -100,7 +100,7 @@ export function useTvPower(active: boolean, csrfToken: string, onSessionExpired:
     try { id = requestId(); }
     catch { setMessage('Операция не отправлена. Не удалось подготовить идентификатор операции.'); return; }
     const previous = current.state;
-    void mutate(current, async (signal) => ({ ...previous, canWake: false, canPowerOff: false, operation: await api.startPower(action === 'wake' ? { id, action } : { id, action, confirm: true }, csrfToken, signal) }),
+    void mutate(current, async (signal) => ({ ...previous, canWake: false, canPowerOff: false, operation: await api.startPower(action === 'wake' ? { id, action } : { id, action, confirm: true }, csrfToken, signal, tvId) }),
       (cause) => cause instanceof ApiFailure && cause.powerRejectedBeforeDispatch ? friendlyError(cause) : 'Результат операции неизвестен. Обновляем статус. Автоматический повтор не выполняется.');
   }
 
@@ -109,14 +109,14 @@ export function useTvPower(active: boolean, csrfToken: string, onSessionExpired:
     if (!active || !current?.active || current.pending || !current.state || current.state.operation?.status === 'running') return;
     const parsed = tvMacAddressSchema.nullable().safeParse(mac);
     if (!parsed.success) { setMessage('Введите корректный ненулевой unicast MAC-адрес телевизора.'); return; }
-    void mutate(current, (signal) => api.setTvMac(parsed.data, csrfToken, signal), friendlyError);
+    void mutate(current, (signal) => api.setTvMac(parsed.data, csrfToken, signal, tvId), friendlyError);
   }
 
   function cancel(id: string) {
     const current = runtime.current;
     if (!active || !current?.active || current.pending || !current.state || current.state.operation?.id !== id || current.state.operation.status !== 'running') return;
     const previous = current.state;
-    void mutate(current, async (signal) => ({ ...previous, canWake: false, canPowerOff: false, operation: await api.cancelPower(id, csrfToken, signal) }), friendlyError);
+    void mutate(current, async (signal) => ({ ...previous, canWake: false, canPowerOff: false, operation: await api.cancelPower(id, csrfToken, signal, tvId) }), friendlyError);
   }
 
   return { state, loading, error, message, busy, refresh, start, saveMac, cancel };

@@ -5,18 +5,20 @@ import { LogoutConfirmation } from '../components/LogoutConfirmation.js';
 import { SettingsDialog } from '../components/SettingsDialog.js';
 import { useTvStatus } from '../useTvStatus.js';
 import { Dashboard } from './Dashboard.js';
+import { useTvDevices } from '../useTvDevices.js';
+import type { TvId } from '@remote-webos-tv/contracts';
+import { AddTv } from './AddTv.js';
 
 interface Props { username: string; csrfToken: string; tvActive: boolean; busy: boolean; error: ReactNode; onLogout(): void; onSessionExpired(): void }
 export function Home({ username, csrfToken, tvActive, busy, error, onLogout, onSessionExpired }: Props) {
   const props = { username, csrfToken, tvActive, busy, error, onLogout, onSessionExpired };
-  return tvActive ? <ActiveHome {...props} /> : <HomeContent {...props} />;
+  return <HomeContent {...props} />;
 }
-function ActiveHome(props: Props) {
-  const statusState = useTvStatus(props.onSessionExpired);
-  return <HomeContent {...props} statusState={statusState} />;
-}
-function HomeContent({ username, csrfToken, tvActive, busy, error, onLogout, onSessionExpired, statusState }: Props & { statusState?: ReturnType<typeof useTvStatus> }) {
+function HomeContent({ username, csrfToken, tvActive, busy, error, onLogout, onSessionExpired }: Props) {
   const [screen, setScreen] = useState<'dashboard' | 'add' | 'remote'>('dashboard');
+  const [tvId, setTvId] = useState<TvId | null>(null);
+  const devicesState = useTvDevices(onSessionExpired, tvActive && screen === 'dashboard');
+  const statusState = useTvStatus(onSessionExpired, tvId ?? undefined, tvActive && screen === 'remote' && tvId !== null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [confirmingLogout, setConfirmingLogout] = useState(false);
   const [confirmingPower, setConfirmingPower] = useState(false);
@@ -33,7 +35,6 @@ function HomeContent({ username, csrfToken, tvActive, busy, error, onLogout, onS
   }, []);
   useEffect(() => { if ((settingsOpen || confirmingPower || confirmingLogout) && help.current) help.current.open = false; }, [settingsOpen, confirmingPower, confirmingLogout]);
   useEffect(() => { if (!tvActive) { setSettingsOpen(false); setConfirmingPower(false); } }, [tvActive]);
-  useEffect(() => { if (screen === 'add' && statusState?.status?.tv) { setScreen('dashboard'); setSettingsOpen(false); } }, [screen, statusState?.status?.tv]);
   function navigate(next: typeof screen) {
     setSettingsOpen(false); setConfirmingPower(false); setScreen(next);
     if (help.current) help.current.open = false;
@@ -59,12 +60,12 @@ function HomeContent({ username, csrfToken, tvActive, busy, error, onLogout, onS
       </div>
     </header>
     <LogoutConfirmation open={confirmingLogout && !busy} anchor={logoutButton} onClose={() => setConfirmingLogout(false)} onConfirm={() => { setConfirmingLogout(false); onLogout(); }} />
-    {tvActive && statusState && (screen === 'dashboard' ? <>
-      <Dashboard status={statusState.status} loading={statusState.loading} error={statusState.error} onRetry={statusState.refresh} onOpenTv={() => navigate('remote')} onAddTv={() => navigate('add')} />
+    {tvActive && (screen === 'dashboard' ? <>
+      <Dashboard devices={devicesState.devices} loading={devicesState.loading} error={devicesState.error} onRetry={devicesState.refresh} onOpenTv={(id) => { setTvId(id); navigate('remote'); }} onAddTv={() => navigate('add')} />
       <SettingsDialog title="Настройки аккаунта" open={settingsOpen} onClose={() => setSettingsOpen(false)}><p className="session-caption">Вы вошли как {username}.</p></SettingsDialog>
     </> : <>
       <nav className="tv-navigation" aria-label="Телевизоры"><button type="button" disabled={confirmingPower} onClick={() => navigate('dashboard')}><IconArrowLeft aria-hidden="true" />Телевизоры</button></nav>
-      <TvSetup username={username} csrfToken={csrfToken} identityTarget={screen === 'remote' ? identityTarget : null} statusState={statusState} settingsOpen={settingsOpen} onCloseSettings={() => setSettingsOpen(false)} onConfirmationChange={setConfirmingPower} onSessionExpired={onSessionExpired} />
+      {screen === 'add' ? <AddTv csrfToken={csrfToken} onSessionExpired={onSessionExpired} onReady={() => navigate('dashboard')} /> : tvId && <TvSetup key={tvId} tvId={tvId} username={username} csrfToken={csrfToken} identityTarget={identityTarget} statusState={statusState} settingsOpen={settingsOpen} onCloseSettings={() => setSettingsOpen(false)} onConfirmationChange={setConfirmingPower} onSessionExpired={onSessionExpired} />}
     </>)}
     {error}
   </section>;
