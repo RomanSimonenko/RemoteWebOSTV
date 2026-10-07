@@ -191,7 +191,7 @@ export class TvFixture {
 
   async login(page: Page) {
     await expect(page.getByRole('heading', { name: 'Вход', exact: true })).toBeVisible();
-    await page.getByLabel('Имя владельца').fill('synthetic-owner');
+    await page.getByLabel('Логин').fill('synthetic-owner');
     await page.getByLabel('Пароль', { exact: true }).fill(password);
     await page.getByRole('button', { name: 'Войти', exact: true }).click();
   }

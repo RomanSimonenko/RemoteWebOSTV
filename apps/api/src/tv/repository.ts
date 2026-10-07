@@ -20,6 +20,7 @@ function validatedTv(host: unknown, identity: unknown, envelope: unknown, macAdd
 }
 
 export interface TvDeviceRepository {
+  remove(tvId: TvId): void;
   list(): Array<{ tvId: TvId; platform: 'webos' }>;
   forDevice(tvId: TvId): TvRepository;
   legacyId(): TvId | null;
@@ -27,7 +28,13 @@ export interface TvDeviceRepository {
 }
 
 export function createTvDeviceRepository(sqlite: Database.Database): TvDeviceRepository {
+  const remove = sqlite.transaction((tvId: TvId) => {
+    sqlite.prepare('DELETE FROM tv_default WHERE tv_id = ?').run(tvId);
+    sqlite.prepare('DELETE FROM tv_devices WHERE tv_id = ?').run(tvId);
+    sqlite.prepare('INSERT INTO tv_default (id, tv_id) SELECT 1, tv_id FROM tv_devices ORDER BY position LIMIT 1 ON CONFLICT(id) DO NOTHING').run();
+  });
   return {
+    remove(tvId) { remove.immediate(tvIdSchema.parse(tvId)); },
     list() {
       return (sqlite.prepare('SELECT tv_id, platform FROM tv_devices ORDER BY position').all() as { tv_id: string; platform: string }[]).map((row) => {
         if (row.platform !== 'webos') throw new Error('Unsupported stored TV platform');

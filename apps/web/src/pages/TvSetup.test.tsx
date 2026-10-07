@@ -12,6 +12,40 @@ beforeEach(() => {
 });
 
 const csrfToken = 'c'.repeat(43);
+test('pending initial status is not presented as an unconfigured TV', async () => {
+  vi.useFakeTimers();
+  let finish!: (value: Response) => void;
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { finish = resolve; })));
+  render(<TvSetup csrfToken={csrfToken} onCloseSettings={vi.fn()} onSessionExpired={vi.fn()} settingsOpen={false} />);
+  expect(screen.queryByRole('heading', { name: 'Телевизор ещё не настроен' })).toBeNull();
+  expect(screen.queryByText('Загрузка телевизора…')).toBeNull();
+  await act(async () => { await vi.advanceTimersByTimeAsync(399); });
+  expect(screen.queryByText('Загрузка телевизора…')).toBeNull();
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(screen.getByText('Загрузка телевизора…')).toBeTruthy();
+  await act(async () => { finish(response(empty)); });
+  expect(screen.getByRole('heading', { name: 'Телевизор ещё не настроен' })).toBeTruthy();
+  expect(screen.queryByText('Загрузка телевизора…')).toBeNull();
+});
+test('initial status failure keeps its error and retry without claiming the TV is unconfigured', async () => {
+  vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('Synthetic connection failure'))));
+  render(<TvSetup csrfToken={csrfToken} onCloseSettings={vi.fn()} onSessionExpired={vi.fn()} settingsOpen={false} />);
+  await act(async () => {});
+  expect(screen.queryByRole('heading', { name: 'Телевизор ещё не настроен' })).toBeNull();
+  expect(screen.queryByText('Загрузка телевизора…')).toBeNull();
+  expect(screen.getByRole('alert')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Обновить статус' }).hasAttribute('disabled')).toBe(false);
+});
+test('a quick status response cancels the delayed loading announcement', async () => {
+  vi.useFakeTimers();
+  const pending = barrier<Response>();
+  vi.stubGlobal('fetch', vi.fn(() => pending.promise));
+  render(<TvSetup csrfToken={csrfToken} onCloseSettings={vi.fn()} onSessionExpired={vi.fn()} settingsOpen={false} />);
+  await act(async () => { await vi.advanceTimersByTimeAsync(100); pending.resolve(response(empty)); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+  expect(screen.queryByText('Загрузка телевизора…')).toBeNull();
+  expect(screen.getByRole('heading', { name: 'Телевизор ещё не настроен' })).toBeTruthy();
+});
 test('pairing prioritizes the confirmation instruction without a passive power warning', async () => {
   vi.stubGlobal('fetch', vi.fn((path: string) => Promise.resolve(response(path === '/api/tv'
     ? { ...saved, connection: 'pairing', operation: { id: '00000000-0000-4000-8000-000000000001', action: 'repair', status: 'running', startedAt: Date.now(), deadlineAt: Date.now() + 60000 } }
@@ -296,9 +330,9 @@ test('keeps refresh enabled during background reads and coalesces clicks without
   const fetch = vi.fn().mockReturnValueOnce(initial.promise).mockReturnValueOnce(background.promise).mockReturnValueOnce(next.promise);
   vi.stubGlobal('fetch', fetch);
   await mount();
-  const refresh = screen.getByRole<HTMLButtonElement>('button', { name: 'Обновить статус' });
-  expect(refresh.disabled).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Обновить статус' })).toBeNull();
   await act(async () => { initial.resolve(response(empty)); });
+  const refresh = screen.getByRole<HTMLButtonElement>('button', { name: 'Обновить статус' });
   expect(refresh.disabled).toBe(false);
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
   expect(fetch).toHaveBeenCalledTimes(2);

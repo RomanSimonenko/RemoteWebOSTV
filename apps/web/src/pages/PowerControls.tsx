@@ -71,7 +71,7 @@ export function PowerControls({ tvId, csrfToken, active, onSessionExpired, onSta
   const conflicting = !!state?.canPowerOff && state.canWake;
   const powerAction = conflicting ? null : state?.canPowerOff ? 'power_off' : state?.canWake && state.mac ? 'wake' : null;
   const disabled = busy || loading || !!error || !state || running;
-  const powerDisabled = settingsOpen || disabled || !powerAction;
+  const powerDisabled = settingsOpen || busy || loading || !!error || !state || !powerAction || (running && !(powerAction === 'wake' && operation?.action === 'recover'));
   const diagnostic = message || error || (conflicting ? 'Сервер вернул противоречивые разрешения питания. Обновите статус.' : terminalError(operation));
   const backgroundDiagnostic = !message && !error && !conflicting && operation?.delivery === 'sent' && operation.error?.code === 'POWER_OFF_UNCONFIRMED' && operation.id === expiredShutdownWarning ? '' : diagnostic;
   useEffect(() => { onStateChange?.(state); }, [state, onStateChange]);

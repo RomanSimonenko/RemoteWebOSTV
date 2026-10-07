@@ -50,6 +50,10 @@ const jsonHeaders = { 'content-type': 'application/json' };
 const tvPath = (tvId?: TvId) => tvId ? `/tvs/${encodeURIComponent(tvId)}` : '/tv';
 export const api = {
   async tvDevices(signal?: AbortSignal) { return parsed(await request('/tvs', { signal: signal ?? null }), tvDevicesResponseSchema); },
+  async deleteTv(tvId: TvId, csrfToken: string, signal: AbortSignal) {
+    const response = await request(`/tvs/${tvId}`, { method: 'DELETE', headers: { ...jsonHeaders, 'x-csrf-token': csrfToken }, body: JSON.stringify({ confirm: true }), signal });
+    if (response.status !== 204) throw new ApiFailure(response.status, 'INVALID_RESPONSE');
+  },
   async addTv(input: AddTvRequest, csrfToken: string, signal?: AbortSignal) {
     return parsed(await request('/tvs', { method: 'POST', headers: { ...jsonHeaders, 'x-csrf-token': csrfToken }, body: JSON.stringify(input), signal: signal ?? null }), addTvResponseSchema);
   },

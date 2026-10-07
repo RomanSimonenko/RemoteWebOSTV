@@ -6,6 +6,7 @@ import { projectTvError, TvServiceError, type TvService } from './service.js';
 export interface TvPowerRoutesDependencies {
   readonly service: TvService;
   readonly resolveService?: (request: FastifyRequest) => TvService;
+  readonly receiptScope?: (service: TvService) => string;
   readonly prefixes?: readonly string[];
   readonly sessions: AuthSessionService;
   readonly sessionForRequest: (request: FastifyRequest) => string | undefined;
@@ -15,7 +16,7 @@ export interface TvPowerRoutesDependencies {
 interface Receipt { readonly action: TvPowerRequest['action']; operation: TvPowerOperation }
 const receiptCapacity = 100;
 
-export function registerTvPowerRoutes(app: FastifyInstance, { service: defaultService, resolveService, prefixes = ['/api/tv'], sessions, sessionForRequest, beforePowerAttempt }: TvPowerRoutesDependencies): void {
+export function registerTvPowerRoutes(app: FastifyInstance, { service: defaultService, resolveService, receiptScope, prefixes = ['/api/tv'], sessions, sessionForRequest, beforePowerAttempt }: TvPowerRoutesDependencies): void {
   let admission = Promise.resolve();
   let closing = false;
   const receipts = new Map<string, Map<string, Receipt>>();
@@ -25,10 +26,10 @@ export function registerTvPowerRoutes(app: FastifyInstance, { service: defaultSe
     if (!(cause instanceof TvServiceError)) throw cause;
     return reply.code(cause.code === 'UNSUPPORTED_CAPABILITY' ? 422 : cause.statusCode).send({ ...projectTvError(cause), requestId: request.id });
   };
-  const subscriptions = new Map<TvService, { key: number; unsubscribe(): void }>();
+  const subscriptions = new Map<TvService, { key: string; unsubscribe(): void }>();
   function watch(service: TvService) {
     if (subscriptions.has(service)) return;
-    const key = subscriptions.size;
+    const key = receiptScope ? receiptScope(service) : String(subscriptions.size);
     const unsubscribe = service.onPowerFinished((operation, owner) => {
     if (typeof owner !== 'string') return;
     const receipt = receipts.get(owner)?.get(`${key}:${operation.id}`);

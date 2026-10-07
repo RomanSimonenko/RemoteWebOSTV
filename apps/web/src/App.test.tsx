@@ -26,6 +26,32 @@ function response(status: number, data?: unknown) {
   });
 }
 
+test.each([
+  [401, 'INVALID_CREDENTIALS', 'Неверный логин или пароль.', true],
+  [400, 'BAD_REQUEST', 'Проверьте логин и пароль: логин — 1–64 символа, пароль — 12–128.', false],
+  [403, 'FORBIDDEN', 'Вход отклонён сервером. Обновите страницу и попробуйте снова.', false],
+  [429, 'RATE_LIMITED', 'Слишком много попыток. Попробуйте позже.', false],
+  [500, 'UNEXPECTED_ERROR', 'Не удалось выполнить запрос. Попробуйте снова.', false],
+  [200, 'INVALID_RESPONSE', 'Не удалось подтвердить вход: сервер вернул некорректный ответ. Попробуйте снова.', false],
+  [0, 'NETWORK_ERROR', 'Нет связи с сервером. Попробуйте снова.', false],
+])('login failure %s/%s is specific and only invalid credentials mark fields', async (status, code, message, invalid) => {
+  const fetch = vi.fn().mockResolvedValueOnce(response(200, { state: 'claimed' }))
+    .mockResolvedValueOnce(response(401, { code: 'UNAUTHORIZED', message: 'Unauthorized', requestId: 'synthetic' }));
+  if (status === 0) fetch.mockRejectedValueOnce(new TypeError('synthetic network failure'));
+  else fetch.mockResolvedValueOnce(response(status, { code, message: 'safe synthetic failure', requestId: 'synthetic' }));
+  vi.stubGlobal('fetch', fetch); render(<App />);
+  await screen.findByRole('heading', { name: 'Вход' });
+  expect(screen.getByText('Smart TV Remote Hub')).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('Логин'), { target: { value: 'alice' } });
+  fireEvent.change(screen.getByLabelText('Пароль'), { target: { value: 'correct horse battery staple' } });
+  fireEvent.submit(screen.getByRole('button', { name: 'Войти' }).closest('form')!);
+  expect((await screen.findByRole('alert')).textContent).toBe(message);
+  expect(screen.getByLabelText('Логин').getAttribute('aria-invalid')).toBe(String(invalid));
+  expect(screen.getByLabelText('Пароль').getAttribute('aria-invalid')).toBe(String(invalid));
+  fireEvent.change(screen.getByLabelText('Логин'), { target: { value: 'alice2' } });
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
 test('unclaimed installation shows setup and moves to login after claim', async () => {
   const fetch = vi.fn().mockResolvedValueOnce(response(200, { state: 'unclaimed' }))
     .mockResolvedValueOnce(response(201));
@@ -52,7 +78,7 @@ test('claimed installation shows login, then authenticated home after verified s
   vi.stubGlobal('fetch', fetch);
   render(<App />);
   expect(await screen.findByRole('heading', { name: 'Вход' })).toBeTruthy();
-  fireEvent.change(screen.getByLabelText('Имя владельца'), { target: { value: 'alice' } });
+  fireEvent.change(screen.getByLabelText('Логин'), { target: { value: 'alice' } });
   fireEvent.change(screen.getByLabelText('Пароль'), { target: { value: 'correct horse battery staple' } });
   expect(screen.getByLabelText('Пароль').getAttribute('autocomplete')).toBe('current-password');
   fireEvent.submit(screen.getByRole('button', { name: 'Войти' }).closest('form')!);
@@ -168,7 +194,7 @@ test('pending login cannot submit twice and reports a safe server error', async 
   vi.stubGlobal('fetch', fetch);
   render(<App />);
   await screen.findByRole('heading', { name: 'Вход' });
-  fireEvent.change(screen.getByLabelText('Имя владельца'), { target: { value: 'alice' } });
+  fireEvent.change(screen.getByLabelText('Логин'), { target: { value: 'alice' } });
   fireEvent.change(screen.getByLabelText('Пароль'), { target: { value: 'correct horse battery staple' } });
   const button = screen.getByRole('button', { name: 'Войти' }) as HTMLButtonElement;
   fireEvent.submit(button.closest('form')!);
@@ -177,7 +203,7 @@ test('pending login cannot submit twice and reports a safe server error', async 
   expect(screen.getByRole('status').textContent).toBe('Выполняется вход…');
   expect(fetch).toHaveBeenCalledTimes(3);
   finish(response(401, { code: 'INVALID_CREDENTIALS', message: 'Invalid credentials', requestId: 'request-3' }));
-  expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Неверное имя или пароль.');
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Неверный логин или пароль.');
   await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('alert')));
 });
 

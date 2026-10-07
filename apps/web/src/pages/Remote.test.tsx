@@ -463,7 +463,7 @@ test('App logout removes pending remote, then a late unauthorized command cannot
   fireEvent.click(within(screen.getByRole('dialog', { name: 'Выйти из приложения?' })).getByRole('button', { name: 'Выйти' }));
   expect((command[1]!.signal as AbortSignal).aborted).toBe(true);
   expect(screen.queryByRole('group', { name: 'Пульт' })).toBeNull(); await act(async () => {});
-  fireEvent.change(screen.getByLabelText('Имя владельца'), { target: { value: 'alice' } });
+  fireEvent.change(screen.getByLabelText('Логин'), { target: { value: 'alice' } });
   fireEvent.change(screen.getByLabelText('Пароль'), { target: { value: 'correct horse battery staple' } });
   fireEvent.submit(screen.getByRole('button', { name: 'Войти' }).closest('form')!); await act(async () => {});
   fireEvent.click(screen.getByRole('button', { name: /^Открыть телевизор / })); await act(async () => {});
