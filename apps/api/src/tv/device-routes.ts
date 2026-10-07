@@ -1,4 +1,4 @@
-import { addTvRequestSchema, addTvResponseSchema, tvDevicesResponseSchema, tvIdSchema } from '@remote-webos-tv/contracts';
+import { addTvRequestSchema, addTvResponseSchema, deleteTvRequestSchema, tvDevicesResponseSchema, tvIdSchema } from '@remote-webos-tv/contracts';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { AuthSessionService } from '../auth/sessions.js';
 import type { TvDeviceRegistry } from './device-registry.js';
@@ -25,6 +25,22 @@ export function registerTvDeviceRoutes(app: FastifyInstance, dependencies: {
   let closing = false;
   app.addHook('preClose', async () => { closing = true; await admission.pending; });
   app.get('/api/tvs', async () => tvDevicesResponseSchema.parse({ devices: await registry.list() }));
+  app.delete<{ Params: { tvId: string } }>('/api/tvs/:tvId', async (request, reply) => {
+    const tvId = tvIdSchema.safeParse(request.params.tvId);
+    if (!tvId.success || !deleteTvRequestSchema.safeParse(request.body).success) throw new TvServiceError('INVALID_REQUEST', 400);
+    const owner = sessionForRequest(request);
+    const unauthorized = Symbol('revoked deletion');
+    const authorize = () => {
+      if (!owner || !sessions.authenticate(owner)) throw unauthorized;
+      if (closing) throw new TvServiceError('SERVICE_CLOSED', 409);
+    };
+    const previous = admission.pending; let release!: () => void;
+    admission.pending = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try { authorize(); await registry.remove(tvId.data, authorize); return reply.code(204).send(); }
+    catch (cause) { if (cause === unauthorized) return reply.code(401).send({ code: 'UNAUTHORIZED', message: 'Unauthorized', requestId: request.id }); throw cause; }
+    finally { release(); }
+  });
   app.post('/api/tvs', async (request, reply) => {
     const parsed = addTvRequestSchema.safeParse(request.body);
     if (!parsed.success) throw new TvServiceError('INVALID_REQUEST', 400);

@@ -29,6 +29,29 @@ test('opens the exact selected card and returns without mutations', async () => 
   expect(screen.queryByRole('group', { name: 'Пульт' })).toBeNull();
   expect(fetch.mock.calls.at(-1)?.[0]).toBe('/api/tvs');
 });
+
+test('trash requires confirmation, cancellation does not open remote or delete, confirmed deletion removes the card', async () => {
+  let deleted = false;
+  const fetch = vi.fn(async (path: string, init?: RequestInit) => {
+    if (init?.method === 'DELETE') {
+      expect(path).toBe(`/api/tvs/${first}`);
+      expect(init.headers).toMatchObject({ 'x-csrf-token': 'c'.repeat(43) });
+      expect(JSON.parse(init.body as string)).toEqual({ confirm: true });
+      deleted = true; return new Response(null, { status: 204 });
+    }
+    return response({ devices: deleted ? [] : [device()] });
+  });
+  vi.stubGlobal('fetch', fetch); render(home()); await act(async () => {});
+  fireEvent.click(screen.getByRole('button', { name: 'Удалить телевизор Synthetic television' }));
+  expect(screen.queryByRole('group', { name: 'Пульт' })).toBeNull();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Отмена' }));
+  expect(deleted).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: 'Удалить телевизор Synthetic television' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Удалить' })); await act(async () => {});
+  expect(deleted).toBe(true);
+  expect(screen.getByText('Пока нет телевизоров')).toBeTruthy();
+});
 test.each([[[]], [[device()]]])('adding is available with an empty or populated list', async (devices) => {
   await mount(devices); fireEvent.click(screen.getByRole('button', { name: 'Добавить ТВ' }));
   expect(screen.getByLabelText('IP-адрес телевизора')).toBeTruthy();
@@ -38,7 +61,7 @@ test.each([['6.5.3', 'webOS 6.5.3'], [undefined, 'webOS']])('card has one action
   const card = screen.getByRole('button', { name: 'Открыть телевизор Synthetic television' });
   expect(within(card).getByText(label)).toBeTruthy();
   expect(card.textContent).not.toContain('99.8');
-  expect(card.closest('article')!.querySelectorAll('button')).toHaveLength(1);
+  expect(within(card.closest('article')!).getByRole('button', { name: 'Удалить телевизор Synthetic television' })).toBeTruthy();
 });
 test('list failure is not an empty state', async () => {
   vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network'))); render(home()); await act(async () => {});

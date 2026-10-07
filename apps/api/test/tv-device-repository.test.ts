@@ -39,6 +39,18 @@ test('emptyDatabaseStaysEmpty', async () => {
   finally { db.close(); }
 });
 
+test('deleting default and last TV preserves valid storage after restart', async () => {
+  const dataDir = await directory(); const db = await openDatabase({ dataDir });
+  const repo = repositories.createTvDeviceRepository(db.sqlite);
+  repo.forDevice(first).replace(tv); repo.forDevice(second).replace({ ...tv, host: '10.2.3.5' });
+  repo.remove(first);
+  expect(repo.legacyId()).toBe(second); expect(repo.forDevice(first).load()).toBeNull();
+  expect(repo.forDevice(second).load()?.encryptedClientKey).toEqual(tv.encryptedClientKey);
+  repo.remove(second); expect(repo.legacyId()).toBeNull(); db.close();
+  const reopened = await openDatabase({ dataDir });
+  try { expect(repositories.createTvDeviceRepository(reopened.sqlite).list()).toEqual([]); } finally { reopened.close(); }
+});
+
 test('idsAndDefaultSurviveRestart', async () => {
   const dataDir = await directory(); const db = await openDatabase({ dataDir });
   try { expect(repositories).toHaveProperty('createTvDeviceRepository'); const repo = repositories.createTvDeviceRepository(db.sqlite); repo.forDevice(first).replace(tv); repo.forDevice(second).replace({ ...tv, host: '10.2.3.5' }); }

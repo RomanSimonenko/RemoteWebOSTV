@@ -464,7 +464,7 @@ for (const width of [320, 1280]) {
       await page.setViewportSize({ width, height: 960 });
       await fixture(page, mode);
       await expect(page.getByRole('heading', { name: mode === 'login' ? 'Вход' : 'Первичная настройка', exact: true })).toBeVisible();
-      await expect(page.getByLabel('Имя владельца')).toBeInViewport();
+      await expect(page.getByLabel(mode === 'login' ? 'Логин' : 'Имя владельца')).toBeInViewport();
       await noOverflow(page);
     });
   }

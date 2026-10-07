@@ -1,19 +1,29 @@
-:root { font-family: system-ui, sans-serif; color: #f1f5f8; background: #10171d; color-scheme: dark; font-synthesis: none; }
+:root { --screen-header-gap: 20px; font-family: system-ui, sans-serif; color: #f1f5f8; background: #10171d; color-scheme: dark; font-synthesis: none; }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100vh; background: radial-gradient(ellipse at top, #1c2a33, #10171d 65%); }
 .shell { width: 100%; max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; }
 .app-header { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid #32414a; }
-.eyebrow { margin: 0; font-size: 1rem; font-weight: 700; letter-spacing: -.02em; }
+.eyebrow { margin: 0; font-size: 1.375rem; font-weight: 700; letter-spacing: -.02em; }
+.auth-header { max-width: 440px; margin: 28px auto 0; text-align: center; }
+.auth-header .eyebrow { font-size: 1.5rem; line-height: 1.25; }
+.auth-screen .form-card { margin-top: 20px; }
+.login-card .field-error { margin: 6px 0 0; font-size: .85rem; }
+.login-card [role="status"]:empty { display: none; }
+.login-card input[aria-invalid="true"] { border-color: #ffb4b4; }
 .header-actions { display: flex; flex-shrink: 0; align-items: center; gap: 8px; }
-.dashboard { margin-top: 44px; }
-.dashboard-screen .eyebrow { font-size: 1.4rem; }
-.dashboard-screen .app-header { padding-bottom: 24px; }
+.dashboard { margin-top: var(--screen-header-gap); }
 .dashboard-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 32px; }
-.dashboard-heading h1 { font-size: 2.5rem; margin: 0; }
+.dashboard-heading h1 { font-size: 1.75rem; margin: 0; }
 .dashboard-heading > button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap; }
 .dashboard-heading > button svg { width: 20px; height: 20px; }
 .device-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
-.device-card { min-width: 0; }
+.device-card { min-width: 0; position: relative; }
+.device-delete { position: absolute; top: 12px; right: 12px; display: grid; place-items: center; width: 36px; height: 36px; padding: 8px; border: 0; background: transparent; color: #a8b6bf; z-index: 1; }
+.device-delete:hover, .device-delete:focus-visible { color: #ffb4b4; background: #422c34; }
+.device-delete svg { width: 20px; height: 20px; }
+.delete-tv-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }
+.delete-tv-confirm { background: #8e303f; border-color: #b74455; }
+.device-card .device-connection { padding-right: 32px; }
 .device-card-main { display: flex; flex-direction: column; align-items: center; width: 100%; height: 100%; padding: 22px; border: 1px solid #334955; border-radius: 16px; background: #17232b; color: inherit; transition: border-color .18s ease, background-color .18s ease; }
 .device-card-main:hover, .device-card-main:focus-visible { border-color: #83bdce; background: #20323d; }
 .device-card-main h2 { margin: 20px 0 16px; max-width: 100%; overflow-wrap: anywhere; font-size: 1.2rem; }
@@ -31,13 +41,12 @@ body { margin: 0; min-width: 320px; min-height: 100vh; background: radial-gradie
 .dashboard-primary { display: inline-flex; align-items: center; justify-content: center; gap: 12px; margin: 24px 0 12px; padding: 14px 22px; background: #0875ef; border-color: #35b9ff; color: #fff; }
 .dashboard-primary:hover { background: #1686ff; }
 .dashboard-empty .muted { font-size: .85rem; color: #a8b6bf; }
-.tv-navigation { margin-top: 20px; }
+.tv-navigation { margin-top: var(--screen-header-gap); }
 .tv-navigation button { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; }
 @media (max-width: 800px) { .device-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 520px) {
   .device-grid { grid-template-columns: minmax(0, 1fr); }
   .dashboard { margin-top: 28px; }
-  .dashboard-screen .eyebrow { font-size: 1rem; }
   .dashboard-heading h1 { font-size: 2rem; }
   .dashboard-empty { padding: 32px 0; }
   .dashboard-empty h2 { font-size: 1.35rem; }

@@ -8,6 +8,7 @@ import { Dashboard } from './Dashboard.js';
 import { useTvDevices } from '../useTvDevices.js';
 import type { TvId } from '@remote-webos-tv/contracts';
 import { AddTv } from './AddTv.js';
+import { api, ApiFailure } from '../api.js';
 
 interface Props { username: string; csrfToken: string; tvActive: boolean; busy: boolean; error: ReactNode; onLogout(): void; onSessionExpired(): void }
 export function Home({ username, csrfToken, tvActive, busy, error, onLogout, onSessionExpired }: Props) {
@@ -61,7 +62,10 @@ function HomeContent({ username, csrfToken, tvActive, busy, error, onLogout, onS
     </header>
     <LogoutConfirmation open={confirmingLogout && !busy} anchor={logoutButton} onClose={() => setConfirmingLogout(false)} onConfirm={() => { setConfirmingLogout(false); onLogout(); }} />
     {tvActive && (screen === 'dashboard' ? <>
-      <Dashboard devices={devicesState.devices} loading={devicesState.loading} error={devicesState.error} onRetry={devicesState.refresh} onOpenTv={(id) => { setTvId(id); navigate('remote'); }} onAddTv={() => navigate('add')} />
+      <Dashboard devices={devicesState.devices} loading={devicesState.loading} error={devicesState.error} onRetry={devicesState.refresh} onOpenTv={(id) => { setTvId(id); navigate('remote'); }} onAddTv={() => navigate('add')} onDeleteTv={async (id, signal) => {
+        try { await api.deleteTv(id, csrfToken, signal); devicesState.remove(id); }
+        catch (cause) { devicesState.refresh(); if (cause instanceof ApiFailure && cause.status === 401) onSessionExpired(); throw cause; }
+      }} />
       <SettingsDialog title="Настройки аккаунта" open={settingsOpen} onClose={() => setSettingsOpen(false)}><p className="session-caption">Вы вошли как {username}.</p></SettingsDialog>
     </> : <>
       <nav className="tv-navigation" aria-label="Телевизоры"><button type="button" disabled={confirmingPower} onClick={() => navigate('dashboard')}><IconArrowLeft aria-hidden="true" />Телевизоры</button></nav>

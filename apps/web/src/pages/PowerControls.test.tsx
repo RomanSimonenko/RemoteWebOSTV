@@ -3,6 +3,15 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { PowerControls } from './PowerControls.js';
 
 const csrfToken = 'c'.repeat(43);
+test('server-authorized wake stays usable during automatic recovery', async () => {
+  const fetch = vi.fn().mockResolvedValue(response({ ...wake, busy: true, operation: { ...operation, action: 'recover', status: 'running' } }));
+  vi.stubGlobal('fetch', fetch); await mount();
+  const button = screen.getByRole('button', { name: 'Включить ТВ' }) as HTMLButtonElement;
+  expect(button.disabled).toBe(false);
+  fireEvent.click(button);
+  await act(async () => {});
+  expect(fetch.mock.calls.some(([, init]) => init?.method === 'POST' && JSON.parse(init.body).action === 'wake')).toBe(true);
+});
 test('unknown shutdown delivery does not expire with the unconfirmed warning timer', async () => {
   vi.useFakeTimers();
   vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(response({ ...wake, operation: { ...operation, action: 'power_off', status: 'failed', phase: 'finished', delivery: 'unknown', error: { code: 'POWER_OFF_UNCONFIRMED', message: 'Synthetic warning' } } }))));

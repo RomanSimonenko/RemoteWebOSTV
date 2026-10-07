@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { TvDevice } from '@remote-webos-tv/contracts';
+import type { TvDevice, TvId } from '@remote-webos-tv/contracts';
 import { api, ApiFailure, friendlyError } from './api.js';
 
 /** Only the dashboard owns list polling. Cleanup rejects replies from old screens. */
@@ -10,6 +10,12 @@ export function useTvDevices(onSessionExpired: () => void, enabled = true) {
   const expired = useRef(onSessionExpired);
   expired.current = onSessionExpired;
   const requestRefresh = useRef<() => void>(() => {});
+  const revision = useRef(0);
+  const remove = useCallback((tvId: TvId) => {
+    revision.current++;
+    setDevices(current => current?.filter(device => device.tvId !== tvId) ?? null);
+    requestRefresh.current();
+  }, []);
   const refresh = useCallback(() => requestRefresh.current(), []);
   useEffect(() => {
     setDevices(null); setError(''); setLoading(enabled);
@@ -24,15 +30,16 @@ export function useTvDevices(onSessionExpired: () => void, enabled = true) {
     async function read() {
       if (!active || inFlight) return;
       inFlight = true;
+      const version = revision.current;
       controller = new AbortController();
       try {
         const next = await api.tvDevices(controller.signal);
-        if (!active) return;
+        if (!active || version !== revision.current) return;
         setDevices(next.devices); setError('');
       } catch (cause) {
         if (!active) return;
         if (cause instanceof ApiFailure && cause.status === 401) { active = false; expired.current(); }
-        else setError(friendlyError(cause));
+        else if (version === revision.current) setError(friendlyError(cause));
       } finally {
         inFlight = false;
         if (active) { setLoading(false); schedule(); }
@@ -42,5 +49,5 @@ export function useTvDevices(onSessionExpired: () => void, enabled = true) {
     void read();
     return () => { active = false; requestRefresh.current = () => {}; if (timer !== undefined) clearTimeout(timer); controller?.abort(); };
   }, [enabled]);
-  return { devices, loading, error, refresh };
+  return { devices, loading, error, refresh, remove };
 }

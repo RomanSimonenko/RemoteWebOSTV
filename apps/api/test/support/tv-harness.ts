@@ -41,6 +41,7 @@ export class ControlledAdapter implements WebOsAdapter {
   readonly enteredPair = barrier<PairingRequest>();
   readonly enteredRead = barrier<AbortSignal>();
   readonly disconnected = barrier<void>();
+  readonly enteredDisconnect = barrier<void>();
   pairResult = barrier<PairingResult>();
   readResult = barrier<TvSnapshot>();
   disconnectResult: Promise<void> = Promise.resolve();
@@ -61,7 +62,7 @@ export class ControlledAdapter implements WebOsAdapter {
     return this.pairResult.promise;
   }
   async readSnapshot(signal: AbortSignal) { this.reads++; this.enteredRead.resolve(signal); return this.readResult.promise; }
-  async disconnect() { this.closed = true; await this.disconnectResult; this.disconnected.resolve(); }
+  async disconnect() { this.closed = true; this.enteredDisconnect.resolve(); await this.disconnectResult; this.disconnected.resolve(); }
   async openPointerSocket() { throw new Error('outside test scope'); }
   async listApps() { return []; }
   async listInputs() { return []; }

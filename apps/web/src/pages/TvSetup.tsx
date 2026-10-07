@@ -158,7 +158,8 @@ function TvSetupContent({ tvId, onReady, username, csrfToken, identityTarget, on
     {tv && <span id="connection-tooltip" role="tooltip" className="connection-tooltip">{connectionText}</span>}
   </div>;
   return <>{identityTarget ? createPortal(identity, identityTarget) : identity}<section className={tv ? 'tv-layout' : 'form-card'}>
-    {!tv && <h1>Телевизор ещё не настроен</h1>}
+    {!tv && status && <h1>Телевизор ещё не настроен</h1>}
+    {!tv && !status && !error && showActivity && <p role="status">Загрузка телевизора…</p>}
     {tv && <div className={`connection-progress${settingsOpen ? ' reserved-activity' : ''}`} hidden={!running || powerRunning} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{running && !powerRunning && activity(!settingsOpen)}</div>}
     {tv && <div className="tv-card">
       <div className="remote-top">{connectionIndicator}</div>
@@ -166,12 +167,12 @@ function TvSetupContent({ tvId, onReady, username, csrfToken, identityTarget, on
       <Remote {...(tvId ? { tvId } : {})} csrfToken={csrfToken} active quietOffline={quietRemoteUnavailable} interactionBlocked={settingsOpen} activityTarget={remoteActivityTarget} onSessionExpired={onSessionExpired} onBusyChange={setRemoteBusy} />
     </div>}
     <div className="tv-activity">
-      {!tv && <div className={status?.connection === 'unconfigured' ? 'visually-hidden' : undefined}>{connectionIndicator}</div>}
+      {!tv && (status || error) && <div className={status?.connection === 'unconfigured' ? 'visually-hidden' : undefined}>{connectionIndicator}</div>}
       <div className={settingsOpen ? 'reserved-activity' : undefined} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{!(tv && running && !powerRunning) && activity(true)}</div>
       <div className="power-activity" ref={setPowerActivityTarget} />
       <div ref={setRemoteActivityTarget} />
     </div>
-    {!tv && <>{addressForm}<button type="button" disabled={loading} onClick={refresh}>Обновить статус</button></>}
+    {!tv && (status || error) && <>{addressForm}<button type="button" disabled={loading} onClick={refresh}>Обновить статус</button></>}
     <SettingsDialog open={settingsOpen} onClose={onCloseSettings}>
       {tv ? <><section className="settings-section">
         <p className="settings-identity"><span className="settings-model">Модель: {tv.identity.model}</span>{settingsOpen && <span className="tv-version">{tv.identity.platformVersion ? `webOS ${tv.identity.platformVersion}` : 'Версия неизвестна'}</span>}</p>

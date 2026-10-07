@@ -95,7 +95,7 @@ export function useTvPower(active: boolean, csrfToken: string, onSessionExpired:
 
   function start(action: 'wake' | 'power_off') {
     const current = runtime.current;
-    if (!active || !current?.active || current.pending || !current.state || (action === 'wake' ? !current.state.canWake : !current.state.canPowerOff) || current.state.operation?.status === 'running') return;
+    if (!active || !current?.active || current.pending || !current.state || (action === 'wake' ? !current.state.canWake : !current.state.canPowerOff) || (current.state.operation?.status === 'running' && !(action === 'wake' && current.state.operation.action === 'recover'))) return;
     let id: string;
     try { id = requestId(); }
     catch { setMessage('Операция не отправлена. Не удалось подготовить идентификатор операции.'); return; }

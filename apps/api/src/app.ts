@@ -123,7 +123,7 @@ export function buildApp({ config, getSetupState, webRoot, auth, tv, tvs, report
     const admission = { pending: Promise.resolve() };
     registerTvRoutes(app, { service: tv, ...targets, sessions: auth.sessions, sessionForRequest: sessionForRequest!, beforeTvAttempt, admission });
     registerTvCommandRoutes(app, { service: tv, ...targets, sessions: auth.sessions, sessionForRequest: sessionForRequest!, beforeCommandAttempt: createTvCommandLimiter(app) });
-    registerTvPowerRoutes(app, { service: tv, ...targets, sessions: auth.sessions, sessionForRequest: sessionForRequest!, beforePowerAttempt: createTvPowerLimiter(app) });
+    registerTvPowerRoutes(app, { service: tv, ...targets, ...(tvs ? { receiptScope: (service: TvService) => tvs.identity(service)! } : {}), sessions: auth.sessions, sessionForRequest: sessionForRequest!, beforePowerAttempt: createTvPowerLimiter(app) });
     if (tvs) registerTvDeviceRoutes(app, { registry: tvs, sessions: auth.sessions, sessionForRequest: sessionForRequest!, beforeTvAttempt, admission });
   }
 

@@ -14,7 +14,9 @@ test('dashboard adds the first TV, opens remote and returns without another pair
   await expect(page.getByRole('button', { name: /^Открыть телевизор / })).toBeVisible();
   const card = page.getByRole('button', { name: /^Открыть телевизор / });
   await expect(page.getByRole('button', { name: 'Открыть пульт', exact: true })).toHaveCount(0);
-  await expect(page.locator('.device-card button')).toHaveCount(1);
+  await expect(page.locator('.device-card button')).toHaveCount(2);
+  await expect(page.locator('.device-card').getByRole('button', { name: /^Открыть телевизор / })).toHaveCount(1);
+  await expect(page.locator('.device-card').getByRole('button', { name: /^Удалить телевизор / })).toHaveCount(1);
   await card.hover();
   await expect(card).toHaveCSS('border-color', 'rgb(131, 189, 206)');
   await expect(page.getByRole('heading', { name: 'Телевизоры', exact: true })).toBeVisible();

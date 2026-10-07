@@ -76,9 +76,30 @@ test('CLI token claims one owner and browser session survives reload until logou
   });
   expect(secondClaim.status()).toBe(403);
 
-  await page.getByLabel('Имя владельца').fill('alice');
-  await page.getByLabel('Пароль').fill(password);
+  await page.setViewportSize({ width: 2419, height: 1248 });
+  const brand = page.getByText('Smart TV Remote Hub', { exact: true });
+  const headingBounds = await brand.evaluate((element) => {
+    const range = document.createRange(); range.selectNodeContents(element);
+    const bounds = range.getBoundingClientRect();
+    return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
+  });
+  const formBounds = (await page.locator('.login-card').boundingBox())!;
+  expect(Math.abs(headingBounds.x + headingBounds.width / 2 - formBounds.x - formBounds.width / 2)).toBeLessThan(1);
+  expect(formBounds.y - headingBounds.y - headingBounds.height).toBeLessThanOrEqual(24);
+  await page.getByLabel('Пароль').fill('short');
   await page.getByRole('button', { name: 'Войти' }).click();
+  await expect(page.getByText('Введите логин.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Пароль: от 12 до 128 символов.', { exact: true })).toBeVisible();
+  await page.getByLabel('Логин').fill('alice');
+  await page.getByLabel('Пароль').fill('wrong synthetic password');
+  await page.getByRole('button', { name: 'Войти' }).click();
+  await expect(page.getByRole('alert')).toHaveText('Неверный логин или пароль.');
+  await expect(page.getByLabel('Логин')).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.getByLabel('Пароль')).toHaveAttribute('aria-invalid', 'true');
+
+  await page.getByLabel('Логин').fill('alice');
+  await page.getByLabel('Пароль').fill(password);
+  await page.getByLabel('Пароль').press('Enter');
   await expect(page.getByRole('heading', { name: 'Пока нет телевизоров' })).toBeVisible();
 
   const cookies = await page.context().cookies(origin);

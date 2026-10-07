@@ -285,9 +285,11 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
         try {
           await connect(context, input, previous, controller.signal, budget);
           finish(context, 'succeeded');
-          // A successful manual connection supersedes exhausted automatic recovery,
-          // but must retain explicit power-operation delivery receipts.
-          if (!context.power && power?.operation.action === 'recover' && power.operation.status !== 'running') power = undefined;
+          // Successful manual connection supersedes connection-only failures.
+          // Terminal delivery receipts were already retained by onPowerFinished;
+          // send failures and uncertain delivery remain actionable diagnostics.
+          if (!context.power && power && (power.operation.action === 'recover' && power.operation.status !== 'running'
+            || power.operation.action === 'wake' && power.operation.status === 'failed' && power.operation.delivery === 'sent' && power.operation.error?.code === 'RECOVERY_TIMEOUT')) power = undefined;
           break;
         } catch (cause) {
           adapter = activeAdapter;
@@ -360,7 +362,8 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     error = undefined;
     probe?.controller.abort(new TvServiceError('CANCELLED'));
     // Defer the worker so the synchronous start always publishes the accepted operation first.
-    work = Promise.resolve().then(() => run(context, input, saved)).finally(() => { work = undefined; });
+    const pending = Promise.resolve().then(() => run(context, input, saved)).finally(() => { if (work === pending) work = undefined; });
+    work = pending;
     return copyOperation(operation);
   }
 
@@ -431,13 +434,19 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     if (work || cleanup || command || probe) throw new TvServiceError('OPERATION_CONFLICT', 409);
   }
 
+  function canReplaceReconnect(): boolean {
+    return !closed && !unsafeCleanup && !command && !probe && !!work && attempt?.operation.status === 'running'
+      && (connection === 'connecting' || connection === 'unavailable')
+      && attempt.operation.action === 'reconnect' && (!attempt.power || attempt.power.operation.action === 'recover');
+  }
+
   function powerState(): TvPowerState {
     const idle = !closed && !unsafeCleanup && !work && !cleanup && !command && !probe;
     return {
       busy: !!(work || cleanup || command || probe),
       mac: saved?.macAddress ?? null,
       canPowerOff: idle && connection === 'available' && !!activeAdapter && remoteCapability?.generation === generation && remoteCapability.powerOff === true,
-      canWake: idle && !!saved?.macAddress && connection === 'unavailable',
+      canWake: !!saved?.macAddress && (idle && connection === 'unavailable' || canReplaceReconnect()),
       operation: power ? { ...power.operation, ...(power.operation.error ? { error: { ...power.operation.error } } : {}) } : null,
     };
   }
@@ -457,10 +466,10 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
   function assertCanStartPower(input: TvPowerRequest): TvPowerRequest {
     const parsed = tvPowerRequestSchema.safeParse(input);
     if (!parsed.success) throw new TvServiceError('INVALID_REQUEST', 400);
-    assertIdle();
+    if (!(parsed.data.action === 'wake' && canReplaceReconnect())) assertIdle();
     if (parsed.data.action === 'wake') {
       if (!saved?.macAddress) throw new TvServiceError('WOL_NOT_CONFIGURED', 409);
-      if (connection !== 'unavailable') throw new TvServiceError('INVALID_ACTION', 409);
+      if (connection !== 'unavailable' && !canReplaceReconnect()) throw new TvServiceError('INVALID_ACTION', 409);
     } else {
       if (connection !== 'available' || !activeAdapter || remoteCapability?.generation !== generation) throw new TvServiceError('TV_UNAVAILABLE', 409);
       if (!remoteCapability.powerOff) throw new TvServiceError('UNSUPPORTED_CAPABILITY', 409);
@@ -468,7 +477,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     return parsed.data;
   }
 
-  function beginPower(input: { readonly id: string; readonly action: TvPowerOperation['action'] }, owner: string | symbol): TvPowerOperation {
+  function beginPower(input: { readonly id: string; readonly action: TvPowerOperation['action'] }, owner: string | symbol, previousWork?: Promise<void>): TvPowerOperation {
     const startedAt = dependencies.now();
     const budget = input.action === 'power_off' ? 5_000 : recoveryTimeoutMs;
     const controller = new AbortController();
@@ -484,12 +493,16 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     if (input.action !== 'power_off') { intentionalOff = false; connection = 'connecting'; remoteCapability = undefined; }
     error = undefined;
     const previous = saved!;
-    work = Promise.resolve().then(() => runPower(context, previous)).finally(() => { work = undefined; });
+    const pending = Promise.resolve().then(() => runPower(context, previous, previousWork)).finally(() => { if (work === pending) work = undefined; });
+    work = pending;
     return { ...operation };
   }
 
   function startPower(input: TvPowerRequest, owner: string): TvPowerOperation {
-    return beginPower(assertCanStartPower(input), owner);
+    const accepted = assertCanStartPower(input);
+    const previousWork = accepted.action === 'wake' && canReplaceReconnect() ? work : undefined;
+    if (previousWork) cancelAttempt(attempt!);
+    return beginPower(accepted, owner, previousWork);
   }
 
   function cancelPower(id: string, owner: string): TvPowerOperation {
@@ -528,7 +541,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     }
   }
 
-  async function runPower(context: Attempt, previous: StoredTv): Promise<void> {
+  async function runPower(context: Attempt, previous: StoredTv, previousWork?: Promise<void>): Promise<void> {
     const current = context.power!;
     if (current.operation.action === 'recover') { await run(context, { action: 'reconnect' }, previous); return; }
     const signal = context.controller.signal;
@@ -537,6 +550,9 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     let ownedCleanup: Promise<void> | undefined;
     let observedSend = false;
     try {
+      // Keep ownership until the superseded connection has disposed its transport.
+      // A timeout or cancellation must not release this cleanup gate early.
+      if (previousWork) await abortable(previousWork, signal);
       check(context);
       adapter = current.operation.action === 'power_off' ? activeAdapter! : dependencies.createAdapter(previous.host, createStagingKeyStore(), Math.min(5_000, context.expiresAt - scheduler.now()), false);
       if (current.operation.action === 'wake') activeAdapter = adapter;
@@ -571,6 +587,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       }
       // Publication is bounded; transport and cleanup ownership are not released
       // by racing an AbortSignal. Late completion cannot rewrite the terminal result.
+      if (previousWork) await previousWork;
       if (pending) await pending.then(() => undefined, (lateCause: unknown) => {
         latchCleanupFailure(lateCause);
         if (signal.aborted && failure instanceof Error && lateCause !== failure) failure.cause = lateCause;

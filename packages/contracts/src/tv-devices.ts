@@ -10,6 +10,7 @@ export const tvDeviceSchema = z.strictObject({
 });
 export type TvDevice = Readonly<z.infer<typeof tvDeviceSchema>>;
 export const tvDevicesResponseSchema = z.strictObject({ devices: z.array(tvDeviceSchema) });
+export const deleteTvRequestSchema = z.strictObject({ confirm: z.literal(true) });
 export const addTvRequestSchema = z.strictObject({
   id: z.uuid(), platform: z.literal('webos'), host: localTvHostSchema,
 });

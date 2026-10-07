@@ -3,6 +3,8 @@ import type { TvDeviceRepository, TvRepository } from './repository.js';
 import { TvServiceError, type TvScheduler, type TvService } from './service.js';
 
 export interface TvDeviceRegistry {
+  identity(service: TvService): TvId | undefined;
+  remove(tvId: TvId, beforeCommit: () => void): Promise<void>;
   list(): Promise<TvDevice[]>;
   get(tvId: TvId): TvService | null;
   add(request: AddTvRequest, owner: string): AddTvResponse;
@@ -25,10 +27,12 @@ export function createTvDeviceRegistry(dependencies: {
 }): TvDeviceRegistry {
   const { repository, scheduler } = dependencies;
   const entries = new Map<TvId, Entry>();
+  const serviceIds = new WeakMap<TvService, TvId>();
   const reservedHosts = new Map<string, TvId>();
   const receipts = new Map<string, Map<string, Receipt>>();
   const pendingClosures = new Set<Promise<void>>();
   const cleanupFailures: unknown[] = [];
+  const removing = new Set<TvId>();
   let legacyId = repository.legacyId();
   let closing: Promise<void> | undefined;
   let closed = false;
@@ -88,7 +92,7 @@ export function createTvDeviceRegistry(dependencies: {
         } catch (cause) { releaseHosts(tvId); throw cause; }
       },
     };
-    entries.set(tvId, { service }); return service;
+    entries.set(tvId, { service }); serviceIds.set(service, tvId); return service;
   }
   function assertCanAdd(input: AddTvRequest, owner: string): AddTvResponse | null {
     if (closed) throw new TvServiceError('SERVICE_CLOSED', 409);
@@ -105,9 +109,37 @@ export function createTvDeviceRegistry(dependencies: {
     return null;
   }
   return {
+    identity: (service) => serviceIds.get(service),
+    async remove(tvId, beforeCommit) {
+      if (closed) throw new TvServiceError('SERVICE_CLOSED', 409);
+      if (removing.has(tvId)) throw new TvServiceError('OPERATION_CONFLICT', 409);
+      if (!entries.has(tvId) && !repository.forDevice(tvId).hasStoredKey()) { beforeCommit(); return; }
+      removing.add(tvId);
+      let cleaned = false;
+      try {
+        const service = ensure(tvId);
+        const pending = service.close(); pendingClosures.add(pending);
+        try { await pending; cleaned = true; } finally { pendingClosures.delete(pending); }
+        beforeCommit();
+        if (closed) throw new TvServiceError('SERVICE_CLOSED', 409);
+        repository.remove(tvId);
+        if (legacyId === tvId) legacyId = null;
+        for (const owned of receipts.values()) for (const receipt of owned.values()) if (receipt.tvId === tvId) receipt.expired = true;
+      } finally {
+        // Failed authorization/storage after a successful close must not leave
+        // a saved TV permanently bound to a closed service. Unsafe cleanup,
+        // however, retains its fail-closed owner until shutdown.
+        if (cleaned) {
+          const entry = entries.get(tvId);
+          if (entry?.timer !== undefined) scheduler.clearTimeout(entry.timer);
+          entries.delete(tvId); releaseHosts(tvId);
+        }
+        removing.delete(tvId);
+      }
+    },
     assertCanAdd,
     async list() { return Promise.all(repository.list().map(async ({ tvId, platform }) => ({ tvId, platform, status: await ensure(tvId).status() }))); },
-    get(tvId) { if (closed) return null; return entries.get(tvId)?.service ?? (repository.list().some((tv) => tv.tvId === tvId) ? ensure(tvId) : null); },
+    get(tvId) { if (closed || removing.has(tvId)) return null; return entries.get(tvId)?.service ?? (repository.list().some((tv) => tv.tvId === tvId) ? ensure(tvId) : null); },
     add(input, owner) {
       const previous = assertCanAdd(input, owner);
       if (previous) return previous;

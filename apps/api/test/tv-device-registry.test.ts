@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { createClientKeyCipher, WebOsError } from '@remote-webos-tv/webos';
 import { schemaMigrations } from '../src/storage/migrations.js';
 import { createTvDeviceRepository } from '../src/tv/repository.js';
@@ -32,6 +32,26 @@ test('isolatesTwoServices', async () => {
   await h.registry.get(second.tvId)!.sendCommand({ id: request(200).id, button: 'DOWN' }, signal);
   expect(h.adapters[0]!.sent).toEqual(['UP']); expect(h.adapters[1]!.sent).toEqual(['DOWN']);
   expect(h.registry.legacy()).toBe(h.registry.get(first.tvId));
+});
+
+test('deleting a pending draft closes it and prevents late pairing from saving it', async () => {
+  const h = setup(); const accepted = h.registry.add(request(100), 'session'); await drain();
+  const pending = h.registry.remove(accepted.tvId, () => {}); await drain(); await pending;
+  h.adapters[0]!.pairResult.resolve({ clientKey: 'synthetic-key', identity: { model: 'Synthetic' }, capabilities: { ssap: true, pointer: false, powerOff: false, wakeOnLan: false, apps: false, inputs: false, textInput: false, notifications: false }, transport: 'ws:3000', macAddresses: [] });
+  await drain(); expect(h.repository.list()).toEqual([]);
+  expect(h.registry.get(accepted.tvId)).toBeNull();
+  expect(() => h.registry.add(request(100), 'session')).toThrowError(expect.objectContaining({ code: 'OPERATION_NOT_FOUND' }));
+});
+
+test('storage failure retains the saved TV and lets it reconnect with a fresh service', async () => {
+  const h = setup(); const accepted = h.registry.add(request(100), 'session'); await drain(); await succeed(h.adapters[0]!);
+  const old = h.registry.get(accepted.tvId)!;
+  const removal = vi.spyOn(h.repository, 'remove').mockImplementationOnce(() => { throw new Error('synthetic storage failure'); });
+  await expect(h.registry.remove(accepted.tvId, () => {})).rejects.toThrow('synthetic storage failure');
+  expect(h.repository.list()).toHaveLength(1); removal.mockRestore();
+  const fresh = h.registry.get(accepted.tvId)!; expect(fresh).not.toBe(old);
+  fresh.start({ action: 'reconnect' }); await drain(); await succeed(h.adapters[1]!);
+  expect((await fresh.status()).connection).toBe('available');
 });
 
 test('sameRequestDoesNotPairTwiceAndChangedRequestConflicts', async () => {
