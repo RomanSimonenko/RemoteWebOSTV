@@ -222,7 +222,7 @@ describe('TV service persistence and projection', () => {
       service = createTvService(fixture.dependencies); await service.initialize(); await fixture.readFinished.promise; await drain();
       expect((await service.status()).connection).toBe('available'); expect(fixture.mock.pairingPromptCount).toBe(1);
       expect(fixture.repository.load()?.macAddress).toBe('02:00:00:00:00:01');
-      expect(fixture.sql.prepare('SELECT count(*) AS count FROM tv_config').get()).toEqual({ count: 1 });
+      expect(fixture.sql.prepare('SELECT count(*) AS count FROM tv_devices').get()).toEqual({ count: 1 });
     } finally { await service.close(); await fixture.mock.stop(); fixture.sql.close(); }
   });
 
@@ -263,6 +263,7 @@ async function protocolFixture(scenario: 'success' | 'identity-loss') {
   await mock.start();
   const sql = new Database(':memory:'); sql.exec(tvConfigTableSql);
   schemaMigrations[2]!.up(sql);
+  schemaMigrations[3]!.up(sql);
   const repository = createTvRepository(sql);
   const cipher = createClientKeyCipher(Buffer.alloc(32, 7));
   const committed = barrier<void>(); const staged = barrier<void>();
