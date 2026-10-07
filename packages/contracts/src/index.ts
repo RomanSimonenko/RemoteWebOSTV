@@ -3,3 +3,4 @@ export * from './auth.js';
 export * from './tv-setup.js';
 export * from './tv-command.js';
 export * from './tv-power.js';
+export * from './tv-devices.js';
