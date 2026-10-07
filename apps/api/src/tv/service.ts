@@ -26,6 +26,7 @@ export interface TvServiceDependencies {
   readonly scheduler: TvScheduler;
   readonly recoveryTimeoutMs?: number;
   readonly onVersionDiagnostic?: (diagnostic: TvVersionDiagnostic) => void;
+  readonly onOperationFinished?: (operation: TvOperation) => void;
 }
 export interface TvVersionDiagnostic {
   readonly operation: 'hello';
@@ -257,6 +258,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       const { operation, owner } = context.power;
       for (const listener of powerFinishedListeners) listener({ ...operation, ...(operation.error ? { error: { ...operation.error } } : {}) }, owner);
     }
+    if (!context.power && status !== 'running') dependencies.onOperationFinished?.(copyOperation(context.operation));
   }
 
   async function run(context: Attempt, input: StartTvOperation, previous: StoredTv | null): Promise<void> {

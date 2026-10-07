@@ -11,7 +11,8 @@ import { createOwnerSetupService } from './auth/service.js';
 import { createAuthSessionService, loadAuthMasterKey } from './auth/sessions.js';
 import { openDatabase } from './storage/database.js';
 import { safeCauseTypes, safeListenTextResolver } from './security/logging.js';
-import { createTvRepository } from './tv/repository.js';
+import { createTvDeviceRepository } from './tv/repository.js';
+import { createTvDeviceRegistry, type TvDeviceRegistry } from './tv/device-registry.js';
 import { createTvService, type TvService, type TvServiceDependencies, type TvScheduler, type TvVersionDiagnostic } from './tv/service.js';
 
 const runtimeScheduler: TvScheduler = {
@@ -32,6 +33,8 @@ export async function createApiRuntime(config: AppConfig, options: {
 } = {}) {
   const database = await (options.openDatabase ?? openDatabase)({ dataDir: config.dataDir });
   let tv: TvService | undefined;
+  let tvs: TvDeviceRegistry | undefined;
+  let unsubscribeRegistry: (() => void) | undefined;
   let logger: FastifyInstance['log'] | undefined;
   const pendingVersionDiagnostics: TvVersionDiagnostic[] = [];
   const logVersionDiagnostic = (diagnostic: TvVersionDiagnostic) => {
@@ -40,7 +43,8 @@ export async function createApiRuntime(config: AppConfig, options: {
   };
   const closeResources = async () => {
     const failures: unknown[] = [];
-    try { await tv?.close(); } catch (cause) { failures.push(cause); }
+    unsubscribeRegistry?.();
+    try { await tvs?.close(); } catch (cause) { failures.push(cause); }
     try { database.close(); } catch (cause) { failures.push(cause); }
     if (failures.length === 1) throw failures[0];
     if (failures.length > 1) throw new AggregateError(failures, 'API resource cleanup failed');
@@ -49,12 +53,13 @@ export async function createApiRuntime(config: AppConfig, options: {
     const repository = createOwnerRepository(database.sqlite);
     const masterKey = await loadAuthMasterKey(config.dataDir, () => repository.hasSessions(), options.randomBytes);
     const sessions = await createAuthSessionService({ repository, masterKey, ...options });
-    const tvRepository = createTvRepository(database.sqlite);
+    const tvRepository = createTvDeviceRepository(database.sqlite);
     // Initialize exactly one cipher before exposing HTTP, even with no saved TV.
-    const cipher = await loadClientKeyCipher({ directory: config.dataDir, hasStoredKey: tvRepository.hasStoredKey() });
+    const cipher = await loadClientKeyCipher({ directory: config.dataDir, hasStoredKey: tvRepository.list().length > 0 });
     const now = options.now ?? Date.now;
-    tv = createTvService({
-      repository: tvRepository, cipher, now, newId: options.newId ?? randomUUID,
+    tvs = createTvDeviceRegistry({ repository: tvRepository, scheduler: options.scheduler ?? runtimeScheduler, newId: randomUUID,
+      createService: (repository, onOperationFinished) => createTvService({
+      repository, cipher, now, newId: options.newId ?? randomUUID, onOperationFinished,
       scheduler: options.scheduler ?? runtimeScheduler,
       recoveryTimeoutMs: config.recoveryTimeoutMs ?? 60_000,
       onVersionDiagnostic: logVersionDiagnostic,
@@ -62,8 +67,10 @@ export async function createApiRuntime(config: AppConfig, options: {
         host, keyStore, requestTimeoutMs, handshakeTimeoutMs: requestTimeoutMs, allowPairingPrompt, now: () => new Date(now()),
         ...(config.wolBroadcastAddress === undefined ? {} : { wolBroadcastAddress: config.wolBroadcastAddress }),
       })),
-    });
-    await tv.initialize();
+    }) });
+    unsubscribeRegistry = sessions.onRevoke((owner) => tvs!.revoke(owner));
+    await tvs.initialize();
+    tv = tvs.legacy();
     const app = buildApp({
       config,
       tv,
