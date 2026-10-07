@@ -74,6 +74,7 @@ export async function createApiRuntime(config: AppConfig, options: {
     const app = buildApp({
       config,
       tv,
+      tvs,
       ...(options.logStream ? { logStream: options.logStream } : {}),
       ...(options.webRoot ? { webRoot: options.webRoot } : {}),
       getSetupState: async () => repository.getSetupState(),

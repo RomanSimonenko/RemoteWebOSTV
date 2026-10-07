@@ -5,6 +5,7 @@ export type PublicTvError = NonNullable<TvStatusResponse['error']>;
 const messages = {
   OPERATION_CONFLICT: 'Другая операция с телевизором ещё не завершена.',
   DUPLICATE_TV_HOST: 'Телевизор с этим адресом уже добавлен или подключается.',
+  TV_NOT_FOUND: 'Телевизор не найден.',
   INVALID_ACTION: 'Это действие недоступно для текущей настройки телевизора.',
   INVALID_REQUEST: 'Некорректный запрос настройки телевизора.',
   OPERATION_NOT_FOUND: 'Операция с телевизором не найдена.',

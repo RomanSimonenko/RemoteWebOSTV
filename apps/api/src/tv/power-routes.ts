@@ -5,6 +5,8 @@ import { projectTvError, TvServiceError, type TvService } from './service.js';
 
 export interface TvPowerRoutesDependencies {
   readonly service: TvService;
+  readonly resolveService?: (request: FastifyRequest) => TvService;
+  readonly prefixes?: readonly string[];
   readonly sessions: AuthSessionService;
   readonly sessionForRequest: (request: FastifyRequest) => string | undefined;
   readonly beforePowerAttempt: (request: FastifyRequest, reply: FastifyReply) => Promise<(() => Promise<void>) | undefined>;
@@ -13,7 +15,7 @@ export interface TvPowerRoutesDependencies {
 interface Receipt { readonly action: TvPowerRequest['action']; operation: TvPowerOperation }
 const receiptCapacity = 100;
 
-export function registerTvPowerRoutes(app: FastifyInstance, { service, sessions, sessionForRequest, beforePowerAttempt }: TvPowerRoutesDependencies): void {
+export function registerTvPowerRoutes(app: FastifyInstance, { service: defaultService, resolveService, prefixes = ['/api/tv'], sessions, sessionForRequest, beforePowerAttempt }: TvPowerRoutesDependencies): void {
   let admission = Promise.resolve();
   let closing = false;
   const receipts = new Map<string, Map<string, Receipt>>();
@@ -23,20 +25,34 @@ export function registerTvPowerRoutes(app: FastifyInstance, { service, sessions,
     if (!(cause instanceof TvServiceError)) throw cause;
     return reply.code(cause.code === 'UNSUPPORTED_CAPABILITY' ? 422 : cause.statusCode).send({ ...projectTvError(cause), requestId: request.id });
   };
-  const unsubscribePower = service.onPowerFinished((operation, owner) => {
+  const subscriptions = new Map<TvService, { key: number; unsubscribe(): void }>();
+  function watch(service: TvService) {
+    if (subscriptions.has(service)) return;
+    const key = subscriptions.size;
+    const unsubscribe = service.onPowerFinished((operation, owner) => {
     if (typeof owner !== 'string') return;
-    const receipt = receipts.get(owner)?.get(operation.id);
+    const receipt = receipts.get(owner)?.get(`${key}:${operation.id}`);
     if (receipt) receipt.operation = operation;
-  });
-  const unsubscribe = sessions.onRevoke((token) => {
+    });
+    subscriptions.set(service, { key, unsubscribe });
+  }
+  watch(defaultService);
+  function serviceFor(request: FastifyRequest) { const service = resolveService?.(request) ?? defaultService; watch(service); return service; }
+  const receiptKey = (service: TvService, id: string) => `${subscriptions.get(service)!.key}:${id}`;
+  const unsubscribe = sessions.onRevoke(async (token) => {
     receipts.delete(token);
-    return service.cancelOwnedPower(token);
+    const results = await Promise.allSettled([...subscriptions.keys()].map((service) => service.cancelOwnedPower(token)));
+    const errors = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected').map((result) => result.reason as unknown);
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw new AggregateError(errors, 'TV power cleanup failed');
   });
   app.addHook('preClose', async () => { closing = true; await admission; });
-  app.addHook('onClose', async () => { unsubscribe(); unsubscribePower(); receipts.clear(); });
+  app.addHook('onClose', async () => { unsubscribe(); for (const subscription of subscriptions.values()) subscription.unsubscribe(); subscriptions.clear(); receipts.clear(); });
 
-  app.get('/api/tv/power', async () => tvPowerStateSchema.parse(service.powerState()));
-  app.put('/api/tv/mac', async (request, reply) => {
+  for (const prefix of prefixes) {
+  app.get(`${prefix}/power`, async (request) => tvPowerStateSchema.parse(serviceFor(request).powerState()));
+  app.put(`${prefix}/mac`, async (request, reply) => {
+    const service = serviceFor(request);
     const body = request.body;
     if (typeof body !== 'object' || body === null || Array.isArray(body) || Object.keys(body).length !== 1 || !('mac' in body)) return badRequest(request, reply);
     const parsed = tvMacAddressSchema.nullable().safeParse(body.mac);
@@ -49,7 +65,8 @@ export function registerTvPowerRoutes(app: FastifyInstance, { service, sessions,
     }
     catch (cause) { return safeFailure(cause, request, reply); }
   });
-  app.post('/api/tv/power', async (request, reply) => {
+  app.post(`${prefix}/power`, async (request, reply) => {
+    const service = serviceFor(request);
     const parsed = tvPowerRequestSchema.safeParse(request.body);
     if (!parsed.success) return badRequest(request, reply);
     const token = sessionForRequest(request);
@@ -63,7 +80,7 @@ export function registerTvPowerRoutes(app: FastifyInstance, { service, sessions,
       if (!sessions.authenticate(token)) return unauthorized();
       if (closing) throw new TvServiceError('SERVICE_CLOSED', 409);
       const owned = receipts.get(token);
-      const accepted = owned?.get(parsed.data.id);
+      const accepted = owned?.get(receiptKey(service, parsed.data.id));
       if (accepted) {
         if (accepted.action !== parsed.data.action) throw new TvServiceError('OPERATION_CONFLICT', 409);
         if (accepted.operation.status === 'running') {
@@ -84,18 +101,19 @@ export function registerTvPowerRoutes(app: FastifyInstance, { service, sessions,
       const operation = service.startPower(parsed.data, token);
       const receipt: Receipt = { action: parsed.data.action, operation };
       const sessionReceipts = owned ?? new Map<string, Receipt>();
-      sessionReceipts.set(parsed.data.id, receipt); receipts.set(token, sessionReceipts);
+      sessionReceipts.set(receiptKey(service, parsed.data.id), receipt); receipts.set(token, sessionReceipts);
       await charge();
       return reply.code(202).send(tvPowerOperationSchema.parse(operation));
     } catch (cause) { return safeFailure(cause, request, reply); }
     finally { release(); }
   });
-  app.post<{ Params: { id: string } }>('/api/tv/power/:id/cancel', async (request, reply) => {
+  app.post<{ Params: { id: string } }>(`${prefix}/power/:id/cancel`, async (request, reply) => {
+    const service = serviceFor(request);
     if (!tvPowerOperationSchema.shape.id.safeParse(request.params.id).success) return badRequest(request, reply);
     if (request.body !== undefined && (typeof request.body !== 'object' || request.body === null || Array.isArray(request.body) || Object.keys(request.body).length !== 0)) return badRequest(request, reply);
     const token = sessionForRequest(request);
     if (!token || !sessions.authenticate(token)) return failure(request, reply, 401, 'UNAUTHORIZED', 'Unauthorized');
-    const receipt = receipts.get(token)?.get(request.params.id);
+    const receipt = receipts.get(token)?.get(receiptKey(service, request.params.id));
     if (!receipt) return failure(request, reply, 403, 'FORBIDDEN', 'Forbidden');
     try {
       if (receipt.operation.status === 'running') receipt.operation = service.cancelPower(request.params.id, token);
@@ -105,4 +123,5 @@ export function registerTvPowerRoutes(app: FastifyInstance, { service, sessions,
       return safeFailure(cause, request, reply);
     }
   });
+  }
 }

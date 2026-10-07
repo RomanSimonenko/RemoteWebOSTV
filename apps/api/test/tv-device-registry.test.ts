@@ -6,7 +6,7 @@ import { createTvDeviceRepository } from '../src/tv/repository.js';
 import { createTvService } from '../src/tv/service.js';
 import { TvServiceError } from '../src/tv/operation.js';
 import { createTvDeviceRegistry } from '../src/tv/device-registry.js';
-import { ControlledAdapter, ControlledScheduler, drain, succeed } from './support/tv-harness.js';
+import { barrier, ControlledAdapter, ControlledScheduler, drain, succeed } from './support/tv-harness.js';
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0)) await close(); });
@@ -65,4 +65,13 @@ test('closesAllAfterOneCloseFailure', async () => {
   void h.adapters[0]!.disconnectResult.catch(() => undefined);
   await expect(h.registry.close()).rejects.toThrow(); expect(h.adapters[1]!.closed).toBe(true);
   cleanups.pop();
+});
+
+test('cancelledDraftKeepsAddressReservedUntilAdapterCleanupSettles', async () => {
+  const h = setup(); const accepted = h.registry.add(request(100), 'session'); await drain();
+  const released = barrier<void>(); h.adapters[0]!.disconnectResult = released.promise;
+  h.registry.get(accepted.tvId)!.cancel(accepted.operation.id); await drain();
+  try { expect(() => h.registry.add(request(101), 'session')).toThrow(new TvServiceError('DUPLICATE_TV_HOST', 409)); }
+  finally { released.resolve(); await drain(); }
+  expect(h.registry.add(request(101), 'session').tvId).not.toBe(accepted.tvId);
 });

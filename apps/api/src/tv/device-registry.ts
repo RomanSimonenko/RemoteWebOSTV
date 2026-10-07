@@ -6,13 +6,14 @@ export interface TvDeviceRegistry {
   list(): Promise<TvDevice[]>;
   get(tvId: TvId): TvService | null;
   add(request: AddTvRequest, owner: string): AddTvResponse;
+  assertCanAdd(request: AddTvRequest, owner: string): AddTvResponse | null;
   legacy(): TvService;
   initialize(): Promise<void>;
   revoke(owner: string): Promise<void>;
   close(): Promise<void>;
 }
 interface Receipt { readonly request: AddTvRequest; readonly tvId: TvId; operation: TvOperation; expired: boolean }
-interface Entry { readonly service: TvService; owner?: string; timer?: unknown }
+interface Entry { readonly service: TvService; owner?: string; timer?: unknown; disposal?: Promise<void> }
 const draftRetentionMs = 600_000;
 const receiptCapacity = 100;
 
@@ -32,7 +33,14 @@ export function createTvDeviceRegistry(dependencies: {
   let closing: Promise<void> | undefined;
   let closed = false;
 
-  function checkHost(host: string, tvId: TvId) {
+  function checkHost(host: string, tvId?: TvId) {
+    const reserved = reservedHosts.get(host);
+    if (reserved) {
+      const entry = entries.get(reserved);
+      // Terminal publication can precede transport cleanup. Only the owning
+      // service's idle gate proves this pending address can be used again.
+      if (entry && !entry.disposal && !entry.service.powerState().busy) reservedHosts.delete(host);
+    }
     const occupied = repository.hostOwner(host) ?? reservedHosts.get(host);
     if (occupied && occupied !== tvId) throw new TvServiceError('DUPLICATE_TV_HOST', 409);
   }
@@ -40,9 +48,11 @@ export function createTvDeviceRegistry(dependencies: {
   function dispose(tvId: TvId): Promise<void> {
     const entry = entries.get(tvId);
     if (!entry) return Promise.resolve();
+    if (entry.disposal) return entry.disposal;
     if (entry.timer !== undefined) scheduler.clearTimeout(entry.timer);
     // Keep address reservations until the service has finished releasing its adapter.
-    const pending = entry.service.close().finally(() => { releaseHosts(tvId); entries.delete(tvId); });
+    const pending = entry.service.close().finally(() => { if (entry.timer !== undefined) scheduler.clearTimeout(entry.timer); releaseHosts(tvId); entries.delete(tvId); });
+    entry.disposal = pending;
     pendingClosures.add(pending);
     void pending.then(() => pendingClosures.delete(pending), (cause: unknown) => { pendingClosures.delete(pending); cleanupFailures.push(cause); });
     return pending;
@@ -51,10 +61,9 @@ export function createTvDeviceRegistry(dependencies: {
     const existing = entries.get(tvId); if (existing) return existing.service;
     const scoped = repository.forDevice(tvId);
     const finished = (operation: TvOperation) => {
-      releaseHosts(tvId);
       for (const owned of receipts.values()) for (const receipt of owned.values()) if (receipt.tvId === tvId && receipt.operation.id === operation.id) receipt.operation = operation;
       const entry = entries.get(tvId);
-      if (entry && !scoped.hasStoredKey() && entry.owner && entry.timer === undefined) {
+      if (entry && !closed && !entry.disposal && !scoped.hasStoredKey() && entry.owner && entry.timer === undefined) {
         entry.timer = scheduler.setTimeout(() => {
           for (const owned of receipts.values()) for (const receipt of owned.values()) if (receipt.tvId === tvId) receipt.expired = true;
           void dispose(tvId).catch(() => { /* Failure is retained by dispose and reported at close. */ });
@@ -67,24 +76,33 @@ export function createTvDeviceRegistry(dependencies: {
       const parsed = inner.assertCanStart(input); if ('host' in parsed) checkHost(parsed.host, tvId); return parsed;
     };
     const service: TvService = { ...inner, assertCanStart,
-      start(input, owner) { const parsed = assertCanStart(input); if ('host' in parsed) reservedHosts.set(parsed.host, tvId); try { return inner.start(parsed, owner); } catch (cause) { releaseHosts(tvId); throw cause; } },
+      start(input, owner) { const parsed = assertCanStart(input); releaseHosts(tvId); if ('host' in parsed) reservedHosts.set(parsed.host, tvId); try { return inner.start(parsed, owner); } catch (cause) { releaseHosts(tvId); throw cause; } },
     };
     entries.set(tvId, { service }); return service;
   }
+  function assertCanAdd(input: AddTvRequest, owner: string): AddTvResponse | null {
+    if (closed) throw new TvServiceError('SERVICE_CLOSED', 409);
+    const request = addTvRequestSchema.parse(input);
+    const owned = receipts.get(owner);
+    const previous = owned?.get(request.id);
+    if (previous) {
+      if (previous.expired) throw new TvServiceError('OPERATION_NOT_FOUND', 404);
+      if (previous.request.host !== request.host || previous.request.platform !== request.platform) throw new TvServiceError('OPERATION_CONFLICT', 409);
+      return { tvId: previous.tvId, operation: previous.operation };
+    }
+    if (owned && owned.size >= receiptCapacity) throw new TvServiceError('OPERATION_CONFLICT', 409);
+    checkHost(request.host);
+    return null;
+  }
   return {
+    assertCanAdd,
     async list() { return Promise.all(repository.list().map(async ({ tvId, platform }) => ({ tvId, platform, status: await ensure(tvId).status() }))); },
     get(tvId) { if (closed) return null; return entries.get(tvId)?.service ?? (repository.list().some((tv) => tv.tvId === tvId) ? ensure(tvId) : null); },
     add(input, owner) {
-      if (closed) throw new TvServiceError('SERVICE_CLOSED', 409);
+      const previous = assertCanAdd(input, owner);
+      if (previous) return previous;
       const request = addTvRequestSchema.parse(input);
       const owned = receipts.get(owner) ?? new Map<string, Receipt>();
-      const previous = owned.get(request.id);
-      if (previous) {
-        if (previous.expired) throw new TvServiceError('OPERATION_NOT_FOUND', 404);
-        if (previous.request.host !== request.host || previous.request.platform !== request.platform) throw new TvServiceError('OPERATION_CONFLICT', 409);
-        return { tvId: previous.tvId, operation: previous.operation };
-      }
-      if (owned.size >= receiptCapacity) throw new TvServiceError('OPERATION_CONFLICT', 409);
       const tvId = tvIdSchema.parse(dependencies.newId()); checkHost(request.host, tvId);
       const service = ensure(tvId);
       const operation = service.start({ action: 'pair', host: request.host });
