@@ -67,6 +67,35 @@ test('closesAllAfterOneCloseFailure', async () => {
   cleanups.pop();
 });
 
+test('retryingDraftCancelsOldRetentionAndKeepsSuccessfullySavedService', async () => {
+  const h = setup(); const accepted = h.registry.add(request(100), 'session'); await drain();
+  h.adapters[0]!.pairResult.reject(new WebOsError('PAIRING_REJECTED', 'synthetic rejection')); await drain();
+  h.scheduler.advance(599_999); await drain();
+  const service = h.registry.get(accepted.tvId)!;
+  service.start({ action: 'pair', host: '10.2.3.4' }); await drain();
+  h.scheduler.advance(1); await drain();
+  expect(h.registry.get(accepted.tvId)).toBe(service);
+  await succeed(h.adapters[1]!);
+  h.scheduler.advance(600_000); await drain();
+  expect(h.registry.get(accepted.tvId)).toBe(service);
+  expect(h.registry.add(request(100), 'session').tvId).toBe(accepted.tvId);
+  await service.sendCommand({ id: request(200).id, button: 'UP' }, new AbortController().signal);
+  expect(h.adapters[1]!.sent).toEqual(['UP']);
+});
+
+test('failedRetryRetainsDraftForTenMinutesFromLatestTerminalResult', async () => {
+  const h = setup(); const accepted = h.registry.add(request(100), 'session'); await drain();
+  h.adapters[0]!.pairResult.reject(new WebOsError('PAIRING_REJECTED', 'synthetic rejection')); await drain();
+  h.scheduler.advance(300_000);
+  const service = h.registry.get(accepted.tvId)!;
+  service.start({ action: 'pair', host: '10.2.3.4' }); await drain();
+  h.adapters[1]!.pairResult.reject(new WebOsError('PAIRING_REJECTED', 'synthetic retry rejection')); await drain();
+  h.scheduler.advance(599_999); await drain();
+  expect(h.registry.get(accepted.tvId)).toBe(service);
+  h.scheduler.advance(1); await drain();
+  expect(h.registry.get(accepted.tvId)).toBeNull();
+});
+
 test('cancelledDraftKeepsAddressReservedUntilAdapterCleanupSettles', async () => {
   const h = setup(); const accepted = h.registry.add(request(100), 'session'); await drain();
   const released = barrier<void>(); h.adapters[0]!.disconnectResult = released.promise;

@@ -76,7 +76,17 @@ export function createTvDeviceRegistry(dependencies: {
       const parsed = inner.assertCanStart(input); if ('host' in parsed) checkHost(parsed.host, tvId); return parsed;
     };
     const service: TvService = { ...inner, assertCanStart,
-      start(input, owner) { const parsed = assertCanStart(input); releaseHosts(tvId); if ('host' in parsed) reservedHosts.set(parsed.host, tvId); try { return inner.start(parsed, owner); } catch (cause) { releaseHosts(tvId); throw cause; } },
+      start(input, owner) {
+        const parsed = assertCanStart(input); releaseHosts(tvId); if ('host' in parsed) reservedHosts.set(parsed.host, tvId);
+        try {
+          const operation = inner.start(parsed, owner);
+          // Retention belongs to the last terminal draft, never to a retry
+          // that is running or has successfully persisted this device.
+          const entry = entries.get(tvId);
+          if (entry?.timer !== undefined) { scheduler.clearTimeout(entry.timer); entry.timer = undefined; }
+          return operation;
+        } catch (cause) { releaseHosts(tvId); throw cause; }
+      },
     };
     entries.set(tvId, { service }); return service;
   }
