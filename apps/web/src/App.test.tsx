@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from './App.js';
 
 const csrfToken = 'c'.repeat(43);
@@ -69,6 +69,7 @@ test('expired session returns to login when an authenticated operation is reject
   render(<App />);
   expect(await screen.findByText('Телевизор ещё не настроен')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Выйти' }));
+  fireEvent.click(within(screen.getByRole('dialog', { name: 'Выйти из приложения?' })).getByRole('button', { name: 'Выйти' }));
   expect(await screen.findByRole('heading', { name: 'Вход' })).toBeTruthy();
   expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Сессия истекла. Войдите снова.');
 });
@@ -114,6 +115,8 @@ test('logout during pair stops UI requests immediately and ignores late response
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
   const signal = fetch.mock.calls[2]?.[1].signal as AbortSignal;
   fireEvent.click(screen.getByRole('button', { name: 'Выйти' }));
+  expect(signal.aborted).toBe(false);
+  fireEvent.click(within(screen.getByRole('dialog', { name: 'Выйти из приложения?' })).getByRole('button', { name: 'Выйти' }));
   expect(signal.aborted).toBe(true);
   finishStatus(response(200, { tv: { host: '192.168.1.20', identity: { model: 'Late synthetic TV' } }, connection: 'available', operation: null }));
   finishLogout(response(204));
@@ -137,6 +140,8 @@ test('logout stays available while a pair submission is pending and aborts it wi
   const signal = fetch.mock.calls[3]?.[1].signal as AbortSignal;
   expect((screen.getByRole('button', { name: 'Выйти' }) as HTMLButtonElement).disabled).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: 'Выйти' }));
+  expect(signal.aborted).toBe(false);
+  fireEvent.click(within(screen.getByRole('dialog', { name: 'Выйти из приложения?' })).getByRole('button', { name: 'Выйти' }));
   expect(signal.aborted).toBe(true);
   await act(async () => {
     finishPair(response(202, { id: 'late-synthetic', action: 'pair', status: 'running', startedAt: 10000, deadlineAt: 70000 }));

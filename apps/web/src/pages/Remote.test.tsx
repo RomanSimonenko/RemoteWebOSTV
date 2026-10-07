@@ -422,6 +422,10 @@ test('direct active/token lifecycle stops polls and ignores old command even whe
 });
 
 test('App logout removes pending remote, then a late unauthorized command cannot expire the new login', async () => {
+  Object.defineProperties(HTMLDialogElement.prototype, {
+    showModal: { configurable: true, value: vi.fn(function (this: HTMLDialogElement) { this.open = true; }) },
+    close: { configurable: true, value: vi.fn(function (this: HTMLDialogElement) { this.open = false; }) },
+  });
   const pending = barrier<Response>(); let sessions = 0;
   const fetch = vi.fn((path: string, _init?: RequestInit) => {
     switch (path) {
@@ -438,7 +442,10 @@ test('App logout removes pending remote, then a late unauthorized command cannot
   });
   vi.stubGlobal('fetch', fetch); render(<App />); await act(async () => {});
   fireEvent.click(screen.getByRole('button', { name: 'OK' })); const command = fetch.mock.calls.find(([path]) => path === '/api/tv/commands')!;
-  fireEvent.click(screen.getByRole('button', { name: 'Выйти' })); expect((command[1]!.signal as AbortSignal).aborted).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Выйти' }));
+  expect((command[1]!.signal as AbortSignal).aborted).toBe(false);
+  fireEvent.click(within(screen.getByRole('dialog', { name: 'Выйти из приложения?' })).getByRole('button', { name: 'Выйти' }));
+  expect((command[1]!.signal as AbortSignal).aborted).toBe(true);
   expect(screen.queryByRole('group', { name: 'Пульт' })).toBeNull(); await act(async () => {});
   fireEvent.change(screen.getByLabelText('Имя владельца'), { target: { value: 'alice' } });
   fireEvent.change(screen.getByLabelText('Пароль'), { target: { value: 'correct horse battery staple' } });

@@ -4,6 +4,25 @@ import { Lgtv2Adapter, WebOsError, type Lgtv2Client } from '@remote-webos-tv/web
 import { barrier, drain, harness, succeed } from './support/tv-harness.js';
 
 describe('bounded TV recovery', () => {
+  test.each([true, false])('manual reconnect retires exhausted automatic recovery only after success: %s', async (success) => {
+    const h = harness(true, { recoveryTimeoutMs: 1_000 });
+    try {
+      h.service.start({ action: 'reconnect' }); await drain(); await succeed(h.adapters[0]!);
+      h.adapters[0]!.readResult = barrier(); const reading = h.service.status(); await drain();
+      h.adapters[0]!.readResult.reject(new WebOsError('CONNECTION_LOST', 'synthetic')); await reading; await drain();
+      h.scheduler.advance(1_000); await drain();
+      const failed = h.service.powerState().operation;
+      expect(failed).toMatchObject({ action: 'recover', status: 'failed', error: { code: 'RECOVERY_TIMEOUT' } });
+      h.service.start({ action: 'reconnect' }); await drain();
+      expect(h.service.powerState().operation).toEqual(failed);
+      if (success) await succeed(h.adapters[2]!);
+      else { h.scheduler.advance(1_000); await drain(); }
+      const status = await h.service.status();
+      expect(status.connection).toBe(success ? 'available' : 'unavailable');
+      expect(status.operation?.status).toBe(success ? 'succeeded' : 'failed');
+      expect(h.service.powerState().operation).toEqual(success ? null : failed);
+    } finally { await h.service.close(); }
+  });
   test('real pairing cleanup failure terminates recovery even when detached-client disconnect later succeeds', async () => {
     const adapters: Lgtv2Adapter[] = []; let disconnects = 0;
     const h = harness(true, { createAdapter(host, keyStore, requestTimeoutMs, allowPairingPrompt) {

@@ -56,6 +56,7 @@ test('saved TV survives browser reload, logout/login and API restart without a n
   await savedTv(page);
   expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
   await page.getByRole('button', { name: 'Выйти', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Выйти из приложения?' }).getByRole('button', { name: 'Выйти', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Вход', exact: true })).toBeVisible();
   expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
   expect((await page.context().request.get(`${tv.origin}/api/tv`)).status()).toBe(401);

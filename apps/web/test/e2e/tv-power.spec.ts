@@ -222,6 +222,7 @@ test('lost genuine power response reports uncertainty and never replays shutdown
   await page.reload();
   await ready(page);
   await page.getByRole('button', { name: 'Выйти', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Выйти из приложения?' }).getByRole('button', { name: 'Выйти', exact: true }).click();
   await tv.login(page);
   await ready(page);
   expect(posts).toBe(1);
@@ -246,9 +247,11 @@ test('another session cannot cancel wake; initiating logout aborts transport and
     const denied = await other.request.post(`${tv.origin}/api/tv/power/${id}/cancel`, { headers: await headers(otherPage, tv), data: {} });
     expect(denied.status()).toBe(403);
     await otherPage.getByRole('button', { name: 'Выйти', exact: true }).click();
+    await otherPage.getByRole('dialog', { name: 'Выйти из приложения?' }).getByRole('button', { name: 'Выйти', exact: true }).click();
     await expect(otherPage.getByRole('heading', { name: 'Вход', exact: true })).toBeVisible();
     expect(tv.wakes[0]!.signal.aborted).toBe(false);
     await page.getByRole('button', { name: 'Выйти', exact: true }).click();
+    await page.getByRole('dialog', { name: 'Выйти из приложения?' }).getByRole('button', { name: 'Выйти', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Вход', exact: true })).toBeVisible();
     expect(tv.wakes[0]!.signal.aborted).toBe(true);
     await expect.poll(() => tv.clock.pendingCount).toBe(0);
