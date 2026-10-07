@@ -18,7 +18,7 @@ test('dashboard adds the first TV, opens remote and returns without another pair
   await card.hover();
   await expect(card).toHaveCSS('border-color', 'rgb(131, 189, 206)');
   await expect(page.getByRole('heading', { name: 'Телевизоры', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Добавить ТВ' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Добавить ТВ' })).toBeVisible();
   const mutations: string[] = [];
   page.on('request', (request) => { if (request.method() !== 'GET') mutations.push(request.url()); });
   await openTvWorkspace(page);

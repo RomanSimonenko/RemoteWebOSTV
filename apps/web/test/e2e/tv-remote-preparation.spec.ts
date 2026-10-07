@@ -11,13 +11,14 @@ async function syntheticRemote(page: Page, origin: string) {
   await page.route(`${origin}/**`, async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     const data: Record<string, unknown> = {
+      '/api/tvs': { devices: [{ tvId: '00000000-0000-4000-8000-000000000001', platform: 'webos', status: { tv: { host: '192.168.1.20', identity: { model: 'Synthetic TV' } }, connection: 'available', operation: null } }] },
       '/api/setup/status': { state: 'claimed' },
       '/api/auth/session': { username: 'synthetic', csrfToken: 'c'.repeat(43) },
-      '/api/tv': { tv: { host: '192.168.1.20', identity: { model: 'Synthetic TV' } }, connection: 'available', operation: null },
-      '/api/tv/remote': { enabled: true, reason: null },
-      '/api/tv/power': { mac: null, canPowerOff: true, canWake: false, operation: null },
+      '/api/tvs/00000000-0000-4000-8000-000000000001': { tv: { host: '192.168.1.20', identity: { model: 'Synthetic TV' } }, connection: 'available', operation: null },
+      '/api/tvs/00000000-0000-4000-8000-000000000001/remote': { enabled: true, reason: null },
+      '/api/tvs/00000000-0000-4000-8000-000000000001/power': { mac: null, canPowerOff: true, canWake: false, operation: null },
     };
-    if (pathname === '/api/tv/commands') {
+    if (pathname === '/api/tvs/00000000-0000-4000-8000-000000000001/commands') {
       posts.push(route.request().postDataJSON() as { id: string; button: string });
       await route.fulfill({ json: { id: posts.at(-1)!.id, outcome: 'sent' } });
     } else if (pathname in data) await route.fulfill({ json: data[pathname] });

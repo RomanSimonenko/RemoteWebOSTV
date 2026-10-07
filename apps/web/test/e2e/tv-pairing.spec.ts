@@ -16,7 +16,7 @@ async function competingBind(port: number) {
 async function startPair(page: Page, tv: TvFixture) {
   await expect(page.getByRole('button', { name: 'Подключить', exact: true })).toBeVisible();
   await page.getByLabel('IP-адрес телевизора').fill(tvHost);
-  const accepted = page.waitForResponse((response) => response.url() === `${tv.origin}/api/tv/operations` && response.request().method() === 'POST');
+  const accepted = page.waitForResponse((response) => response.url() === `${tv.origin}/api/tvs` && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'Подключить', exact: true }).click();
   expect((await accepted).status()).toBe(202);
   await tv.tv.waitForRequestCount(1);
@@ -63,7 +63,7 @@ test('saved TV survives browser reload, logout/login and API restart without a n
   await page.getByRole('dialog', { name: 'Выйти из приложения?' }).getByRole('button', { name: 'Выйти', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Вход', exact: true })).toBeVisible();
   expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
-  expect((await page.context().request.get(`${tv.origin}/api/tv`)).status()).toBe(401);
+  expect((await page.context().request.get(`${tv.origin}${tv.tvPath}`)).status()).toBe(401);
   await tv.login(page);
   await openTvWorkspace(page);
   await savedTv(page);
@@ -94,14 +94,12 @@ test('reload preserves the server pair deadline and timeout cannot save a late a
   tv.clock.advance(40_000);
   await page.clock.setFixedTime(running.startedAt + 40_000);
   await page.reload();
-  await openTvWorkspace(page);
-  await expect(page.getByText('Подтвердите доступ на экране телевизора.')).toBeVisible();
-  await expect(page.getByText('Осталось: 20 с', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Пока нет телевизоров' })).toBeVisible();
+  await expect(page.getByText('Подтвердите доступ на экране телевизора.')).toHaveCount(0);
   expect((await tv.status(page)).operation).toEqual(running);
   expect(tv.promptCount).toBe(1);
   tv.clock.advance(20_000);
   await expect.poll(async () => (await tv.status(page)).operation?.error?.code).toBe('PAIRING_TIMEOUT');
-  await expect(page.getByRole('alert')).toHaveText('Время ожидания сопряжения истекло.');
   await tv.tv.waitForActiveSocketCount(0);
   tv.promptGate.release();
   await tv.restart();
@@ -207,18 +205,20 @@ test('revoked saved key requires explicit repair and reload never starts another
 });
 
 test('a delayed accepted operation in one tab yields to a fresh operation completed in another tab', async ({ page, context, tv }) => {
-  await tv.setupAndLogin(page);
-  await openTvWorkspace(page);
-  await expect(page.getByRole('button', { name: 'Подключить', exact: true })).toBeVisible();
+  await pairSuccessfully(page, tv);
+  await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+  await page.locator('.settings-advanced summary').click();
+  const permission = gate();
+  await tv.replaceTv({ kind: 'deferred-pairing', gate: permission.promise });
   const accepted = gate();
   const deliver = gate();
   const readFresh = gate();
   // Stop tab A from observing its original operation while its POST response is held.
-  await page.route(`${tv.origin}/api/tv`, async (route) => {
+  await page.route(`${tv.origin}${tv.tvPath}`, async (route) => {
     await readFresh.promise;
     await route.continue();
   });
-  await page.route(`${tv.origin}/api/tv/operations`, async (route) => {
+  await page.route(`${tv.origin}${tv.tvPath}/operations`, async (route) => {
     const response = await route.fetch();
     expect(response.status()).toBe(202);
     accepted.release();
@@ -227,18 +227,18 @@ test('a delayed accepted operation in one tab yields to a fresh operation comple
   });
   const second = await context.newPage();
   try {
-    await page.getByLabel('IP-адрес телевизора').fill(tvHost);
-    await page.getByRole('button', { name: 'Подключить', exact: true }).click();
+    await page.getByRole('button', { name: 'Повторить сопряжение', exact: true }).click();
     await accepted.promise;
     const firstId = (await tv.status(page)).operation!.id;
     await second.goto(tv.origin);
     await openTvWorkspace(second);
+    await second.getByRole('button', { name: 'Настройки', exact: true }).click();
     await second.getByRole('button', { name: 'Отменить', exact: true }).click();
     await tv.tv.waitForActiveSocketCount(0);
-    await expect(second.getByRole('button', { name: 'Подключить', exact: true })).toBeVisible();
-    await second.getByLabel('IP-адрес телевизора').fill(tvHost);
-    await second.getByRole('button', { name: 'Подключить', exact: true }).click();
-    await tv.tv.waitForRequestCount(2);
+    await second.locator('.settings-advanced summary').click();
+    await expect(second.getByRole('button', { name: 'Повторить сопряжение', exact: true })).toBeEnabled();
+    await second.getByRole('button', { name: 'Повторить сопряжение', exact: true }).click();
+    await expect(second.getByRole('button', { name: 'Отменить', exact: true })).toBeVisible();
     await second.getByRole('button', { name: 'Отменить', exact: true }).click();
     await tv.tv.waitForActiveSocketCount(0);
     const latest = (await tv.status(second)).operation!;
@@ -247,7 +247,7 @@ test('a delayed accepted operation in one tab yields to a fresh operation comple
     deliver.release();
     await expect(page.getByRole('button', { name: 'Отменить', exact: true })).toBeVisible();
     readFresh.release();
-    await expect(page.getByRole('button', { name: 'Подключить', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Подключиться снова', exact: true })).toBeEnabled();
     await expect(page.getByRole('button', { name: 'Отменить', exact: true })).toBeHidden();
-  } finally { deliver.release(); readFresh.release(); await second.close(); }
+  } finally { permission.release(); deliver.release(); readFresh.release(); await second.close(); }
 });

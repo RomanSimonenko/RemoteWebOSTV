@@ -10,7 +10,7 @@ const mappings = [
 const frame = (name: string) => `type:button\nname:${name}\n\n`;
 const remote = (page: Page) => page.getByRole('group', { name: 'Пульт', exact: true });
 const commandResponse = (page: Page, tv: TvFixture) => page.waitForResponse((response) =>
-  response.url() === `${tv.origin}/api/tv/commands` && response.request().method() === 'POST');
+  response.url() === `${tv.origin}${tv.tvPath}/commands` && response.request().method() === 'POST');
 
 async function ready(page: Page) {
   await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Подключён');
@@ -47,7 +47,7 @@ test('all ten browser controls reach the pointer once; saved TV remains usable a
   const original = tv.tv;
   const requests: string[] = [];
   page.on('request', (request) => {
-    if (request.url() === `${tv.origin}/api/tv/commands` && request.method() === 'POST') requests.push(request.postData()!);
+    if (request.url() === `${tv.origin}${tv.tvPath}/commands` && request.method() === 'POST') requests.push(request.postData()!);
   });
   for (const [label, name] of mappings) {
     const response = commandResponse(page, tv);
@@ -72,8 +72,8 @@ test('all ten browser controls reach the pointer once; saved TV remains usable a
   await page.getByRole('button', { name: 'Выйти', exact: true }).click();
   await page.getByRole('dialog', { name: 'Выйти из приложения?' }).getByRole('button', { name: 'Выйти', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Вход', exact: true })).toBeVisible();
-  expect((await page.context().request.get(`${tv.origin}/api/tv/remote`)).status()).toBe(401);
-  expect((await page.context().request.post(`${tv.origin}/api/tv/commands`, {
+  expect((await page.context().request.get(`${tv.origin}${tv.tvPath}/remote`)).status()).toBe(401);
+  expect((await page.context().request.post(`${tv.origin}${tv.tvPath}/commands`, {
     headers: { origin: tv.origin }, data: { id: '11111111-1111-4111-8111-111111111111', button: 'UP' },
   })).status()).toBe(401);
   await tv.login(page);
@@ -85,7 +85,7 @@ test('all ten browser controls reach the pointer once; saved TV remains usable a
   const session = await page.context().request.get(`${tv.origin}/api/auth/session`);
   const { csrfToken } = await session.json() as { csrfToken: string };
   for (const headers of [{ origin: tv.origin }, { origin: 'https://foreign.example.test', 'x-csrf-token': csrfToken }]) {
-    expect((await page.context().request.post(`${tv.origin}/api/tv/commands`, {
+    expect((await page.context().request.post(`${tv.origin}${tv.tvPath}/commands`, {
       headers, data: { id: '22222222-2222-4222-8222-222222222222', button: 'UP' },
     })).status()).toBe(403);
   }
@@ -142,7 +142,7 @@ test('native keyboard maps ten controls with one Enter owner and ignores modifie
   await pair(page, tv);
   const requests: string[] = [];
   page.on('request', (request) => {
-    if (request.url() === `${tv.origin}/api/tv/commands` && request.method() === 'POST') requests.push(request.postData()!);
+    if (request.url() === `${tv.origin}${tv.tvPath}/commands` && request.method() === 'POST') requests.push(request.postData()!);
   });
   await page.getByRole('button', { name: 'Настройки', exact: true }).click();
   await page.getByLabel('IP-адрес телевизора').focus();
@@ -186,11 +186,11 @@ test('native held keys do not repeat or queue while a genuine response is pendin
   await remote(page).focus();
   const requests: string[] = [];
   page.on('request', (request) => {
-    if (request.url() === `${tv.origin}/api/tv/commands` && request.method() === 'POST') requests.push(request.postData()!);
+    if (request.url() === `${tv.origin}${tv.tvPath}/commands` && request.method() === 'POST') requests.push(request.postData()!);
   });
   const accepted = gate();
   const deliver = gate();
-  await page.route(`${tv.origin}/api/tv/commands`, async (route) => {
+  await page.route(`${tv.origin}${tv.tvPath}/commands`, async (route) => {
     const response = await route.fetch();
     accepted.release();
     await deliver.promise;
@@ -206,7 +206,7 @@ test('native held keys do not repeat or queue while a genuine response is pendin
     await page.keyboard.up('ArrowUp');
     deliver.release();
     await sent(await response);
-    await page.unroute(`${tv.origin}/api/tv/commands`);
+    await page.unroute(`${tv.origin}${tv.tvPath}/commands`);
     await expect(remote(page)).toHaveAttribute('aria-busy', 'false');
     // Repeat again after pending clears: suppression must not rely on busy admission.
     const left = commandResponse(page, tv);
@@ -235,7 +235,7 @@ test('offline remote disables commands and reconnect never replays offline input
   await page.keyboard.press('ArrowUp');
   const session = await page.context().request.get(`${tv.origin}/api/auth/session`);
   const { csrfToken } = await session.json() as { csrfToken: string };
-  const rejected = await page.context().request.post(`${tv.origin}/api/tv/commands`, {
+  const rejected = await page.context().request.post(`${tv.origin}${tv.tvPath}/commands`, {
     headers: { origin: tv.origin, 'x-csrf-token': csrfToken },
     data: { id: '33333333-3333-4333-8333-333333333333', button: 'UP' },
   });
@@ -259,7 +259,7 @@ test('lost genuine command response after pointer receipt shows uncertainty and 
   const received = gate();
   const loseResponse = gate();
   const original = tv.tv;
-  await page.route(`${tv.origin}/api/tv/commands`, async (route) => {
+  await page.route(`${tv.origin}${tv.tvPath}/commands`, async (route) => {
     const response = await route.fetch();
     expect(response.status()).toBe(200);
     await original.waitForPointerFrameCount(1);
@@ -274,7 +274,7 @@ test('lost genuine command response after pointer receipt shows uncertainty and 
     await tv.makeTvUnavailable();
     loseResponse.release();
     await expect(page.locator('.remote-activity').getByRole('alert')).toHaveText('Результат команды неизвестен. Автоматический повтор не выполняется');
-    await page.unroute(`${tv.origin}/api/tv/commands`);
+    await page.unroute(`${tv.origin}${tv.tvPath}/commands`);
     await tv.expireUnavailableRecovery(page);
     await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Нет соединения');
     await tv.replaceTv({ kind: 'success' });
