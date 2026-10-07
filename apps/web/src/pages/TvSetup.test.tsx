@@ -258,13 +258,14 @@ test('connection spinner follows a pending command without visible activity text
 test.each([
   [{ model: 'Synthetic TV', platformVersion: '6.5.3', firmwareVersion: '99.8' }, 'webOS 6.5.3'],
   [{ model: 'Synthetic TV', firmwareVersion: '99.8' }, 'Версия неизвестна'],
-])('saved TV identity %j keeps the model in the card and session/version in settings', async (identity, version) => {
+])('saved TV identity %j keeps the model in the header and version in TV settings without account caption', async (identity, version) => {
   vi.stubGlobal('fetch', vi.fn((path: RequestInfo | URL) => Promise.resolve(response(path === '/api/tv'
     ? { ...saved, tv: { ...saved.tv, identity } }
     : path === '/api/tv/power' ? { mac: null, canPowerOff: true, canWake: false, operation: null }
     : { enabled: true, reason: null }))));
   const view = render(<Home username="synthetic-owner" csrfToken={csrfToken} tvActive busy={false} error={null} onLogout={vi.fn()} onSessionExpired={vi.fn()} />);
   await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: /^Открыть телевизор / })); await act(async () => {});
   const info = view.container.querySelector('.tv-info') as HTMLElement;
   expect(info).not.toBeNull();
   expect(within(info).getByText('Synthetic TV')).toBeTruthy();
@@ -282,7 +283,7 @@ test.each([
   fireEvent.click(screen.getByRole('button', { name: 'Настройки' }));
   const settings = screen.getByRole('dialog', { name: 'Настройки телевизора' });
   expect(within(settings).getByText(version)).toBeTruthy();
-  expect(within(settings).getByText('Вы вошли как synthetic-owner.')).toBeTruthy();
+  expect(within(settings).queryByText('Вы вошли как synthetic-owner.')).toBeNull();
   expect(settings.textContent).not.toContain('99.8');
 });
 
@@ -509,6 +510,7 @@ test('closing pending reconnect retains owners and reopening restores saved IP a
     : path === '/api/tv/remote' ? Promise.resolve(response({ enabled: true, reason: null })) : pending.promise);
   vi.stubGlobal('fetch', fetch);
   render(<Home username="alice" csrfToken={csrfToken} tvActive busy={false} error={null} onLogout={vi.fn()} onSessionExpired={vi.fn()} />); await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: /^Открыть телевизор / })); await act(async () => {});
   const gear = screen.getByRole('button', { name: 'Настройки' }); gear.focus(); fireEvent.click(gear);
   fireEvent.change(screen.getByRole('textbox', { name: 'IP-адрес телевизора' }), { target: { value: '10.0.0.25' } });
   fireEvent.change(screen.getByRole('textbox', { name: 'MAC-адрес телевизора' }), { target: { value: '02:00:00:00:00:02' } });
@@ -531,6 +533,7 @@ test('background connection and power diagnostics leave focus in active settings
     : path === '/api/tv/power' ? ++powerReads === 1 ? Promise.resolve(response({ mac: null, canPowerOff: false, canWake: false, operation: null })) : powerRead.promise
     : Promise.resolve(response({ enabled: true, reason: null }))));
   render(<Home username="alice" csrfToken={csrfToken} tvActive busy={false} error={null} onLogout={vi.fn()} onSessionExpired={vi.fn()} />); await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: /^Открыть телевизор / })); await act(async () => {});
   fireEvent.click(screen.getByRole('button', { name: 'Настройки' })); const input = screen.getByRole('textbox', { name: 'IP-адрес телевизора' }); input.focus();
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
   await act(async () => { tvRead.resolve(response({ ...saved, error: { code: 'CONNECTION_LOST', message: 'Синтетическая потеря соединения.' } })); powerRead.resolve(response({ code: 'STORAGE_FAILED', message: 'Synthetic', requestId: 'synthetic' }, 503)); });
@@ -549,6 +552,7 @@ test('new connection diagnostics focus the retained background alert after setti
     : { enabled: true, reason: null }))));
   render(<Home username="synthetic-owner" csrfToken={csrfToken} tvActive busy={false} error={null} onLogout={vi.fn()} onSessionExpired={vi.fn()} />);
   await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: /^Открыть телевизор / })); await act(async () => {});
   expect(document.activeElement).toBe(screen.getByRole('alert'));
   const gear = screen.getByRole('button', { name: 'Настройки' }); fireEvent.click(gear);
   const input = screen.getByRole('textbox', { name: 'IP-адрес телевизора' }); input.focus();
@@ -573,6 +577,7 @@ test('losing power-off eligibility dismisses confirmation and unlocks settings',
   vi.stubGlobal('fetch', vi.fn((path: RequestInfo | URL) => Promise.resolve(response(path === '/api/tv' ? saved : path === '/api/tv/power'
     ? { mac: '02:00:00:00:00:01', canPowerOff: ++powerReads === 1, canWake: false, operation: null } : { enabled: true, reason: null }))));
   render(<Home username="alice" csrfToken={csrfToken} tvActive busy={false} error={null} onLogout={vi.fn()} onSessionExpired={vi.fn()} />); await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: /^Открыть телевизор / })); await act(async () => {});
   fireEvent.click(screen.getByRole('button', { name: 'Выключить ТВ' })); expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Настройки' }).disabled).toBe(true);
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
   expect(screen.queryByRole('dialog', { name: 'Выключить телевизор?' })).toBeNull();
@@ -585,6 +590,7 @@ test('MAC save keeps its protected request alive on close and reopening shows th
     ? { mac: '02:00:00:00:00:01', canPowerOff: false, canWake: true, operation: null } : { enabled: true, reason: null })));
   vi.stubGlobal('fetch', fetch);
   render(<Home username="alice" csrfToken={csrfToken} tvActive busy={false} error={null} onLogout={vi.fn()} onSessionExpired={vi.fn()} />); await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: /^Открыть телевизор / })); await act(async () => {});
   fireEvent.click(screen.getByRole('button', { name: 'Настройки' }));
   fireEvent.change(screen.getByRole('textbox', { name: 'MAC-адрес телевизора' }), { target: { value: '02:00:00:00:00:02' } });
   fireEvent.click(screen.getByRole('button', { name: 'Сохранить MAC' }));
@@ -602,6 +608,7 @@ test('power confirmation disables settings until dismissed and settings disable 
     ? { mac: '02:00:00:00:00:01', canPowerOff: true, canWake: false, operation: null } : { enabled: true, reason: null })));
   vi.stubGlobal('fetch', fetch);
   render(<Home username="alice" csrfToken={csrfToken} tvActive busy={false} error={null} onLogout={vi.fn()} onSessionExpired={vi.fn()} />); await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: /^Открыть телевизор / })); await act(async () => {});
   fireEvent.click(screen.getByRole('button', { name: 'Выключить ТВ' }));
   const gear = screen.getByRole<HTMLButtonElement>('button', { name: 'Настройки' }); expect(gear.disabled).toBe(true);
   expect(screen.queryByRole('dialog', { name: 'Настройки телевизора' })).toBeNull();

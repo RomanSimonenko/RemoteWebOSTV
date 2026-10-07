@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
 import type { TvStatusResponse, TvPowerState } from '../../../../packages/contracts/src/index.js';
+import { openTvWorkspace } from '../support/dashboard.js';
 
 const origin = 'http://remote.example.test';
 const webRoot = new URL('../../dist/', import.meta.url);
@@ -94,7 +95,10 @@ async function fixture(page: Page, mode = 'idle') {
     });
   });
   await page.goto(origin);
-  if (mode !== 'login' && mode !== 'setup') await expect(remote(page).getByRole('button', { name: 'Вверх', exact: true })).toBeEnabled();
+  if (mode !== 'login' && mode !== 'setup') {
+    await openTvWorkspace(page);
+    await expect(remote(page).getByRole('button', { name: 'Вверх', exact: true })).toBeEnabled();
+  }
   return { reads, mutations, status, power };
 }
 
@@ -379,6 +383,9 @@ for (const width of [320, 1280]) {
     const upBounds = (await upButton.boundingBox())!;
     expect(Math.abs(ok.width - upBounds.width)).toBeLessThanOrEqual(1);
     expect(Math.abs(ok.height - upBounds.height)).toBeLessThanOrEqual(1);
+    // Dashboard navigation may leave the pointer over OK; compare both idle states.
+    await page.mouse.move(0, 0);
+    await expect(okButton).toHaveCSS('border-color', await upButton.evaluate((element) => getComputedStyle(element).borderColor));
     for (const property of ['border-radius', 'border-width', 'border-color', 'background-image']) {
       expect(await okButton.evaluate((element, name) => getComputedStyle(element).getPropertyValue(name), property)).toBe(await upButton.evaluate((element, name) => getComputedStyle(element).getPropertyValue(name), property));
     }
@@ -540,7 +547,7 @@ for (const key of ['Enter', 'Space']) {
 }
 
 for (const [mode, text] of [['version-known', 'webOS 6.5.3'], ['version-missing', 'Версия неизвестна']] as const) {
-  test(`${mode} keeps model in card and version/session in settings without using firmware`, async ({ page }) => {
+  test(`${mode} keeps model in header and version in TV settings without account caption or firmware`, async ({ page }) => {
     await fixture(page, mode);
     const info = page.locator('.tv-info');
     await expect(info.getByText('Synthetic TV', { exact: true })).toBeVisible();
@@ -551,7 +558,7 @@ for (const [mode, text] of [['version-known', 'webOS 6.5.3'], ['version-missing'
     expect(box.y + box.height).toBeLessThan((await page.locator('.tv-card').boundingBox())!.y);
     await page.getByRole('button', { name: 'Настройки', exact: true }).click();
     await expect(settings(page).getByText(text, { exact: true })).toBeVisible();
-    await expect(settings(page).getByText('Вы вошли как synthetic-owner.', { exact: true })).toBeVisible();
+    await expect(settings(page).getByText('Вы вошли как synthetic-owner.', { exact: true })).toHaveCount(0);
     await expect(settings(page)).not.toContainText('99.8');
   });
 }

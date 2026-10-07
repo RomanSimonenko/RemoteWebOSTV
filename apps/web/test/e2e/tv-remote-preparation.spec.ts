@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
+import { openTvWorkspace } from '../support/dashboard.js';
 
 // Synthetic HTTP responses isolate browser preparation. Full API/SQLite/adapter
 // acceptance remains in tv-remote.spec.ts, without these intercepted responses.
@@ -26,6 +27,7 @@ async function syntheticRemote(page: Page, origin: string) {
     });
   });
   await page.goto(origin);
+  await openTvWorkspace(page);
   const group = page.getByRole('group', { name: 'Пульт', exact: true });
   await expect(group.getByRole('button', { name: 'Вверх', exact: true })).toBeEnabled();
   return { group, posts };

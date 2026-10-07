@@ -5,6 +5,44 @@ body { margin: 0; min-width: 320px; min-height: 100vh; background: radial-gradie
 .app-header { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid #32414a; }
 .eyebrow { margin: 0; font-size: 1rem; font-weight: 700; letter-spacing: -.02em; }
 .header-actions { display: flex; flex-shrink: 0; align-items: center; gap: 8px; }
+.dashboard { margin-top: 44px; }
+.dashboard-screen .eyebrow { font-size: 1.4rem; }
+.dashboard-screen .app-header { padding-bottom: 24px; }
+.dashboard-heading { margin-bottom: 32px; }
+.dashboard-heading h1 { font-size: 2.5rem; }
+.device-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+.device-card { min-width: 0; }
+.device-card-main { display: flex; flex-direction: column; align-items: center; width: 100%; height: 100%; padding: 22px; border: 1px solid #334955; border-radius: 16px; background: #17232b; color: inherit; transition: border-color .18s ease, background-color .18s ease; }
+.device-card-main:hover, .device-card-main:focus-visible { border-color: #83bdce; background: #20323d; }
+.device-card-main h2 { margin: 20px 0 16px; max-width: 100%; overflow-wrap: anywhere; font-size: 1.2rem; }
+.device-connection { display: flex; align-items: center; align-self: flex-start; gap: 10px; margin-bottom: 22px; color: #a8b6bf; font-size: .85rem; }
+.device-connection svg { width: 14px; height: 14px; fill: currentColor; stroke: none; }
+.device-connection[data-connection="available"] { color: #60d994; }
+.device-connection[data-connection="authorization_error"], .device-connection[data-connection="compatibility_error"] { color: #ffa8b0; }
+.device-illustration { width: 160px; height: 120px; color: #a8b6bf; stroke-width: 1.2; }
+.platform-badge { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border: 1px solid #2c3e48; border-radius: 24px; font-size: .95rem; color: #c1ced6; }
+.platform-badge img { width: 34px; height: 24px; object-fit: contain; }
+.dashboard-empty { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 112px 16px 40px; }
+.empty-illustration svg { width: 144px; height: 112px; color: #9aaebd; stroke-width: 1.2; }
+.dashboard-empty h2 { margin-top: 24px; font-size: 2.2rem; }
+.dashboard-empty p { color: #b4c6d2; font-size: 1.15rem; }
+.dashboard-primary { display: inline-flex; align-items: center; justify-content: center; gap: 12px; margin: 24px 0 12px; padding: 14px 22px; background: #0875ef; border-color: #35b9ff; color: #fff; }
+.dashboard-primary:hover { background: #1686ff; }
+.dashboard-empty .muted { font-size: .85rem; color: #a8b6bf; }
+.tv-navigation { margin-top: 20px; }
+.tv-navigation button { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; }
+@media (max-width: 800px) { .device-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) {
+  .device-grid { grid-template-columns: minmax(0, 1fr); }
+  .dashboard { margin-top: 28px; }
+  .dashboard-screen .eyebrow { font-size: 1rem; }
+  .dashboard-heading h1 { font-size: 2rem; }
+  .dashboard-empty { padding: 32px 0; }
+  .dashboard-empty h2 { font-size: 1.35rem; }
+  .dashboard-empty p { font-size: 1rem; }
+  .app-header { flex-wrap: wrap; }
+  .header-identity { min-width: 0; }
+}
 .header-actions button { min-height: 42px; padding: 8px 12px; font-size: .85rem; }
 .header-actions button[aria-label="Настройки"] { display: flex; align-items: center; justify-content: center; width: 42px; padding: 0; }
 .session-caption { color: #a8b6bf; font-size: .75rem; }

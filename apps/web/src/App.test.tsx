@@ -54,10 +54,12 @@ test('claimed installation shows login, then authenticated home after verified s
   fireEvent.change(screen.getByLabelText('Пароль'), { target: { value: 'correct horse battery staple' } });
   expect(screen.getByLabelText('Пароль').getAttribute('autocomplete')).toBe('current-password');
   fireEvent.submit(screen.getByRole('button', { name: 'Войти' }).closest('form')!);
-  expect(await screen.findByText('Телевизор ещё не настроен')).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: 'Пока нет телевизоров' })).toBeTruthy();
   expect(fetch.mock.calls[2]?.[1]).toMatchObject({ method: 'POST', credentials: 'same-origin' });
   expect(fetch.mock.calls[3]?.[0]).toBe('/api/auth/session');
-  expect(await screen.findByLabelText('IP-адрес телевизора')).toBeTruthy();
+  expect(screen.queryByLabelText('IP-адрес телевизора')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Добавить ТВ' }));
+  expect(screen.getByLabelText('IP-адрес телевизора')).toBeTruthy();
 });
 
 test('expired session returns to login when an authenticated operation is rejected', async () => {
@@ -67,7 +69,7 @@ test('expired session returns to login when an authenticated operation is reject
     .mockResolvedValueOnce(response(401, { code: 'UNAUTHORIZED', message: 'Unauthorized', requestId: 'request-2' }));
   vi.stubGlobal('fetch', fetch);
   render(<App />);
-  expect(await screen.findByText('Телевизор ещё не настроен')).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: 'Пока нет телевизоров' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Выйти' }));
   fireEvent.click(within(screen.getByRole('dialog', { name: 'Выйти из приложения?' })).getByRole('button', { name: 'Выйти' }));
   expect(await screen.findByRole('heading', { name: 'Вход' })).toBeTruthy();
@@ -82,6 +84,8 @@ test('authenticated reload reads TV status without starting a new pairing', asyn
     .mockResolvedValueOnce(response(200, { enabled: false, reason: 'UNAVAILABLE' }));
   vi.stubGlobal('fetch', fetch); render(<App />);
   expect(await screen.findByText('Synthetic TV')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: /^Открыть телевизор / }));
+  await act(async () => {});
   const gear = screen.getByRole('button', { name: 'Настройки' });
   expect(gear.closest('header')).toBe(screen.getByRole('button', { name: 'Выйти' }).closest('header'));
   expect(screen.queryByRole('textbox', { name: 'IP-адрес телевизора' })).toBeNull();
@@ -135,6 +139,7 @@ test('logout stays available while a pair submission is pending and aborts it wi
     .mockReturnValueOnce(pair).mockResolvedValueOnce(response(204));
   vi.stubGlobal('fetch', fetch); render(<App />);
   await act(async () => {});
+  fireEvent.click(screen.getByRole('button', { name: 'Добавить ТВ' }));
   fireEvent.change(screen.getByLabelText('IP-адрес телевизора'), { target: { value: '10.0.0.25' } });
   fireEvent.submit(screen.getByRole('button', { name: 'Подключить' }).closest('form')!);
   const signal = fetch.mock.calls[3]?.[1].signal as AbortSignal;

@@ -79,7 +79,7 @@ test('CLI token claims one owner and browser session survives reload until logou
   await page.getByLabel('Имя владельца').fill('alice');
   await page.getByLabel('Пароль').fill(password);
   await page.getByRole('button', { name: 'Войти' }).click();
-  await expect(page.getByRole('heading', { name: 'Телевизор ещё не настроен' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Пока нет телевизоров' })).toBeVisible();
 
   const cookies = await page.context().cookies(origin);
   const cookie = cookies.find(({ name }) => name === 'remote_webos_session');
@@ -94,7 +94,7 @@ test('CLI token claims one owner and browser session survives reload until logou
   expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
 
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Телевизор ещё не настроен' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Пока нет телевизоров' })).toBeVisible();
   expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
 
   const rejectedOrigin = await page.context().request.post(`${origin}/api/auth/logout`, {

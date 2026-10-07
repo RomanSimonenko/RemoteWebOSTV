@@ -1,10 +1,22 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { TvSetup } from './TvSetup.js';
-import { IconInfoCircle, IconSettings } from '@tabler/icons-react';
+import { IconArrowLeft, IconInfoCircle, IconSettings } from '@tabler/icons-react';
 import { LogoutConfirmation } from '../components/LogoutConfirmation.js';
+import { SettingsDialog } from '../components/SettingsDialog.js';
+import { useTvStatus } from '../useTvStatus.js';
+import { Dashboard } from './Dashboard.js';
 
 interface Props { username: string; csrfToken: string; tvActive: boolean; busy: boolean; error: ReactNode; onLogout(): void; onSessionExpired(): void }
 export function Home({ username, csrfToken, tvActive, busy, error, onLogout, onSessionExpired }: Props) {
+  const props = { username, csrfToken, tvActive, busy, error, onLogout, onSessionExpired };
+  return tvActive ? <ActiveHome {...props} /> : <HomeContent {...props} />;
+}
+function ActiveHome(props: Props) {
+  const statusState = useTvStatus(props.onSessionExpired);
+  return <HomeContent {...props} statusState={statusState} />;
+}
+function HomeContent({ username, csrfToken, tvActive, busy, error, onLogout, onSessionExpired, statusState }: Props & { statusState?: ReturnType<typeof useTvStatus> }) {
+  const [screen, setScreen] = useState<'dashboard' | 'add' | 'remote'>('dashboard');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [confirmingLogout, setConfirmingLogout] = useState(false);
   const [confirmingPower, setConfirmingPower] = useState(false);
@@ -21,11 +33,16 @@ export function Home({ username, csrfToken, tvActive, busy, error, onLogout, onS
   }, []);
   useEffect(() => { if ((settingsOpen || confirmingPower || confirmingLogout) && help.current) help.current.open = false; }, [settingsOpen, confirmingPower, confirmingLogout]);
   useEffect(() => { if (!tvActive) { setSettingsOpen(false); setConfirmingPower(false); } }, [tvActive]);
-  return <section>
+  useEffect(() => { if (screen === 'add' && statusState?.status?.tv) { setScreen('dashboard'); setSettingsOpen(false); } }, [screen, statusState?.status?.tv]);
+  function navigate(next: typeof screen) {
+    setSettingsOpen(false); setConfirmingPower(false); setScreen(next);
+    if (help.current) help.current.open = false;
+  }
+  return <section className={screen === 'dashboard' ? 'dashboard-screen' : undefined}>
     <header className="app-header">
       <div className="header-identity"><p className="eyebrow">Smart TV Remote Hub</p><div ref={setIdentityTarget} /></div>
       <div className="header-actions">
-        <details ref={help} className="keyboard-help"><summary aria-label="Управление с клавиатуры" title="Управление с клавиатуры"><IconInfoCircle aria-hidden="true" /></summary><div id="remote-help" className="help-panel">
+        {screen === 'remote' && <details ref={help} className="keyboard-help"><summary aria-label="Управление с клавиатуры" title="Управление с клавиатуры"><IconInfoCircle aria-hidden="true" /></summary><div id="remote-help" className="help-panel">
           <p>Нажмите Tab, чтобы перейти к пульту, или нажмите на свободное место внутри него.</p>
           <dl className="keyboard-shortcuts">
             <div><dt><kbd>↑ ↓ ← →</kbd></dt><dd>Навигация</dd></div>
@@ -36,13 +53,19 @@ export function Home({ username, csrfToken, tvActive, busy, error, onLogout, onS
             <div><dt><kbd>−</kbd></dt><dd>Тише</dd></div>
             <div><dt><kbd>M</kbd></dt><dd>Без звука</dd></div>
           </dl>
-        </div></details>
+        </div></details>}
         <button ref={settingsButton} type="button" aria-label="Настройки" title="Настройки" aria-haspopup="dialog" disabled={!tvActive || confirmingPower} onClick={() => { settingsButton.current?.focus(); setSettingsOpen(true); }}><IconSettings aria-hidden="true" /></button>
         <button ref={logoutButton} type="button" aria-haspopup="dialog" disabled={busy || confirmingPower} onClick={() => { setSettingsOpen(false); setConfirmingLogout(true); }}>{busy ? 'Выход…' : 'Выйти'}</button>
       </div>
     </header>
     <LogoutConfirmation open={confirmingLogout && !busy} anchor={logoutButton} onClose={() => setConfirmingLogout(false)} onConfirm={() => { setConfirmingLogout(false); onLogout(); }} />
-    {tvActive && <TvSetup username={username} csrfToken={csrfToken} identityTarget={identityTarget} settingsOpen={settingsOpen} onCloseSettings={() => setSettingsOpen(false)} onConfirmationChange={setConfirmingPower} onSessionExpired={onSessionExpired} />}
+    {tvActive && statusState && (screen === 'dashboard' ? <>
+      <Dashboard status={statusState.status} loading={statusState.loading} error={statusState.error} onRetry={statusState.refresh} onOpenTv={() => navigate('remote')} onAddTv={() => navigate('add')} />
+      <SettingsDialog title="Настройки аккаунта" open={settingsOpen} onClose={() => setSettingsOpen(false)}><p className="session-caption">Вы вошли как {username}.</p></SettingsDialog>
+    </> : <>
+      <nav className="tv-navigation" aria-label="Телевизоры"><button type="button" disabled={confirmingPower} onClick={() => navigate('dashboard')}><IconArrowLeft aria-hidden="true" />Телевизоры</button></nav>
+      <TvSetup username={username} csrfToken={csrfToken} identityTarget={screen === 'remote' ? identityTarget : null} statusState={statusState} settingsOpen={settingsOpen} onCloseSettings={() => setSettingsOpen(false)} onConfirmationChange={setConfirmingPower} onSessionExpired={onSessionExpired} />
+    </>)}
     {error}
   </section>;
 }

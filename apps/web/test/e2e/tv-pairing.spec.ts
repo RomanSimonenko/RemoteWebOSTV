@@ -1,4 +1,5 @@
 import { expect, type Page } from '@playwright/test';
+import { openTvWorkspace } from "../support/dashboard.js";
 import { createServer } from 'node:net';
 import { test, gate, tvHost, failedHost, type TvFixture } from '../support/tv-fixture.js';
 
@@ -31,9 +32,11 @@ async function savedTv(page: Page) {
 
 async function pairSuccessfully(page: Page, tv: TvFixture) {
   await tv.setupAndLogin(page);
+  await openTvWorkspace(page);
   await startPair(page, tv);
   expect((await tv.status(page)).tv).toBeNull();
   tv.promptGate.release();
+  await openTvWorkspace(page);
   await savedTv(page);
   await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Подключён');
 }
@@ -53,6 +56,7 @@ test('saved TV survives browser reload, logout/login and API restart without a n
   expect(await tv.hasExposedSecrets(JSON.stringify(first))).toBe(false);
 
   await page.reload();
+  await openTvWorkspace(page);
   await savedTv(page);
   expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
   await page.getByRole('button', { name: 'Выйти', exact: true }).click();
@@ -61,12 +65,14 @@ test('saved TV survives browser reload, logout/login and API restart without a n
   expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
   expect((await page.context().request.get(`${tv.origin}/api/tv`)).status()).toBe(401);
   await tv.login(page);
+  await openTvWorkspace(page);
   await savedTv(page);
   expect(tv.promptCount).toBe(1);
 
   await tv.replaceTv({ kind: 'success' });
   await tv.restart();
   await page.reload();
+  await openTvWorkspace(page);
   await savedTv(page);
   await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Подключён');
   expect((await tv.status(page)).tv).toEqual(first.tv);
@@ -81,12 +87,14 @@ test('saved TV survives browser reload, logout/login and API restart without a n
 
 test('reload preserves the server pair deadline and timeout cannot save a late approval', async ({ page, tv }) => {
   await tv.setupAndLogin(page);
+  await openTvWorkspace(page);
   await startPair(page, tv);
   const running = (await tv.status(page)).operation!;
   expect(running.deadlineAt - running.startedAt).toBe(60_000);
   tv.clock.advance(40_000);
   await page.clock.setFixedTime(running.startedAt + 40_000);
   await page.reload();
+  await openTvWorkspace(page);
   await expect(page.getByText('Подтвердите доступ на экране телевизора.')).toBeVisible();
   await expect(page.getByText('Осталось: 20 с', { exact: true })).toBeVisible();
   expect((await tv.status(page)).operation).toEqual(running);
@@ -98,6 +106,7 @@ test('reload preserves the server pair deadline and timeout cannot save a late a
   tv.promptGate.release();
   await tv.restart();
   await page.reload();
+  await openTvWorkspace(page);
   await expect(page.getByRole('button', { name: 'Подключить', exact: true })).toBeVisible();
   expect((await tv.status(page)).tv).toBeNull();
 });
@@ -105,6 +114,7 @@ test('reload preserves the server pair deadline and timeout cannot save a late a
 test('TV rejection is visible and leaves no saved TV', async ({ page, tv }) => {
   await tv.replaceTv({ kind: 'reject-pairing' });
   await tv.setupAndLogin(page);
+  await openTvWorkspace(page);
   await page.getByLabel('IP-адрес телевизора').fill(tvHost);
   await page.getByRole('button', { name: 'Подключить', exact: true }).click();
   await expect(page.getByRole('alert')).toHaveText('Запрос на сопряжение отклонён.');
@@ -116,6 +126,7 @@ test('TV rejection is visible and leaves no saved TV', async ({ page, tv }) => {
 
 test('cancel closes the prompt connection and a late TV approval cannot configure it', async ({ page, tv }) => {
   await tv.setupAndLogin(page);
+  await openTvWorkspace(page);
   await startPair(page, tv);
   await page.getByRole('button', { name: 'Отменить', exact: true }).click();
   await expect(page.getByRole('alert')).toHaveText('Операция отменена.');
@@ -123,6 +134,7 @@ test('cancel closes the prompt connection and a late TV approval cannot configur
   tv.promptGate.release();
   await tv.restart();
   await page.reload();
+  await openTvWorkspace(page);
   await expect(page.getByRole('button', { name: 'Подключить', exact: true })).toBeVisible();
   const status = await tv.status(page);
   expect(status.tv).toBeNull();
@@ -148,6 +160,7 @@ test('unavailable TV and failed address change keep the saved identity through r
   await tv.restart();
   await tv.expireUnavailableRecovery(page);
   await page.reload();
+  await openTvWorkspace(page);
   await savedTv(page);
   await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Нет соединения');
   expect((await tv.status(page)).tv).toEqual(original);
@@ -164,6 +177,7 @@ test('revoked saved key requires explicit repair and reload never starts another
   await tv.replaceTv({ kind: 'reject-pairing' });
   await tv.restart();
   await page.reload();
+  await openTvWorkspace(page);
   await savedTv(page);
   await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Ошибка авторизации');
   await expect(page.getByRole('alert')).toHaveText('Телевизор не принял сохранённую авторизацию.');
@@ -171,6 +185,7 @@ test('revoked saved key requires explicit repair and reload never starts another
   expect(tv.promptCount).toBe(1);
   expect(tv.policies.at(-1)).toEqual({ host: tvHost, prompt: false });
   await page.reload();
+  await openTvWorkspace(page);
   await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Ошибка авторизации');
   expect(tv.policies).toHaveLength(2);
 
@@ -193,6 +208,7 @@ test('revoked saved key requires explicit repair and reload never starts another
 
 test('a delayed accepted operation in one tab yields to a fresh operation completed in another tab', async ({ page, context, tv }) => {
   await tv.setupAndLogin(page);
+  await openTvWorkspace(page);
   await expect(page.getByRole('button', { name: 'Подключить', exact: true })).toBeVisible();
   const accepted = gate();
   const deliver = gate();
@@ -216,6 +232,7 @@ test('a delayed accepted operation in one tab yields to a fresh operation comple
     await accepted.promise;
     const firstId = (await tv.status(page)).operation!.id;
     await second.goto(tv.origin);
+    await openTvWorkspace(second);
     await second.getByRole('button', { name: 'Отменить', exact: true }).click();
     await tv.tv.waitForActiveSocketCount(0);
     await expect(second.getByRole('button', { name: 'Подключить', exact: true })).toBeVisible();
