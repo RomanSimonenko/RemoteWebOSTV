@@ -82,11 +82,12 @@ async function fixture(page: Page, mode = 'idle') {
       }
       reads.push(path);
       const data: Record<string, unknown> = {
+        '/api/tvs': { devices: [{ tvId: '00000000-0000-4000-8000-000000000001', platform: 'webos', status }] },
         '/api/setup/status': { state: mode === 'setup' ? 'unclaimed' : 'claimed' },
         '/api/auth/session': { username: 'synthetic-owner', csrfToken: 'c'.repeat(43) },
-        '/api/tv': status,
-        '/api/tv/remote': { enabled: true, reason: null },
-        '/api/tv/power': power,
+        '/api/tvs/00000000-0000-4000-8000-000000000001': status,
+        '/api/tvs/00000000-0000-4000-8000-000000000001/remote': { enabled: true, reason: null },
+        '/api/tvs/00000000-0000-4000-8000-000000000001/power': power,
       };
       await route.fulfill({ status: mode === 'login' && path === '/api/auth/session' ? 401 : 200, json: data[path] });
     } else await route.fulfill({
@@ -601,7 +602,7 @@ test('remote command failure remains visible below the controls and never retrie
   await remote(page).getByRole('button', { name: 'Домой', exact: true }).click();
   await expect(page.locator('.tv-activity').getByRole('alert')).toContainText('Результат команды неизвестен');
   expect(await page.locator('.tv-card').getByRole('alert').count()).toBe(0);
-  expect(mutations).toEqual([{ path: '/api/tv/commands', data: { id: expect.any(String), button: 'HOME' } }]);
+  expect(mutations).toEqual([{ path: '/api/tvs/00000000-0000-4000-8000-000000000001/commands', data: { id: expect.any(String), button: 'HOME' } }]);
 });
 
 test('native settings trap focus, block pointer and TV keys, then restore gear focus', async ({ page }) => {
@@ -664,5 +665,5 @@ test('power confirmation excludes settings and sends only the explicitly confirm
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Выключить ТВ', exact: true }).click();
   await page.getByRole('button', { name: 'Выключить', exact: true }).click();
-  await expect.poll(() => mutations).toEqual([{ path: '/api/tv/power', data: { id: expect.any(String), action: 'power_off', confirm: true } }]);
+  await expect.poll(() => mutations).toEqual([{ path: '/api/tvs/00000000-0000-4000-8000-000000000001/power', data: { id: expect.any(String), action: 'power_off', confirm: true } }]);
 });

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import Database from 'better-sqlite3';
 
-import { ownerTableSql, tvConfigTableSql, schemaMigrations, type Migration } from './migrations.js';
+import { ownerTableSql, tvConfigTableSql, tvDevicesTableSql, tvDefaultTableSql, schemaMigrations, type Migration } from './migrations.js';
 import { StorageStartupError, type StorageErrorCode } from './errors.js';
 
 export interface AppDatabase {
@@ -69,7 +69,7 @@ function migrationVersion(sqlite: Database.Database, latestVersion: number): num
       throw new StorageStartupError('STORAGE_SCHEMA_INVALID', cause);
     }
   }
-  if (version >= 2) {
+  if (version >= 2 && version < 4) {
     const savedTvSql = sqlite.prepare('SELECT sql FROM sqlite_schema WHERE type = ? AND name = ?').pluck().get('table', 'tv_config');
     const extendsTvTable = version > 2 && typeof savedTvSql === 'string' && savedTvSql.startsWith(tvConfigTableSql.slice(0, -1));
     if (savedTvSql !== tvConfigTableSql && !extendsTvTable) throw new StorageStartupError('STORAGE_SCHEMA_INVALID');
@@ -84,6 +84,17 @@ function migrationVersion(sqlite: Database.Database, latestVersion: number): num
         }
       }
     } catch (cause) { throw new StorageStartupError('STORAGE_SCHEMA_INVALID', cause); }
+  }
+  if (version >= 4) {
+    for (const [name, expected] of [['tv_devices', tvDevicesTableSql], ['tv_default', tvDefaultTableSql]]) {
+      if (sqlite.prepare('SELECT sql FROM sqlite_schema WHERE type = ? AND name = ?').pluck().get('table', name) !== expected) {
+        throw new StorageStartupError('STORAGE_SCHEMA_INVALID');
+      }
+    }
+    if (names.has('tv_config') || (sqlite.pragma('foreign_key_check') as unknown[]).length !== 0) throw new StorageStartupError('STORAGE_SCHEMA_INVALID');
+    const count = (sqlite.prepare('SELECT count(*) AS count FROM tv_devices').get() as { count: number }).count;
+    const defaults = (sqlite.prepare('SELECT count(*) AS count FROM tv_default').get() as { count: number }).count;
+    if ((count === 0 && defaults !== 0) || (count > 0 && defaults !== 1)) throw new StorageStartupError('STORAGE_SCHEMA_INVALID');
   }
   return version;
 }

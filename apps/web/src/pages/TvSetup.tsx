@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { startTvOperationSchema, type StartTvOperation, type TvOperation, type SavedTvView, type TvPowerState } from '@remote-webos-tv/contracts';
+import { startTvOperationSchema, type StartTvOperation, type TvOperation, type SavedTvView, type TvPowerState, type TvId } from '@remote-webos-tv/contracts';
 import { api, ApiFailure, friendlyError } from '../api.js';
 import { useTvStatus } from '../useTvStatus.js';
 import { Remote } from './Remote.js';
@@ -8,16 +8,16 @@ import { PowerControls } from './PowerControls.js';
 import { SettingsDialog } from '../components/SettingsDialog.js';
 import { connectionLabels } from '../tv-connection.js';
 
-interface Props { username?: string; csrfToken: string; identityTarget?: HTMLElement | null; onSessionExpired(): void; settingsOpen: boolean; onCloseSettings(): void; onConfirmationChange?(confirming: boolean): void; statusState?: ReturnType<typeof useTvStatus> }
+interface Props { tvId?: TvId; onReady?(): void; username?: string; csrfToken: string; identityTarget?: HTMLElement | null; onSessionExpired(): void; settingsOpen: boolean; onCloseSettings(): void; onConfirmationChange?(confirming: boolean): void; statusState?: ReturnType<typeof useTvStatus> }
 
 export function TvSetup(props: Props) {
   return props.statusState ? <TvSetupContent {...props} statusState={props.statusState} /> : <StandaloneTvSetup {...props} />;
 }
 function StandaloneTvSetup(props: Props) {
-  const statusState = useTvStatus(props.onSessionExpired);
+  const statusState = useTvStatus(props.onSessionExpired, props.tvId);
   return <TvSetupContent {...props} statusState={statusState} />;
 }
-function TvSetupContent({ username, csrfToken, identityTarget, onSessionExpired, settingsOpen, onCloseSettings, onConfirmationChange, statusState }: Props & { statusState: ReturnType<typeof useTvStatus> }) {
+function TvSetupContent({ tvId, onReady, username, csrfToken, identityTarget, onSessionExpired, settingsOpen, onCloseSettings, onConfirmationChange, statusState }: Props & { statusState: ReturnType<typeof useTvStatus> }) {
   const { status, statusReadVersion, getReadVersion, loading, refreshing, error, refresh } = statusState;
   const [host, setHost] = useState('');
   const [message, setMessage] = useState('');
@@ -47,6 +47,7 @@ function TvSetupContent({ username, csrfToken, identityTarget, onSessionExpired,
   const alert = useRef<HTMLParagraphElement>(null);
   if (status) saved.current = status.tv;
   const tv = saved.current;
+  useEffect(() => { if (status?.tv) onReady?.(); }, [status?.tv, onReady]);
   // Reads started before the mutation response may carry a previous snapshot.
   // A read started afterwards is authoritative even if another tab replaced the
   // operation. Opaque server ids and wall-clock timestamps do not order reads.
@@ -122,7 +123,7 @@ function TvSetupContent({ username, csrfToken, identityTarget, onSessionExpired,
     if (pending.current || running || powerRunning) return;
     const parsed = startTvOperationSchema.safeParse(input);
     if (!parsed.success) { setMessage('Введите локальный IP-адрес телевизора в формате IPv4, например 192.168.1.20. Без ссылки и номера порта.'); return; }
-    void mutate((signal) => api.startTvOperation(parsed.data, csrfToken, signal));
+    void mutate((signal) => api.startTvOperation(parsed.data, csrfToken, signal, tvId));
   }
 
   const connectionText = error ? 'Статус неизвестен' : poweringOff ? 'Выключение' : progress || (status ? connectionLabels[status.connection] : 'Загрузка статуса…');
@@ -134,7 +135,7 @@ function TvSetupContent({ username, csrfToken, identityTarget, onSessionExpired,
     {running && !powerRunning && <div>
       {(operation.action === 'pair' || operation.action === 'repair') && <p>Подтвердите доступ на экране телевизора.</p>}
       <p>Осталось: {Math.max(0, Math.ceil((operation.deadlineAt - now) / 1000))} с</p>
-      <button type="button" disabled={busy} onClick={() => void mutate((signal) => api.cancelTvOperation(operation.id, csrfToken, signal))}>Отменить</button>
+      <button type="button" disabled={busy} onClick={() => void mutate((signal) => api.cancelTvOperation(operation.id, csrfToken, signal, tvId))}>Отменить</button>
     </div>}
   </>;
   const addressForm = status && !running && <>
@@ -161,8 +162,8 @@ function TvSetupContent({ username, csrfToken, identityTarget, onSessionExpired,
     {tv && <div className={`connection-progress${settingsOpen ? ' reserved-activity' : ''}`} hidden={!running || powerRunning} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{running && !powerRunning && activity(!settingsOpen)}</div>}
     {tv && <div className="tv-card">
       <div className="remote-top">{connectionIndicator}</div>
-      <PowerControls csrfToken={csrfToken} active quietOffline={quietOffline || running} settingsOpen={settingsOpen} settingsTarget={settingsTarget} activityTarget={powerActivityTarget} {...(onConfirmationChange ? { onConfirmationChange } : {})} onSessionExpired={onSessionExpired} onStateChange={observePowerState} onBusyChange={setPowerBusy} />
-      <Remote csrfToken={csrfToken} active quietOffline={quietRemoteUnavailable} interactionBlocked={settingsOpen} activityTarget={remoteActivityTarget} onSessionExpired={onSessionExpired} onBusyChange={setRemoteBusy} />
+      <PowerControls {...(tvId ? { tvId } : {})} csrfToken={csrfToken} active quietOffline={quietOffline || running} settingsOpen={settingsOpen} settingsTarget={settingsTarget} activityTarget={powerActivityTarget} {...(onConfirmationChange ? { onConfirmationChange } : {})} onSessionExpired={onSessionExpired} onStateChange={observePowerState} onBusyChange={setPowerBusy} />
+      <Remote {...(tvId ? { tvId } : {})} csrfToken={csrfToken} active quietOffline={quietRemoteUnavailable} interactionBlocked={settingsOpen} activityTarget={remoteActivityTarget} onSessionExpired={onSessionExpired} onBusyChange={setRemoteBusy} />
     </div>}
     <div className="tv-activity">
       {!tv && <div className={status?.connection === 'unconfigured' ? 'visually-hidden' : undefined}>{connectionIndicator}</div>}

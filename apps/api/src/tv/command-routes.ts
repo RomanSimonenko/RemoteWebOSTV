@@ -6,6 +6,8 @@ import { rejectTvCommand, TvCommandAdmissionError } from './commands.js';
 
 export interface TvCommandRoutesDependencies {
   readonly service: TvService;
+  readonly resolveService?: (request: FastifyRequest) => TvService;
+  readonly prefixes?: readonly string[];
   readonly sessions: AuthSessionService;
   readonly sessionForRequest: (request: FastifyRequest) => string | undefined;
   readonly beforeCommandAttempt: (request: FastifyRequest, reply: FastifyReply, commandId: string) => Promise<(() => Promise<void>) | undefined>;
@@ -22,7 +24,7 @@ function resultStatus(result: TvCommandResult): number {
   }
 }
 
-export function registerTvCommandRoutes(app: FastifyInstance, { service, sessions, sessionForRequest, beforeCommandAttempt }: TvCommandRoutesDependencies): void {
+export function registerTvCommandRoutes(app: FastifyInstance, { service: defaultService, resolveService, prefixes = ['/api/tv'], sessions, sessionForRequest, beforeCommandAttempt }: TvCommandRoutesDependencies): void {
   let admission = Promise.resolve();
   let closing = false;
   const owned = new Map<AbortController, string>();
@@ -39,8 +41,10 @@ export function registerTvCommandRoutes(app: FastifyInstance, { service, session
     await admission;
   });
   app.addHook('onClose', async () => { unsubscribe(); });
-  app.get('/api/tv/remote', async () => tvRemoteStateSchema.parse(service.remoteState()));
-  app.post('/api/tv/commands', async (request, reply) => {
+  for (const prefix of prefixes) {
+  app.get(`${prefix}/remote`, async (request) => tvRemoteStateSchema.parse((resolveService?.(request) ?? defaultService).remoteState()));
+  app.post(`${prefix}/commands`, async (request, reply) => {
+    const service = resolveService?.(request) ?? defaultService;
     const parsed = tvCommandRequestSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ code: 'BAD_REQUEST', message: 'Bad request', requestId: request.id });
     if (closing) return reply.code(503).send(rejectTvCommand(parsed.data.id, 'COMMAND_NOT_SENT'));
@@ -86,4 +90,5 @@ export function registerTvCommandRoutes(app: FastifyInstance, { service, session
       owned.delete(controller);
     }
   });
+  }
 }

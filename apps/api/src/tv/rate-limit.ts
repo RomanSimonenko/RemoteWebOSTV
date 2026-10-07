@@ -1,6 +1,9 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { rejectTvCommand } from './commands.js';
 
+/** Shared setup admission across adding devices and legacy/addressed operations. */
+export interface TvSetupAdmission { pending: Promise<void> }
+
 function createAcceptedAttemptLimiter(app: FastifyInstance, options: { max: number; timeWindow: number; key: string }) {
   let limiter: ReturnType<FastifyInstance['createRateLimit']> | undefined;
   return async (request: FastifyRequest, reply: FastifyReply, limitedResponse: () => unknown): Promise<(() => Promise<void>) | undefined> => {

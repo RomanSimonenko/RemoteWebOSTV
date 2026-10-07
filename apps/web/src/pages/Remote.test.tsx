@@ -7,9 +7,9 @@ import { api, ApiFailure } from '../api.js';
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 test('saved television exposes the browser remote beside its setup', async () => {
-  vi.stubGlobal('fetch', vi.fn(async (path: string) => new Response(JSON.stringify(path === '/api/tv'
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => new Response(JSON.stringify(path === '/api/tvs' ? deviceList(saved) : path === '/api/tvs/00000000-0000-4000-8000-000000000001'
     ? { tv: { host: '192.168.1.20', identity: { model: 'Synthetic TV' } }, connection: 'available', operation: null }
-    : path === '/api/tv/power' ? { mac: null, canPowerOff: false, canWake: false, operation: null }
+    : path === '/api/tvs/00000000-0000-4000-8000-000000000001/power' ? { mac: null, canPowerOff: false, canWake: false, operation: null }
     : { enabled: true, reason: null }), { status: 200 })));
   render(<Home username="alice" csrfToken={'c'.repeat(43)} tvActive busy={false} error={null} onLogout={vi.fn()} onSessionExpired={vi.fn()} />);
   await act(async () => {});
@@ -20,18 +20,19 @@ test('saved television exposes the browser remote beside its setup', async () =>
 test('settings block direct mouse and keyboard commands while retaining the capability read lifecycle', async () => {
   vi.useFakeTimers();
   const fetch = vi.fn(async (path: string) => response(ready)); vi.stubGlobal('fetch', fetch);
-  const view = render(<Remote csrfToken={csrfToken} active onSessionExpired={vi.fn()} />); await act(async () => {});
+  const view = render(<Remote tvId="00000000-0000-4000-8000-000000000001" csrfToken={csrfToken} active onSessionExpired={vi.fn()} />); await act(async () => {});
   const remote = screen.getByRole('group', { name: 'Пульт' }); remote.focus();
-  view.rerender(<Remote csrfToken={csrfToken} active interactionBlocked onSessionExpired={vi.fn()} />);
+  view.rerender(<Remote tvId="00000000-0000-4000-8000-000000000001" csrfToken={csrfToken} active interactionBlocked onSessionExpired={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: 'OK' }));
   for (const key of ['Escape', 'Enter', 'ArrowUp']) fireEvent.keyDown(remote, { key });
-  expect(fetch.mock.calls.map(([path]) => path)).toEqual(['/api/tv/remote']);
+  expect(fetch.mock.calls.map(([path]) => path)).toEqual(['/api/tvs/00000000-0000-4000-8000-000000000001/remote']);
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
-  expect(fetch.mock.calls.map(([path]) => path)).toEqual(['/api/tv/remote', '/api/tv/remote']);
+  expect(fetch.mock.calls.map(([path]) => path)).toEqual(['/api/tvs/00000000-0000-4000-8000-000000000001/remote', '/api/tvs/00000000-0000-4000-8000-000000000001/remote']);
 });
 
 const csrfToken = 'c'.repeat(43);
 const saved = { tv: { host: '192.168.1.20', identity: { model: 'Synthetic TV' } }, connection: 'available', operation: null };
+const deviceList = (status: unknown) => ({ devices: [{ tvId: '00000000-0000-4000-8000-000000000001', platform: 'webos', status }] });
 const ready = { enabled: true, reason: null };
 const unknown = 'Результат команды неизвестен. Автоматический повтор не выполняется';
 function response(data: unknown, status = 200) { return new Response(JSON.stringify(data), { status }); }
@@ -41,10 +42,11 @@ function home(active = true, expired = vi.fn()) {
 }
 async function mount(command = (input: { id: string; button: string }) => Promise.resolve(response({ id: input.id, outcome: 'sent' })), state = () => Promise.resolve(response(ready)), expired = vi.fn()) {
   const fetch = vi.fn((path: string, init?: RequestInit) => {
-    if (path === '/api/tv') return Promise.resolve(response(saved));
-    if (path === '/api/tv/remote') return state();
-    if (path === '/api/tv/power') return Promise.resolve(response({ mac: null, canPowerOff: false, canWake: false, operation: null }));
-    if (path === '/api/tv/commands') return command(JSON.parse(init!.body as string));
+    if (path === '/api/tvs') return Promise.resolve(response(deviceList(saved)));
+    if (path === '/api/tvs/00000000-0000-4000-8000-000000000001') return Promise.resolve(response(saved));
+    if (path === '/api/tvs/00000000-0000-4000-8000-000000000001/remote') return state();
+    if (path === '/api/tvs/00000000-0000-4000-8000-000000000001/power') return Promise.resolve(response({ mac: null, canPowerOff: false, canWake: false, operation: null }));
+    if (path === '/api/tvs/00000000-0000-4000-8000-000000000001/commands') return command(JSON.parse(init!.body as string));
     throw new Error('Unexpected test route');
   });
   vi.stubGlobal('fetch', fetch);
@@ -52,10 +54,19 @@ async function mount(command = (input: { id: string; button: string }) => Promis
   await act(async () => {});
   fireEvent.click(screen.getByRole('button', { name: /^Открыть телевизор / }));
   await act(async () => {});
-  return { ...view, fetch, commands: () => fetch.mock.calls.filter(([path]) => path === '/api/tv/commands'), reads: () => fetch.mock.calls.filter(([path]) => path === '/api/tv/remote') };
+  return { ...view, fetch, commands: () => fetch.mock.calls.filter(([path]) => path === '/api/tvs/00000000-0000-4000-8000-000000000001/commands'), reads: () => fetch.mock.calls.filter(([path]) => path === '/api/tvs/00000000-0000-4000-8000-000000000001/remote') };
 }
 const buttons = [['Вверх', 'UP'], ['Вниз', 'DOWN'], ['Влево', 'LEFT'], ['Вправо', 'RIGHT'], ['OK', 'ENTER'], ['Назад', 'BACK'], ['Домой', 'HOME'], ['Громкость +', 'VOLUME_UP'], ['Громкость −', 'VOLUME_DOWN'], ['Без звука', 'MUTE']] as const;
 const digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] as const;
+test('leaving the remote stops hold and does not cancel server power', async () => {
+  vi.useFakeTimers(); const view = await mount();
+  pointer(screen.getByRole('button', { name: 'Вверх' }), 'pointerdown'); await act(async () => {});
+  fireEvent.click(screen.getByRole('button', { name: 'Телевизоры' })); await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+  expect(view.commands()).toHaveLength(1);
+  expect(view.fetch.mock.calls.some(([path]) => path.endsWith('/cancel'))).toBe(false);
+  expect(screen.queryByRole('group', { name: 'Пульт' })).toBeNull();
+});
 function pointer(target: Element | Window, type: string) {
   const event = new Event(type, { bubbles: true });
   Object.defineProperties(event, { button: { value: 0 }, isPrimary: { value: true }, pointerId: { value: 1 } });
@@ -96,13 +107,13 @@ test('focused volume repeats with Space and stops when focus leaves the remote',
 test('settings block an existing hold in a retained remote', async () => {
   vi.useFakeTimers(); const commands: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
-    if (path === '/api/tv/remote') return response(ready);
+    if (path === '/api/tvs/00000000-0000-4000-8000-000000000001/remote') return response(ready);
     const input = JSON.parse(init!.body as string); commands.push(input.button); return response({ id: input.id, outcome: 'sent' });
   }));
   const props = { csrfToken, active: true, onSessionExpired: vi.fn() };
-  const view = render(<Remote {...props} />); await act(async () => {});
+  const view = render(<Remote tvId="00000000-0000-4000-8000-000000000001" {...props} />); await act(async () => {});
   pointer(screen.getByRole('button', { name: 'Вверх' }), 'pointerdown'); await act(async () => {});
-  view.rerender(<Remote {...props} interactionBlocked />);
+  view.rerender(<Remote tvId="00000000-0000-4000-8000-000000000001" {...props} interactionBlocked />);
   await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); expect(commands).toEqual(['UP']);
 });
 test('pending hold ticks are discarded and an unknown result ends repetition', async () => {
@@ -171,14 +182,14 @@ test.each(digits)('numeric click %s sends one protected command without a numeri
 });
 test('numeric keys preserve settings, hidden document and in-flight command guards', async () => {
   const pending = barrier<Response>();
-  const fetch = vi.fn((path: string, _init?: RequestInit) => path === '/api/tv/remote' ? Promise.resolve(response(ready)) : pending.promise);
+  const fetch = vi.fn((path: string, _init?: RequestInit) => path === '/api/tvs/00000000-0000-4000-8000-000000000001/remote' ? Promise.resolve(response(ready)) : pending.promise);
   vi.stubGlobal('fetch', fetch);
   const props = { csrfToken, active: true, onSessionExpired: vi.fn() };
-  const view = render(<Remote {...props} interactionBlocked />); await act(async () => {});
+  const view = render(<Remote tvId="00000000-0000-4000-8000-000000000001" {...props} interactionBlocked />); await act(async () => {});
   const zero = screen.getByRole('button', { name: '0' });
   fireEvent.click(zero);
   expect(fetch).toHaveBeenCalledTimes(1);
-  view.rerender(<Remote {...props} />);
+  view.rerender(<Remote tvId="00000000-0000-4000-8000-000000000001" {...props} />);
   const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
   fireEvent.click(zero); expect(fetch).toHaveBeenCalledTimes(1);
   visibility.mockRestore();
@@ -413,13 +424,13 @@ test.each([[400, 'BAD_REQUEST'], [403, 'FORBIDDEN']])('a manually constructed AP
 });
 test('direct active/token lifecycle stops polls and ignores old command even when the component is retained', async () => {
   vi.useFakeTimers(); const pending = barrier<Response>(); const expired = vi.fn();
-  const fetch = vi.fn((path: string, _init?: RequestInit) => path === '/api/tv/remote' ? Promise.resolve(response(ready)) : pending.promise);
+  const fetch = vi.fn((path: string, _init?: RequestInit) => path === '/api/tvs/00000000-0000-4000-8000-000000000001/remote' ? Promise.resolve(response(ready)) : pending.promise);
   vi.stubGlobal('fetch', fetch);
-  const view = render(<Remote csrfToken={csrfToken} active onSessionExpired={expired} />); await act(async () => {});
+  const view = render(<Remote tvId="00000000-0000-4000-8000-000000000001" csrfToken={csrfToken} active onSessionExpired={expired} />); await act(async () => {});
   fireEvent.click(screen.getByRole('button', { name: 'OK' })); const signal = fetch.mock.calls[1]![1]?.signal as AbortSignal;
-  view.rerender(<Remote csrfToken={csrfToken} active={false} onSessionExpired={expired} />); expect(signal.aborted).toBe(true);
+  view.rerender(<Remote tvId="00000000-0000-4000-8000-000000000001" csrfToken={csrfToken} active={false} onSessionExpired={expired} />); expect(signal.aborted).toBe(true);
   await act(async () => { await vi.advanceTimersByTimeAsync(10000); }); expect(fetch).toHaveBeenCalledTimes(2);
-  view.rerender(<Remote csrfToken={'d'.repeat(43)} active onSessionExpired={expired} />); await act(async () => {});
+  view.rerender(<Remote tvId="00000000-0000-4000-8000-000000000001" csrfToken={'d'.repeat(43)} active onSessionExpired={expired} />); await act(async () => {});
   await act(async () => { pending.resolve(response({ code: 'UNAUTHORIZED', message: 'Unauthorized', requestId: 'synthetic' }, 401)); });
   expect(expired).not.toHaveBeenCalled(); expect(screen.queryByRole('alert')).toBeNull();
 });
@@ -436,16 +447,17 @@ test('App logout removes pending remote, then a late unauthorized command cannot
       case '/api/auth/session': return Promise.resolve(response({ username: 'alice', csrfToken: ++sessions === 1 ? csrfToken : 'd'.repeat(43) }));
       case '/api/auth/login': return Promise.resolve(response({ username: 'alice' }));
       case '/api/auth/logout': return Promise.resolve(new Response(null, { status: 204 }));
-      case '/api/tv': return Promise.resolve(response(saved));
-      case '/api/tv/remote': return Promise.resolve(response(ready));
-      case '/api/tv/power': return Promise.resolve(response({ mac: null, canPowerOff: false, canWake: false, operation: null }));
-      case '/api/tv/commands': return pending.promise;
+      case '/api/tvs': return Promise.resolve(response(deviceList(saved)));
+      case '/api/tvs/00000000-0000-4000-8000-000000000001': return Promise.resolve(response(saved));
+      case '/api/tvs/00000000-0000-4000-8000-000000000001/remote': return Promise.resolve(response(ready));
+      case '/api/tvs/00000000-0000-4000-8000-000000000001/power': return Promise.resolve(response({ mac: null, canPowerOff: false, canWake: false, operation: null }));
+      case '/api/tvs/00000000-0000-4000-8000-000000000001/commands': return pending.promise;
       default: throw new Error('Unexpected test route');
     }
   });
   vi.stubGlobal('fetch', fetch); render(<App />); await act(async () => {});
   fireEvent.click(screen.getByRole('button', { name: /^Открыть телевизор / })); await act(async () => {});
-  fireEvent.click(screen.getByRole('button', { name: 'OK' })); const command = fetch.mock.calls.find(([path]) => path === '/api/tv/commands')!;
+  fireEvent.click(screen.getByRole('button', { name: 'OK' })); const command = fetch.mock.calls.find(([path]) => path === '/api/tvs/00000000-0000-4000-8000-000000000001/commands')!;
   fireEvent.click(screen.getByRole('button', { name: 'Выйти' }));
   expect((command[1]!.signal as AbortSignal).aborted).toBe(false);
   fireEvent.click(within(screen.getByRole('dialog', { name: 'Выйти из приложения?' })).getByRole('button', { name: 'Выйти' }));

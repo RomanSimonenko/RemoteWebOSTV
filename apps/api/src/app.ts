@@ -15,6 +15,9 @@ import { registerTvRoutes } from './tv/routes.js';
 import { createTvAttemptLimiter, createTvCommandLimiter, createTvPowerLimiter } from './tv/rate-limit.js';
 import { registerTvCommandRoutes } from './tv/command-routes.js';
 import { registerTvPowerRoutes } from './tv/power-routes.js';
+import type { TvDeviceRegistry } from './tv/device-registry.js';
+import { addressedTvService, registerTvDeviceRoutes } from './tv/device-routes.js';
+import { projectTvError, TvServiceError } from './tv/service.js';
 
 export interface AppDependencies {
   readonly config: AppConfig;
@@ -22,6 +25,7 @@ export interface AppDependencies {
   readonly webRoot?: string;
   readonly auth?: Omit<AuthRoutesDependencies, 'config'>;
   readonly tv?: TvService;
+  readonly tvs?: TvDeviceRegistry;
   readonly reportError?: (report: { readonly requestId: string; readonly status: number; readonly causeTypes: readonly string[] }) => void;
   readonly logStream?: Writable;
 }
@@ -43,7 +47,7 @@ function routingError(error: Error & { code?: string }, request: FastifyRequest,
     });
 }
 
-export function buildApp({ config, getSetupState, webRoot, auth, tv, reportError, logStream }: AppDependencies) {
+export function buildApp({ config, getSetupState, webRoot, auth, tv, tvs, reportError, logStream }: AppDependencies) {
   const app = Fastify({
     logger: safeLoggerOptions(logStream),
     bodyLimit: 16 * 1024,
@@ -65,6 +69,7 @@ export function buildApp({ config, getSetupState, webRoot, auth, tv, reportError
   });
 
   app.setErrorHandler((error, request, reply) => {
+    if (error instanceof TvServiceError && error.statusCode < 500) return reply.code(error.statusCode).send({ ...projectTvError(error), requestId: request.id });
     const failure = typeof error === 'object' && error !== null ? error : {};
     const tooLarge = 'code' in failure && failure.code === 'FST_ERR_CTP_BODY_TOO_LARGE';
     const reportedStatus = 'statusCode' in failure && typeof failure.statusCode === 'number' ? failure.statusCode : 500;
@@ -113,9 +118,13 @@ export function buildApp({ config, getSetupState, webRoot, auth, tv, reportError
   }
   if (tv) {
     if (!auth) throw new Error('TV routes require owner authentication');
-    registerTvRoutes(app, { service: tv, sessions: auth.sessions, sessionForRequest: sessionForRequest!, beforeTvAttempt: createTvAttemptLimiter(app) });
-    registerTvCommandRoutes(app, { service: tv, sessions: auth.sessions, sessionForRequest: sessionForRequest!, beforeCommandAttempt: createTvCommandLimiter(app) });
-    registerTvPowerRoutes(app, { service: tv, sessions: auth.sessions, sessionForRequest: sessionForRequest!, beforePowerAttempt: createTvPowerLimiter(app) });
+    const targets = tvs ? { prefixes: ['/api/tv', '/api/tvs/:tvId'], resolveService: (request: FastifyRequest) => addressedTvService(tvs, request) } : {};
+    const beforeTvAttempt = createTvAttemptLimiter(app);
+    const admission = { pending: Promise.resolve() };
+    registerTvRoutes(app, { service: tv, ...targets, sessions: auth.sessions, sessionForRequest: sessionForRequest!, beforeTvAttempt, admission });
+    registerTvCommandRoutes(app, { service: tv, ...targets, sessions: auth.sessions, sessionForRequest: sessionForRequest!, beforeCommandAttempt: createTvCommandLimiter(app) });
+    registerTvPowerRoutes(app, { service: tv, ...targets, sessions: auth.sessions, sessionForRequest: sessionForRequest!, beforePowerAttempt: createTvPowerLimiter(app) });
+    if (tvs) registerTvDeviceRoutes(app, { registry: tvs, sessions: auth.sessions, sessionForRequest: sessionForRequest!, beforeTvAttempt, admission });
   }
 
   return app;

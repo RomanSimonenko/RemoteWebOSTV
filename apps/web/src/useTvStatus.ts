@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import type { TvStatusResponse } from '@remote-webos-tv/contracts';
+import type { TvStatusResponse, TvId } from '@remote-webos-tv/contracts';
 import { api, ApiFailure, friendlyError } from './api.js';
 
 const pollInterval = 2000;
 
 /** One read at a time. Manual refresh shares the same completion-based cooldown. */
-export function useTvStatus(onSessionExpired: () => void) {
+export function useTvStatus(onSessionExpired: () => void, tvId?: TvId, enabled = true) {
   const [snapshot, setSnapshot] = useState<{ status: TvStatusResponse | null; readVersion: number }>({ status: null, readVersion: 0 });
   // Only the initial read blocks the UI; background reads share inFlight below.
   const [loading, setLoading] = useState(true);
@@ -19,6 +19,8 @@ export function useTvStatus(onSessionExpired: () => void) {
   const getReadVersion = useCallback(() => startedReads.current, []);
 
   useEffect(() => {
+    setSnapshot({ status: null, readVersion: 0 }); setError(''); setLoading(enabled); setRefreshing(false);
+    if (!enabled) return;
     let active = true;
     let inFlight = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -33,7 +35,7 @@ export function useTvStatus(onSessionExpired: () => void) {
       const readVersion = ++startedReads.current;
       controller = new AbortController();
       try {
-        const next = await api.tvStatus(controller.signal);
+        const next = await api.tvStatus(controller.signal, tvId);
         if (!active) return;
         setSnapshot({ status: next, readVersion });
         setError('');
@@ -59,6 +61,6 @@ export function useTvStatus(onSessionExpired: () => void) {
       if (timer !== undefined) clearTimeout(timer);
       controller?.abort();
     };
-  }, []);
+  }, [tvId, enabled]);
   return { status: snapshot.status, statusReadVersion: snapshot.readVersion, getReadVersion, loading, refreshing, error, refresh };
 }

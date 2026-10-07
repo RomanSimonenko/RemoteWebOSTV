@@ -37,7 +37,7 @@ test('upgrades a v1 database with a recovery backup while preserving owner and s
   try {
     expect(database.sqlite.prepare('SELECT username FROM owner').get()).toEqual({ username: 'synthetic-owner' });
     expect(database.sqlite.prepare('SELECT token_hash FROM sessions').get()).toEqual({ token_hash: 'synthetic-token' });
-    expect(database.sqlite.prepare('SELECT version, applied_at FROM migration_version ORDER BY version').all()).toEqual([{ version: 1, applied_at: 100 }, { version: 2, applied_at: 200 }, { version: 3, applied_at: 200 }]);
+    expect(database.sqlite.prepare('SELECT version, applied_at FROM migration_version ORDER BY version').all()).toEqual([{ version: 1, applied_at: 100 }, { version: 2, applied_at: 200 }, { version: 3, applied_at: 200 }, { version: 4, applied_at: 200 }]);
     expect(createTvRepository(database.sqlite).load()).toBeNull();
     const backups = await readdir(join(dataDir, 'backups'));
     expect(backups).toHaveLength(1);
@@ -62,8 +62,7 @@ test('stores one complete encrypted configuration and reloads it after reopening
     const replacement = { ...encryptedTv, host: '10.23.45.68', identity: { model: 'Replacement TV' } };
     repository.replace(replacement);
     expect(repository.load()).toEqual(replacement);
-    expect(database.sqlite.prepare('SELECT id FROM tv_config').all()).toEqual([{ id: 1 }]);
-    expect(() => database.sqlite.prepare('INSERT INTO tv_config (id, host, identity_json, encrypted_client_key_json) VALUES (2, ?, ?, ?)').run(tv.host, '{}', '{}')).toThrow();
+    expect(database.sqlite.prepare('SELECT count(*) AS count FROM tv_devices').get()).toEqual({ count: 1 });
   } finally { database.close(); }
   const reopened = await openDatabase({ dataDir });
   try {
@@ -100,7 +99,7 @@ test('rolls back a replacement rejected inside SQLite and retains the prior conf
   try {
     const repository = createTvRepository(database.sqlite);
     repository.replace(tv);
-    database.sqlite.exec("CREATE TRIGGER reject_tv_update AFTER UPDATE ON tv_config BEGIN SELECT RAISE(ABORT, 'synthetic write failure'); END");
+    database.sqlite.exec("CREATE TRIGGER reject_tv_update AFTER UPDATE ON tv_devices BEGIN SELECT RAISE(ABORT, 'synthetic write failure'); END");
     expect(() => repository.replace({ ...tv, host: '10.23.45.68', identity: { model: 'Rejected TV' } })).toThrow(/synthetic write failure/);
     expect(repository.load()).toEqual(tv);
   } finally { database.close(); }
@@ -126,7 +125,7 @@ test.each([
   try {
     const repository = createTvRepository(database.sqlite);
     repository.replace(tv);
-    database.sqlite.prepare(`UPDATE tv_config SET ${column} = ?`).run(malformed);
+    database.sqlite.prepare(`UPDATE tv_devices SET ${column} = ?`).run(malformed);
     expect(repository.hasStoredKey()).toBe(true);
     expect(() => repository.load()).toThrow();
   } finally { database.close(); }
@@ -161,7 +160,7 @@ test('upgrades a v2 TV row without altering key, identity, owner or session', as
   const database = await openDatabase({ dataDir, now: () => 200 });
   try {
     expect(createTvRepository(database.sqlite).load()).toEqual(tv);
-    expect(database.sqlite.prepare('SELECT identity_json, encrypted_client_key_json, mac_address FROM tv_config').get()).toEqual({ identity_json: identityJson, encrypted_client_key_json: keyJson, mac_address: null });
+    expect(database.sqlite.prepare('SELECT identity_json, encrypted_client_key_json, mac_address FROM tv_devices').get()).toEqual({ identity_json: identityJson, encrypted_client_key_json: keyJson, mac_address: null });
     expect(database.sqlite.prepare('SELECT username, password_hash FROM owner').get()).toEqual({ username: 'synthetic-owner', password_hash: 'synthetic-hash' });
     expect(database.sqlite.prepare('SELECT token_hash FROM sessions').get()).toEqual({ token_hash: 'synthetic-token' });
     const backups = await readdir(join(dataDir, 'backups'));
@@ -180,7 +179,7 @@ test('normalizes a manual MAC and explicitly clears it with null', async () => {
     const repository = createTvRepository(database.sqlite);
     repository.replace({ ...tv, macAddress: '02-ab-cd-ef-00-01' });
     expect(repository.load()?.macAddress).toBe('02:AB:CD:EF:00:01');
-    expect(database.sqlite.prepare('SELECT mac_address FROM tv_config').get()).toEqual({ mac_address: '02:AB:CD:EF:00:01' });
+    expect(database.sqlite.prepare('SELECT mac_address FROM tv_devices').get()).toEqual({ mac_address: '02:AB:CD:EF:00:01' });
     repository.replace({ ...tv, macAddress: null });
     expect(repository.load()?.macAddress).toBeNull();
   } finally { database.close(); }
@@ -189,7 +188,7 @@ test('normalizes a manual MAC and explicitly clears it with null', async () => {
 test('rejects a v3 schema that records migration but lacks its MAC column', async () => {
   const dataDir = await dataDirectory();
   const database = await openDatabase({ dataDir });
-  database.sqlite.exec('DROP TABLE tv_config');
+  database.sqlite.exec('DROP TABLE tv_default; DROP TABLE tv_devices; DELETE FROM migration_version WHERE version = 4');
   schemaMigrations[1]!.up(database.sqlite);
   database.close();
   await expect(openDatabase({ dataDir }).then((unexpected) => { unexpected.close(); return unexpected; })).rejects.toMatchObject({ code: 'STORAGE_SCHEMA_INVALID' });
@@ -198,7 +197,7 @@ test('rejects a v3 schema that records migration but lacks its MAC column', asyn
 test.each(['INTEGER', 'TEXT NOT NULL DEFAULT \'\'', "TEXT DEFAULT '02:00:00:00:00:01'"])('rejects a v3 MAC column with incompatible definition %s', async (definition) => {
   const dataDir = await dataDirectory();
   const database = await openDatabase({ dataDir });
-  database.sqlite.exec('DROP TABLE tv_config');
+  database.sqlite.exec('DROP TABLE tv_default; DROP TABLE tv_devices; DELETE FROM migration_version WHERE version = 4');
   schemaMigrations[1]!.up(database.sqlite);
   database.sqlite.exec(`ALTER TABLE tv_config ADD COLUMN mac_address ${definition}`);
   database.close();
@@ -227,7 +226,7 @@ test('rolls back v2 MAC migration failure while preserving the complete TV row',
 test.each(['missing', 'columns', 'singleton'] as const)('rejects v2 schema with %s TV table damage', async (damage) => {
   const dataDir = await dataDirectory();
   const database = await openDatabase({ dataDir });
-  database.sqlite.exec('DROP TABLE tv_config');
+  database.sqlite.exec('DROP TABLE tv_default; DROP TABLE tv_devices; DELETE FROM migration_version WHERE version >= 3');
   if (damage === 'columns') database.sqlite.exec('CREATE TABLE tv_config (id INTEGER PRIMARY KEY CHECK(id=1), host TEXT NOT NULL)');
   if (damage === 'singleton') database.sqlite.exec('CREATE TABLE tv_config (id INTEGER PRIMARY KEY, host TEXT NOT NULL, identity_json TEXT NOT NULL, encrypted_client_key_json TEXT NOT NULL)');
   database.close();

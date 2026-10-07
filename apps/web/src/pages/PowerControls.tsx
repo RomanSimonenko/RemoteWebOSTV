@@ -1,10 +1,10 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { IconInfoCircle, IconPower, IconX } from '@tabler/icons-react';
-import type { TvPowerOperation, TvPowerState } from '@remote-webos-tv/contracts';
+import type { TvPowerOperation, TvPowerState, TvId } from '@remote-webos-tv/contracts';
 import { useTvPower } from '../useTvPower.js';
 
-interface Props { csrfToken: string; active: boolean; onSessionExpired(): void; onStateChange?(state: TvPowerState | null): void; onBusyChange?(busy: boolean): void; settingsTarget?: HTMLElement | null; activityTarget?: HTMLElement | null; settingsOpen?: boolean; onConfirmationChange?(confirming: boolean): void; quietOffline?: boolean }
+interface Props { tvId?: TvId; csrfToken: string; active: boolean; onSessionExpired(): void; onStateChange?(state: TvPowerState | null): void; onBusyChange?(busy: boolean): void; settingsTarget?: HTMLElement | null; activityTarget?: HTMLElement | null; settingsOpen?: boolean; onConfirmationChange?(confirming: boolean): void; quietOffline?: boolean }
 
 function progress(operation: TvPowerOperation): string {
   if (operation.action === 'recover') return '';
@@ -34,9 +34,9 @@ function terminalError(operation: TvPowerOperation | null | undefined): string {
   return operation.delivery === 'unknown' ? `Результат отправки неизвестен. ${detail}` : detail;
 }
 
-export function PowerControls({ csrfToken, active, onSessionExpired, onStateChange, onBusyChange, settingsTarget, activityTarget, settingsOpen = false, onConfirmationChange, quietOffline = false }: Props) {
+export function PowerControls({ tvId, csrfToken, active, onSessionExpired, onStateChange, onBusyChange, settingsTarget, activityTarget, settingsOpen = false, onConfirmationChange, quietOffline = false }: Props) {
   const networkHelpId = useId();
-  const { state, loading, error, message, busy, refresh, start, saveMac, cancel } = useTvPower(active, csrfToken, onSessionExpired);
+  const { state, loading, error, message, busy, refresh, start, saveMac, cancel } = useTvPower(active, csrfToken, onSessionExpired, tvId);
   const [mac, setMac] = useState('');
   const [confirming, setConfirming] = useState(false);
   const alert = useRef<HTMLParagraphElement>(null);

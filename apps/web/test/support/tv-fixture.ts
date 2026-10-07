@@ -18,6 +18,7 @@ import type { TvScheduler } from '../../../api/src/tv/service.js';
 const webRoot = fileURLToPath(new URL('../../dist/', import.meta.url));
 export const tvHost = '192.168.50.20';
 export const failedHost = '192.168.50.21';
+export const secondHost = '192.168.50.22';
 const password = 'synthetic browser acceptance password';
 
 export function gate() {
@@ -71,6 +72,8 @@ export class TvFixture {
   #setupToken = '';
   #app: Awaited<ReturnType<typeof createApiRuntime>> | undefined;
   #tv!: MockWebOsTv;
+  #secondTv: MockWebOsTv | undefined;
+  #lastTvId: string | undefined;
   #offlineUrl = '';
   #unavailable: Server | undefined;
   #tvUnavailable = false;
@@ -78,6 +81,9 @@ export class TvFixture {
   #id = 0;
   get origin() { return this.#origin; }
   get tv() { return this.#tv; }
+  get secondTv() { if (!this.#secondTv) throw new Error('Second fixture TV is not enabled'); return this.#secondTv; }
+  get tvPath() { return this.#lastTvId ? `/api/tvs/${this.#lastTvId}` : '/api/tv'; }
+  async enableSecondTv() { this.#secondTv = await this.#startMock({ kind: 'success' }); }
   get unavailablePort() { return Number(new URL(this.#offlineUrl).port); }
   get promptCount() { return this.#mocks.reduce((count, mock) => count + mock.pairingPromptCount, 0); }
   holdWake() { this.#wakeGate = gate(); return this.#wakeGate; }
@@ -136,9 +142,9 @@ export class TvFixture {
         logStream: new Writable({ write: (chunk, _encoding, done) => { this.#logs.push(String(chunk)); done(); } }),
         createAdapter: (host, keyStore, requestTimeoutMs, allowPairingPrompt) => {
           // Mapping is confined to this fixture: public validation and HTTP security remain real.
-          if (host !== tvHost && host !== failedHost) throw new Error('Unmapped synthetic TV address');
+          if (host !== tvHost && host !== failedHost && !(host === secondHost && this.#secondTv)) throw new Error('Unmapped synthetic TV address');
           this.policies.push({ host, prompt: allowPairingPrompt });
-          const url = host === tvHost && !this.#tvUnavailable ? this.#tv.url : this.#offlineUrl;
+          const url = host === secondHost && this.#secondTv ? this.#secondTv.url : host === tvHost && !this.#tvUnavailable ? this.#tv.url : this.#offlineUrl;
           const port = Number(new URL(url).port);
           return new Lgtv2Adapter({ host, keyStore, requestTimeoutMs, handshakeTimeoutMs: requestTimeoutMs,
             allowPairingPrompt, now: () => new Date(this.#epoch + this.clock.time) }, {
@@ -170,6 +176,11 @@ export class TvFixture {
   }
 
   async setupAndLogin(page: Page) {
+    page.on('response', async (response) => {
+      if (response.url() === `${this.origin}/api/tvs` && response.request().method() === 'POST' && response.status() === 202) {
+        this.#lastTvId = (await response.json() as { tvId: string }).tvId;
+      }
+    });
     await page.goto(this.origin);
     await page.getByLabel('Установочный токен').fill(this.#setupToken);
     await page.getByLabel('Имя владельца').fill('synthetic-owner');
@@ -186,7 +197,9 @@ export class TvFixture {
   }
 
   async status(page: Page): Promise<TvStatusResponse> {
-    const response = await page.context().request.get(`${this.origin}/api/tv`);
+    let response = await page.context().request.get(`${this.origin}${this.tvPath}`);
+    // A failed draft is intentionally not persisted across API restart.
+    if (response.status() === 404) response = await page.context().request.get(`${this.origin}/api/tv`);
     if (!response.ok()) throw new Error(`TV fixture status failed (${response.status()})`);
     return response.json();
   }
