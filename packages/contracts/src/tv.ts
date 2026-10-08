@@ -2,6 +2,9 @@ import { z } from 'zod';
 
 const nonEmptyTextSchema = z.string().trim().min(1);
 
+export const tvPlatformSchema = z.enum(['webos', 'tizen']);
+export type TvPlatform = z.infer<typeof tvPlatformSchema>;
+
 export const tvConnectionStateSchema = z.enum([
   'unconfigured',
   'pairing',

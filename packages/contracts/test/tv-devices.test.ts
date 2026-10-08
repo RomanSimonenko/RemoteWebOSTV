@@ -13,9 +13,14 @@ test('acceptsCanonicalWebosDevice', () => {
   expect(contracts.addTvResponseSchema.parse({ tvId, operation: { id: 'synthetic-operation', action: 'pair', status: 'running', startedAt: 0, deadlineAt: 1 } })).toEqual({ tvId, operation: { id: 'synthetic-operation', action: 'pair', status: 'running', startedAt: 0, deadlineAt: 1 } });
 });
 
-test('rejectsTizenAndUnknownFields', () => {
+test('acceptsTizenDevicesAndAddition', () => {
+  expect(contracts.addTvRequestSchema.parse({ ...request, platform: 'tizen' })).toEqual({ ...request, platform: 'tizen' });
+  expect(contracts.tvDevicesResponseSchema.parse({ devices: [{ tvId, platform: 'tizen', status }] })).toEqual({ devices: [{ tvId, platform: 'tizen', status }] });
+});
+
+test('rejectsUnknownPlatformsAndFields', () => {
   expect(contracts).toHaveProperty('addTvRequestSchema');
-  expect(contracts.addTvRequestSchema.safeParse({ ...request, platform: 'tizen' }).success).toBe(false);
+  for (const platform of ['unknown', '', null, 0]) expect(contracts.addTvRequestSchema.safeParse({ ...request, platform }).success).toBe(false);
   expect(contracts.addTvRequestSchema.safeParse({ ...request, port: 3000 }).success).toBe(false);
 });
 

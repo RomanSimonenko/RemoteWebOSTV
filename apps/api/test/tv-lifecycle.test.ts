@@ -201,9 +201,9 @@ describe('TV lifecycle barriers', () => {
   test('reconnect commits rotated key only after snapshot and uses it for the next reconnect', async () => {
     const h = harness(true); h.service.start({ action: 'reconnect' }); await drain();
     const adapter = h.adapters[0]!; adapter.pairResult.resolve({ ...pairing, credential: 'rotated-synthetic-key' });
-    await adapter.enteredRead.promise; expect(h.cipher.decrypt(h.repository.load()!.encryptedClientKey)).toBe('synthetic-key');
+    await adapter.enteredRead.promise; expect(h.cipher.decrypt(h.repository.load()!.encryptedCredential)).toBe('synthetic-key');
     adapter.readResult.resolve(snapshot); await drain();
-    expect(h.cipher.decrypt(h.repository.load()!.encryptedClientKey)).toBe('rotated-synthetic-key');
+    expect(h.cipher.decrypt(h.repository.load()!.encryptedCredential)).toBe('rotated-synthetic-key');
     h.service.start({ action: 'reconnect' }); await drain();
     expect((await h.adapters[1]!.enteredPair.promise).credential).toBe('rotated-synthetic-key');
     await h.service.close();

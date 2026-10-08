@@ -97,6 +97,8 @@ export function createTvDeviceRegistry(dependencies: {
   function assertCanAdd(input: AddTvRequest, owner: string): AddTvResponse | null {
     if (closed) throw new TvServiceError('SERVICE_CLOSED', 409);
     const request = addTvRequestSchema.parse(input);
+    // Storage accepts Tizen; admission requires its platform factory first.
+    if (request.platform !== 'webos') throw new TvServiceError('UNSUPPORTED_CAPABILITY', 409);
     const owned = receipts.get(owner);
     const previous = owned?.get(request.id);
     if (previous) {

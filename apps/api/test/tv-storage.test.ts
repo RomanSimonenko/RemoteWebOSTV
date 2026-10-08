@@ -20,9 +20,10 @@ afterEach(async () => {
   for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true });
 });
 const tv: StoredTv = {
+  platform: 'webos',
   host: '10.23.45.67', identity: { model: 'Synthetic TV', platformVersion: 'synthetic-version' },
   macAddress: null,
-  encryptedClientKey: { version: 1, algorithm: 'aes-256-gcm', iv: Buffer.alloc(12, 1).toString('base64'), ciphertext: Buffer.from('synthetic-ciphertext').toString('base64'), authTag: Buffer.alloc(16, 2).toString('base64') },
+  encryptedCredential: { version: 1, algorithm: 'aes-256-gcm', iv: Buffer.alloc(12, 1).toString('base64'), ciphertext: Buffer.from('synthetic-ciphertext').toString('base64'), authTag: Buffer.alloc(16, 2).toString('base64') },
 };
 
 test('upgrades a v1 database with a recovery backup while preserving owner and sessions', async () => {
@@ -37,7 +38,7 @@ test('upgrades a v1 database with a recovery backup while preserving owner and s
   try {
     expect(database.sqlite.prepare('SELECT username FROM owner').get()).toEqual({ username: 'synthetic-owner' });
     expect(database.sqlite.prepare('SELECT token_hash FROM sessions').get()).toEqual({ token_hash: 'synthetic-token' });
-    expect(database.sqlite.prepare('SELECT version, applied_at FROM migration_version ORDER BY version').all()).toEqual([{ version: 1, applied_at: 100 }, { version: 2, applied_at: 200 }, { version: 3, applied_at: 200 }, { version: 4, applied_at: 200 }]);
+    expect(database.sqlite.prepare('SELECT version, applied_at FROM migration_version ORDER BY version').all()).toEqual([{ version: 1, applied_at: 100 }, { version: 2, applied_at: 200 }, { version: 3, applied_at: 200 }, { version: 4, applied_at: 200 }, { version: 5, applied_at: 200 }]);
     expect(createTvRepository(database.sqlite).load()).toBeNull();
     const backups = await readdir(join(dataDir, 'backups'));
     expect(backups).toHaveLength(1);
@@ -52,7 +53,7 @@ test('upgrades a v1 database with a recovery backup while preserving owner and s
 test('stores one complete encrypted configuration and reloads it after reopening', async () => {
   const dataDir = await dataDirectory();
   const cipher = await loadClientKeyCipher({ directory: dataDir, hasStoredKey: false });
-  const encryptedTv = { ...tv, macAddress: '02:AB:CD:EF:00:01', encryptedClientKey: cipher.encrypt('synthetic-client-key') };
+  const encryptedTv = { ...tv, macAddress: '02:AB:CD:EF:00:01', encryptedCredential: cipher.encrypt('synthetic-client-key') };
   const database = await openDatabase({ dataDir });
   try {
     const repository = createTvRepository(database.sqlite);
@@ -69,7 +70,7 @@ test('stores one complete encrypted configuration and reloads it after reopening
     const saved = createTvRepository(reopened.sqlite).load()!;
     expect(saved.host).toBe('10.23.45.68');
     expect(saved.macAddress).toBe('02:AB:CD:EF:00:01');
-    expect(cipher.decrypt(saved.encryptedClientKey)).toBe('synthetic-client-key');
+    expect(cipher.decrypt(saved.encryptedCredential)).toBe('synthetic-client-key');
   }
   finally { reopened.close(); }
   expect((await readFile(join(dataDir, 'app.sqlite'))).includes(Buffer.from('synthetic-client-key'))).toBe(false);
@@ -114,8 +115,8 @@ test.each([
   ['identity_json', '{"model":""}'],
   ['identity_json', '{"model":"TV","clientKey":"synthetic-secret"}'],
   ['identity_json', '{'],
-  ['encrypted_client_key_json', '{"version":2}'],
-  ['encrypted_client_key_json', '{'],
+  ['encrypted_credential_json', '{"version":2}'],
+  ['encrypted_credential_json', '{'],
   ['mac_address', 'not-a-mac'],
   ['mac_address', '01:00:00:00:00:01'],
   ['mac_address', 'FF:FF:FF:FF:FF:FF'],
@@ -154,13 +155,13 @@ test('upgrades a v2 TV row without altering key, identity, owner or session', as
   original.prepare("INSERT INTO owner VALUES (1, 'synthetic-owner', 'synthetic-hash')").run();
   original.prepare("INSERT INTO sessions VALUES ('synthetic-token', 1, 10, 20, 'synthetic-csrf')").run();
   const identityJson = JSON.stringify(tv.identity);
-  const keyJson = JSON.stringify(tv.encryptedClientKey);
+  const keyJson = JSON.stringify(tv.encryptedCredential);
   original.prepare('INSERT INTO tv_config VALUES (1, ?, ?, ?)').run(tv.host, identityJson, keyJson);
   original.close();
   const database = await openDatabase({ dataDir, now: () => 200 });
   try {
     expect(createTvRepository(database.sqlite).load()).toEqual(tv);
-    expect(database.sqlite.prepare('SELECT identity_json, encrypted_client_key_json, mac_address FROM tv_devices').get()).toEqual({ identity_json: identityJson, encrypted_client_key_json: keyJson, mac_address: null });
+    expect(database.sqlite.prepare('SELECT identity_json, encrypted_credential_json, mac_address FROM tv_devices').get()).toEqual({ identity_json: identityJson, encrypted_credential_json: keyJson, mac_address: null });
     expect(database.sqlite.prepare('SELECT username, password_hash FROM owner').get()).toEqual({ username: 'synthetic-owner', password_hash: 'synthetic-hash' });
     expect(database.sqlite.prepare('SELECT token_hash FROM sessions').get()).toEqual({ token_hash: 'synthetic-token' });
     const backups = await readdir(join(dataDir, 'backups'));
@@ -188,7 +189,7 @@ test('normalizes a manual MAC and explicitly clears it with null', async () => {
 test('rejects a v3 schema that records migration but lacks its MAC column', async () => {
   const dataDir = await dataDirectory();
   const database = await openDatabase({ dataDir });
-  database.sqlite.exec('DROP TABLE tv_default; DROP TABLE tv_devices; DELETE FROM migration_version WHERE version = 4');
+  database.sqlite.exec('DROP TABLE tv_default; DROP TABLE tv_devices; DELETE FROM migration_version WHERE version >= 4');
   schemaMigrations[1]!.up(database.sqlite);
   database.close();
   await expect(openDatabase({ dataDir }).then((unexpected) => { unexpected.close(); return unexpected; })).rejects.toMatchObject({ code: 'STORAGE_SCHEMA_INVALID' });
@@ -197,7 +198,7 @@ test('rejects a v3 schema that records migration but lacks its MAC column', asyn
 test.each(['INTEGER', 'TEXT NOT NULL DEFAULT \'\'', "TEXT DEFAULT '02:00:00:00:00:01'"])('rejects a v3 MAC column with incompatible definition %s', async (definition) => {
   const dataDir = await dataDirectory();
   const database = await openDatabase({ dataDir });
-  database.sqlite.exec('DROP TABLE tv_default; DROP TABLE tv_devices; DELETE FROM migration_version WHERE version = 4');
+  database.sqlite.exec('DROP TABLE tv_default; DROP TABLE tv_devices; DELETE FROM migration_version WHERE version >= 4');
   schemaMigrations[1]!.up(database.sqlite);
   database.sqlite.exec(`ALTER TABLE tv_config ADD COLUMN mac_address ${definition}`);
   database.close();
@@ -211,7 +212,7 @@ test('rolls back v2 MAC migration failure while preserving the complete TV row',
     migration.up(original);
     original.prepare('INSERT INTO migration_version VALUES (?, 100)').run(migration.version);
   }
-  const keyJson = JSON.stringify(tv.encryptedClientKey);
+  const keyJson = JSON.stringify(tv.encryptedCredential);
   original.prepare('INSERT INTO tv_config VALUES (1, ?, ?, ?)').run(tv.host, JSON.stringify(tv.identity), keyJson);
   original.close();
   await expect(openDatabase({ dataDir, now: () => { throw new Error('synthetic recording failure'); } })).rejects.toMatchObject({ code: 'STORAGE_MIGRATION_FAILED' });

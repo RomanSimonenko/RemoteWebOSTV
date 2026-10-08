@@ -102,7 +102,7 @@ describe('TV service persistence and projection', () => {
     adapter.pairResult.resolve({ ...pairing, credential: 'synthetic-new-key', macAddresses: ['02:00:00:00:00:02'] });
     await adapter.enteredRead.promise; adapter.readResult.resolve(snapshot); await drain();
     expect(base.repository.load()?.macAddress).toBe('02:AB:CD:EF:00:01');
-    expect(h.cipher.decrypt(base.repository.load()!.encryptedClientKey)).toBe('synthetic-new-key');
+    expect(h.cipher.decrypt(base.repository.load()!.encryptedCredential)).toBe('synthetic-new-key');
     await h.service.close(); await base.service.close();
   });
 
@@ -131,7 +131,7 @@ describe('TV service persistence and projection', () => {
     const base = harness(true);
     base.repository.replace({ ...base.repository.load()!, macAddress: '02:AB:CD:EF:00:01' });
     base.repository.replace({ ...base.repository.load()!, macAddress: null });
-    const key = base.repository.load()!.encryptedClientKey;
+    const key = base.repository.load()!.encryptedCredential;
     const h = harness(true, { repository: base.repository });
     try {
       h.service.start({ action: 'reconnect' }); await drain();
@@ -140,9 +140,9 @@ describe('TV service persistence and projection', () => {
       await adapter.enteredRead.promise; adapter.readResult.resolve(snapshot); await drain();
       expect(base.repository.load()?.macAddress).toBeNull();
       expect((await h.service.status()).operation?.status).toBe('succeeded');
-      expect(h.cipher.decrypt(base.repository.load()!.encryptedClientKey)).toBe(clientKey);
+      expect(h.cipher.decrypt(base.repository.load()!.encryptedCredential)).toBe(clientKey);
       if (clientKey === 'synthetic-key') {
-        expect(base.repository.load()?.encryptedClientKey).toEqual(key);
+        expect(base.repository.load()?.encryptedCredential).toEqual(key);
         expect(base.writes).toHaveLength(2);
       }
     } finally { await h.service.close(); await base.service.close(); }
@@ -207,11 +207,11 @@ describe('TV service persistence and projection', () => {
     await drain();
     const status = await h.service.status();
     expect(status).toMatchObject({ tv: { host: '192.168.1.10', identity: { model: 'Synthetic Model' } }, connection: 'available', operation: { status: 'succeeded' } });
-    expect(h.cipher.decrypt(h.repository.load()!.encryptedClientKey)).toBe('synthetic-key');
+    expect(h.cipher.decrypt(h.repository.load()!.encryptedCredential)).toBe('synthetic-key');
     expect(h.writes).toHaveLength(1);
     expect(tvStatusResponseSchema.safeParse(status).success).toBe(true);
     expect(JSON.stringify(status)).not.toContain('synthetic-key');
-    expect(JSON.stringify(status)).not.toContain('encryptedClientKey');
+    expect(JSON.stringify(status)).not.toContain('encryptedCredential');
     await h.service.close();
   });
 
@@ -274,7 +274,7 @@ describe('TV service persistence and projection', () => {
       service.start({ action: 'pair', host: '192.168.1.10' }); await fixture.committed.promise; await drain();
       expect((await service.status()).connection).toBe('available');
       expect(fixture.mock.pairingPromptCount).toBe(1);
-      expect(fixture.cipher.decrypt(fixture.repository.load()!.encryptedClientKey)).toBe('synthetic-mock-client-key');
+      expect(fixture.cipher.decrypt(fixture.repository.load()!.encryptedCredential)).toBe('synthetic-mock-client-key');
       expect(fixture.repository.load()?.macAddress).toBe('02:00:00:00:00:01');
       await service.close(); fixture.resetRead();
       service = createTvService(fixture.dependencies); await service.initialize(); await fixture.readFinished.promise; await drain();
@@ -322,6 +322,7 @@ async function protocolFixture(scenario: 'success' | 'identity-loss') {
   const sql = new Database(':memory:'); sql.exec(tvConfigTableSql);
   schemaMigrations[2]!.up(sql);
   schemaMigrations[3]!.up(sql);
+  schemaMigrations[4]!.up(sql);
   const repository = createTvRepository(sql);
   const cipher = createClientKeyCipher(Buffer.alloc(32, 7));
   const committed = barrier<void>(); const staged = barrier<void>();

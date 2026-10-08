@@ -17,6 +17,15 @@ const origin = 'https://remote.example.test';
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { vi.restoreAllMocks(); for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+test('Tizen addition cannot use the webOS factory before platform routing is installed', async () => {
+  const h = await fixture();
+  const response = await h.app.inject({ method: 'POST', url: '/api/tvs', headers: h.headers, payload: { id: id(100), platform: 'tizen', host: '10.2.3.4' } });
+  expect(response.statusCode).toBe(409);
+  expect(response.json().code).toBe('UNSUPPORTED_CAPABILITY');
+  expect(h.adapters).toEqual([]);
+  expect(h.repository.list()).toEqual([]);
+});
+
 test('confirmed deletion removes only the addressed TV and protects the mutation', async () => {
   const h = await fixture(); const first = await h.add(100, '10.2.3.4'); const second = await h.add(101, '10.2.3.5');
   const url = `/api/tvs/${first}`;

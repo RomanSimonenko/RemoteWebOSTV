@@ -151,7 +151,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     checkConnection();
     const host = 'host' in input ? input.host : previous!.host;
     const allowPrompt = input.action === 'pair' || input.action === 'repair';
-    const initialKey = allowPrompt ? undefined : cipher.decrypt(previous!.encryptedClientKey);
+    const initialKey = allowPrompt ? undefined : cipher.decrypt(previous!.encryptedCredential);
     const staging = createStagingKeyStore(initialKey);
     const adapter = dependencies.createAdapter(host, staging, budget, allowPrompt);
     activeAdapter = adapter;
@@ -182,10 +182,10 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       ? discoveredMac
       : input.action === 'reconnect' ? previous!.macAddress : previous?.macAddress ?? discoveredMac;
     if (input.action !== 'reconnect' || initialKey !== result.credential || identityChanged) {
-      let encryptedClientKey: EncryptedEnvelopeV1;
-      try { encryptedClientKey = await abortable(Promise.resolve(cipher.encrypt(result.credential)), signal); }
+      let encryptedCredential: EncryptedEnvelopeV1;
+      try { encryptedCredential = await abortable(Promise.resolve(cipher.encrypt(result.credential)), signal); }
       catch (cause) { if (signal.aborted) throw signal.reason; if (cause instanceof WebOsError) throw cause; throw new WebOsError('KEY_STORE_WRITE_FAILED', 'Unable to encrypt the registered key', { cause }); }
-      const replacement: StoredTv = { host, identity: identity.data, encryptedClientKey, macAddress };
+      const replacement: StoredTv = { platform: 'webos', host, identity: identity.data, encryptedCredential, macAddress };
       checkConnection();
       try { repository.replace(replacement); }
       catch (cause) { throw new TvServiceError('STORAGE_FAILED', 500, { cause }); }

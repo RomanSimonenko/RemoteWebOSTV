@@ -92,10 +92,10 @@ test('strict power, MAC and cancel requests reject malformed input without effec
 
 test('MAC update normalizes, clears and preserves the stored encrypted key', async () => {
   const { app, h, headers } = await fixture(false);
-  const key = h.repository.load()!.encryptedClientKey;
+  const key = h.repository.load()!.encryptedCredential;
   const set = await app.inject({ method: 'PUT', url: '/api/tv/mac', headers, payload: { mac: '02-ab-cd-ef-00-01' } });
   expect(set.statusCode).toBe(200); expect(tvPowerStateSchema.parse(set.json())).toMatchObject({ mac: '02:AB:CD:EF:00:01', canWake: true });
-  expect(set.headers['cache-control']).toBe('no-store'); expect(h.repository.load()!.encryptedClientKey).toEqual(key);
+  expect(set.headers['cache-control']).toBe('no-store'); expect(h.repository.load()!.encryptedCredential).toEqual(key);
   const clear = await app.inject({ method: 'PUT', url: '/api/tv/mac', headers, payload: { mac: null } });
   expect(clear.statusCode).toBe(200); expect(clear.json()).toMatchObject({ mac: null, canWake: false });
 });

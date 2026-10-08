@@ -66,7 +66,7 @@ test('runtime migrates existing owner storage, persists TV, and reconnects witho
     const accepted = await app.inject({ method: 'POST', url: '/api/tv/operations', headers, payload: { action: 'pair', host: '192.168.1.10' } });
     expect(accepted.statusCode).toBe(202);
     await succeed(f.adapters[0]!);
-    expect(createTvRepository(f.database().sqlite).load()).toMatchObject({ host: '192.168.1.10', identity: { model: 'Synthetic Model' } });
+    expect(createTvRepository(f.database().sqlite).load()).toMatchObject({ platform: 'webos', host: '192.168.1.10', identity: { model: 'Synthetic Model' } });
     expect(f.policies[0]).toMatchObject({ timeout: 60_000, prompt: true });
     await app.close();
     app = await createApiRuntime(f.config, f.options);
@@ -75,6 +75,7 @@ test('runtime migrates existing owner storage, persists TV, and reconnects witho
     expect(f.policies[1]).toMatchObject({ prompt: false });
     const response = await app.inject({ url: '/api/tv', headers });
     expect(response.json()).toMatchObject({ tv: { host: '192.168.1.10', identity: { model: 'Synthetic Model' } }, connection: 'connecting' });
+    expect(response.json().tv).toEqual({ host: '192.168.1.10', identity: { model: 'Synthetic Model' } });
     expect(response.body).not.toMatch(/synthetic-key|encrypted|clientKey|master/);
     f.adapters[1]!.pairResult.reject(new WebOsError('NETWORK_UNREACHABLE', 'synthetic raw error'));
     await drain();
@@ -215,7 +216,7 @@ test('missing cipher with stored TV fails instead of creating a replacement key'
   const f = await fixture();
   const database = await openDatabase({ dataDir: f.config.dataDir });
   const cipher = await loadClientKeyCipher({ directory: f.config.dataDir, hasStoredKey: false });
-  createTvRepository(database.sqlite).replace({ host: '192.168.1.10', identity: { model: 'Synthetic Model' }, macAddress: null, encryptedClientKey: cipher.encrypt('synthetic-key') });
+  createTvRepository(database.sqlite).replace({ platform: 'webos', host: '192.168.1.10', identity: { model: 'Synthetic Model' }, macAddress: null, encryptedCredential: cipher.encrypt('synthetic-key') });
   database.close();
   await unlink(join(f.config.dataDir, 'tv-master.key'));
   await expect(createApiRuntime(f.config, f.options)).rejects.toThrow('TV master key is missing or invalid');
@@ -240,7 +241,7 @@ test('failure after TV initialization cleans the partially started service befor
   const f = await fixture();
   const seed = await openDatabase({ dataDir: f.config.dataDir });
   const cipher = await loadClientKeyCipher({ directory: f.config.dataDir, hasStoredKey: false });
-  createTvRepository(seed.sqlite).replace({ host: '192.168.1.10', identity: { model: 'Synthetic Model' }, macAddress: null, encryptedClientKey: cipher.encrypt('synthetic-key') });
+  createTvRepository(seed.sqlite).replace({ platform: 'webos', host: '192.168.1.10', identity: { model: 'Synthetic Model' }, macAddress: null, encryptedCredential: cipher.encrypt('synthetic-key') });
   seed.close();
   const cleanup = barrier<void>();
   const enteredCleanup = barrier<void>();

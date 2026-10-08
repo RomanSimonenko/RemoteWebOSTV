@@ -186,9 +186,9 @@ describe('owned TV power operations', () => {
     pending.resolve(); await closing; expect(adapters).toHaveLength(1); expect(adapters[0]!.wakes).toHaveLength(1); await base.service.close();
   });
   test('MAC normalization preserves the encrypted key and obeys the common gate', async () => {
-    const h = harness(true); const key = h.repository.load()!.encryptedClientKey;
+    const h = harness(true); const key = h.repository.load()!.encryptedCredential;
     expect(h.service.setMac('02-ab-cd-ef-00-01')).toMatchObject({ mac: '02:AB:CD:EF:00:01', canWake: true });
-    expect(h.repository.load()!.encryptedClientKey).toEqual(key);
+    expect(h.repository.load()!.encryptedCredential).toEqual(key);
     expect(() => h.service.setMac('invalid')).toThrowError(expect.objectContaining({ code: 'INVALID_REQUEST' }));
     h.service.startPower(wake, 'owner');
     expect(() => h.service.setMac(null)).toThrowError(expect.objectContaining({ code: 'OPERATION_CONFLICT' }));

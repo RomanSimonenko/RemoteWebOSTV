@@ -74,7 +74,7 @@ export class ControlledAdapter implements TvAdapter {
 
 export function harness(saved = false, overrides: Partial<TvServiceDependencies> = {}) {
   const cipher = createClientKeyCipher(Buffer.alloc(32, 7));
-  let stored: StoredTv | null = saved ? { host: '192.168.1.10', identity, macAddress: null, encryptedClientKey: cipher.encrypt('synthetic-key') } : null;
+  let stored: StoredTv | null = saved ? { platform: 'webos', host: '192.168.1.10', identity, macAddress: null, encryptedCredential: cipher.encrypt('synthetic-key') } : null;
   const writes: StoredTv[] = [];
   const repository: TvRepository = {
     load: () => stored,

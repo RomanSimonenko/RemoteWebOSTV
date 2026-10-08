@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import Database from 'better-sqlite3';
 
-import { ownerTableSql, tvConfigTableSql, tvDevicesTableSql, tvDefaultTableSql, schemaMigrations, type Migration } from './migrations.js';
+import { ownerTableSql, tvConfigTableSql, tvDevicesV4TableSql, tvDevicesTableSql, tvDefaultTableSql, schemaMigrations, type Migration } from './migrations.js';
 import { StorageStartupError, type StorageErrorCode } from './errors.js';
 
 export interface AppDatabase {
@@ -86,7 +86,7 @@ function migrationVersion(sqlite: Database.Database, latestVersion: number): num
     } catch (cause) { throw new StorageStartupError('STORAGE_SCHEMA_INVALID', cause); }
   }
   if (version >= 4) {
-    for (const [name, expected] of [['tv_devices', tvDevicesTableSql], ['tv_default', tvDefaultTableSql]]) {
+    for (const [name, expected] of [['tv_devices', version === 4 ? tvDevicesV4TableSql : tvDevicesTableSql], ['tv_default', tvDefaultTableSql]]) {
       if (sqlite.prepare('SELECT sql FROM sqlite_schema WHERE type = ? AND name = ?').pluck().get('table', name) !== expected) {
         throw new StorageStartupError('STORAGE_SCHEMA_INVALID');
       }

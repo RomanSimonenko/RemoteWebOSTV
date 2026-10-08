@@ -15,7 +15,7 @@ test('runtime reports optional metadata failure through the safe application log
   const database = await openDatabase({ dataDir: config.dataDir });
   try {
     const cipher = await loadClientKeyCipher({ directory: config.dataDir, hasStoredKey: false });
-    createTvRepository(database.sqlite).replace({ host: '192.168.1.10', identity, macAddress: null, encryptedClientKey: cipher.encrypt('synthetic-key') });
+    createTvRepository(database.sqlite).replace({ platform: 'webos', host: '192.168.1.10', identity, macAddress: null, encryptedCredential: cipher.encrypt('synthetic-key') });
   } finally { database.close(); }
   const chunks: string[] = [];
   const entered = barrier<ControlledAdapter>();
