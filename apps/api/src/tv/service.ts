@@ -1,5 +1,6 @@
-import { startTvOperationSchema, tvCommandRequestSchema, tvIdentitySchema, tvMacAddressSchema, tvPowerRequestSchema, tvSnapshotSchema, type StartTvOperation, type TvCommandRequest, type TvCommandResult, type TvConnectionState, type TvOperation, type TvPowerOperation, type TvPowerRequest, type TvPowerState, type TvRemoteState, type TvStatusResponse } from '@remote-webos-tv/contracts';
-import { TvPowerSendError, WebOsError, type ClientKeyCipher, type ClientKeyStore, type EncryptedEnvelopeV1, type WebOsAdapter } from '@remote-webos-tv/webos';
+import { startTvOperationSchema, supportsTvButtons, tvCommandRequestSchema, tvIdentitySchema, tvMacAddressSchema, tvPowerRequestSchema, tvSnapshotSchema, type StartTvOperation, type TvCommandRequest, type TvCommandResult, type TvConnectionState, type TvOperation, type TvPowerOperation, type TvPowerRequest, type TvPowerState, type TvRemoteState, type TvStatusResponse } from '@remote-webos-tv/contracts';
+import type { TvAdapter } from '@remote-webos-tv/tv-adapter';
+import { TvPowerSendError, WebOsError, type ClientKeyCipher, type ClientKeyStore, type EncryptedEnvelopeV1 } from '@remote-webos-tv/webos';
 import type { StoredTv, TvRepository } from './repository.js';
 import { createStagingKeyStore } from './staging-key-store.js';
 import { abortable, cleanupFailure, failedConnection, hasCleanupFailure, projectTvError, TvServiceError, type PublicTvError } from './operation.js';
@@ -20,7 +21,7 @@ export interface TvServiceDependencies {
     decrypt: ClientKeyCipher['decrypt'];
     encrypt(key: string): EncryptedEnvelopeV1 | Promise<EncryptedEnvelopeV1>;
   };
-  readonly createAdapter: (host: string, staging: ClientKeyStore, requestTimeoutMs: number, allowPairingPrompt: boolean) => WebOsAdapter;
+  readonly createAdapter: (host: string, staging: ClientKeyStore, requestTimeoutMs: number, allowPairingPrompt: boolean) => TvAdapter;
   readonly now: () => number;
   readonly newId: () => string;
   readonly scheduler: TvScheduler;
@@ -66,9 +67,9 @@ interface Attempt {
 }
 interface Power { operation: TvPowerOperation; readonly owner: string | symbol }
 interface Probe { readonly controller: AbortController; readonly promise: Promise<void> }
-interface Cleanup { readonly adapter: WebOsAdapter; readonly promise: Promise<void> }
+interface Cleanup { readonly adapter: TvAdapter; readonly promise: Promise<void> }
 interface Command { readonly controller: AbortController; readonly promise: Promise<TvCommandResult> }
-interface Metadata extends Probe { readonly adapter: WebOsAdapter }
+interface Metadata extends Probe { readonly adapter: TvAdapter }
 
 export function createTvService(dependencies: TvServiceDependencies): TvService {
   const { repository, cipher, scheduler } = dependencies;
@@ -79,12 +80,12 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
   let error: PublicTvError | undefined;
   let attempt: Attempt | undefined;
   let work: Promise<void> | undefined;
-  let activeAdapter: WebOsAdapter | undefined;
+  let activeAdapter: TvAdapter | undefined;
   let probe: Probe | undefined;
   let cleanup: Cleanup | undefined;
   let command: Command | undefined;
   let metadata: Metadata | undefined;
-  let remoteCapability: { readonly generation: number; readonly pointer: boolean; readonly powerOff: boolean } | undefined;
+  let remoteCapability: { readonly generation: number; readonly buttons: boolean; readonly apps: boolean; readonly powerOff: boolean } | undefined;
   let power: Power | undefined;
   let intentionalOff = false;
   let recoverAfterProbe = false;
@@ -107,7 +108,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     if (hasCleanupFailure(cause)) unsafeCleanup ??= new TvServiceError('CLEANUP_FAILED', 500, { cause });
   }
 
-  function disconnect(adapter: WebOsAdapter): Promise<void> {
+  function disconnect(adapter: TvAdapter): Promise<void> {
     if (metadata?.adapter === adapter) metadata.controller.abort(new TvServiceError('CANCELLED'));
     if (cleanup?.adapter === adapter) return cleanup.promise;
     if (activeAdapter === adapter) {
@@ -154,9 +155,9 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     const staging = createStagingKeyStore(initialKey);
     const adapter = dependencies.createAdapter(host, staging, budget, allowPrompt);
     activeAdapter = adapter;
-    const result = await abortable(adapter.pair({ host, signal, ...(initialKey === undefined ? {} : { clientKey: initialKey }) }), signal);
+    const result = await abortable(adapter.pair({ host, signal, ...(initialKey === undefined ? {} : { credential: initialKey }) }), signal);
     checkConnection();
-    if (!result.clientKey) throw new WebOsError('INVALID_TV_RESPONSE', 'Registered response lacks a client key');
+    if (!result.credential) throw new WebOsError('INVALID_TV_RESPONSE', 'Registered response lacks a credential');
     const identity = tvIdentitySchema.strict().safeParse(result.identity);
     if (!identity.success) throw new WebOsError('INVALID_TV_RESPONSE', 'Registration identity is invalid');
     // Optional metadata absence is not an identity change on a verified ordinary reconnect.
@@ -180,9 +181,9 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     const macAddress = input.action === 'change_address' || identityChanged
       ? discoveredMac
       : input.action === 'reconnect' ? previous!.macAddress : previous?.macAddress ?? discoveredMac;
-    if (input.action !== 'reconnect' || initialKey !== result.clientKey || identityChanged) {
+    if (input.action !== 'reconnect' || initialKey !== result.credential || identityChanged) {
       let encryptedClientKey: EncryptedEnvelopeV1;
-      try { encryptedClientKey = await abortable(Promise.resolve(cipher.encrypt(result.clientKey)), signal); }
+      try { encryptedClientKey = await abortable(Promise.resolve(cipher.encrypt(result.credential)), signal); }
       catch (cause) { if (signal.aborted) throw signal.reason; if (cause instanceof WebOsError) throw cause; throw new WebOsError('KEY_STORE_WRITE_FAILED', 'Unable to encrypt the registered key', { cause }); }
       const replacement: StoredTv = { host, identity: identity.data, encryptedClientKey, macAddress };
       checkConnection();
@@ -191,7 +192,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       saved = replacement;
     }
     connection = 'available'; error = undefined;
-    remoteCapability = { generation, pointer: snapshot.capabilities.pointer === true, powerOff: snapshot.capabilities.powerOff === true };
+    remoteCapability = { generation, buttons: supportsTvButtons(snapshot.capabilities), apps: snapshot.capabilities.apps === true, powerOff: snapshot.capabilities.powerOff === true };
     startVersionRead(adapter);
   }
 
@@ -206,7 +207,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     }
   }
 
-  function startVersionRead(adapter: WebOsAdapter): void {
+  function startVersionRead(adapter: TvAdapter): void {
     if (!saved || saved.identity.platformVersion !== undefined || !adapter.readPlatformVersion) return;
     const controller = new AbortController();
     const version = generation;
@@ -265,7 +266,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     // Own the old connection before any abortable await: an early abort while
     // waiting for its probe must still disconnect it before releasing the gate.
     const previousAdapter = activeAdapter;
-    let adapter: WebOsAdapter | undefined;
+    let adapter: TvAdapter | undefined;
     let previousCleanup: Promise<void> | undefined;
     const signal = context.controller.signal;
     try {
@@ -385,7 +386,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     return copyOperation(context.operation);
   }
 
-  async function readStatus(adapter: WebOsAdapter, controller: AbortController, version: number): Promise<void> {
+  async function readStatus(adapter: TvAdapter, controller: AbortController, version: number): Promise<void> {
     const expiresAt = scheduler.now() + statusBudgetMs;
     const timer = scheduler.setTimeout(() => controller.abort(new WebOsError('CONNECTION_LOST', 'TV status read budget expired')), statusBudgetMs);
     try {
@@ -393,7 +394,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       if (scheduler.now() >= expiresAt) controller.abort(new WebOsError('CONNECTION_LOST', 'TV status read budget expired'));
       if (controller.signal.aborted) throw controller.signal.reason;
       if (!tvSnapshotSchema.safeParse(snapshot).success || snapshot.connection !== 'available') throw new WebOsError('INVALID_TV_RESPONSE', 'Snapshot did not confirm availability');
-      if (!closed && generation === version) { connection = 'available'; error = undefined; remoteCapability = { generation: version, pointer: snapshot.capabilities.pointer === true, powerOff: snapshot.capabilities.powerOff === true }; }
+      if (!closed && generation === version) { connection = 'available'; error = undefined; remoteCapability = { generation: version, buttons: supportsTvButtons(snapshot.capabilities), apps: snapshot.capabilities.apps === true, powerOff: snapshot.capabilities.powerOff === true }; }
     } catch (cause) {
       // A new operation/close owns cleanup after its cancellation; the old probe cannot publish.
       if (!closed && generation === version) {
@@ -445,7 +446,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     return {
       busy: !!(work || cleanup || command || probe),
       mac: saved?.macAddress ?? null,
-      canPowerOff: idle && connection === 'available' && !!activeAdapter && remoteCapability?.generation === generation && remoteCapability.powerOff === true,
+      canPowerOff: idle && connection === 'available' && !!activeAdapter?.powerOff && remoteCapability?.generation === generation && remoteCapability.powerOff === true,
       canWake: !!saved?.macAddress && (idle && connection === 'unavailable' || canReplaceReconnect()),
       operation: power ? { ...power.operation, ...(power.operation.error ? { error: { ...power.operation.error } } : {}) } : null,
     };
@@ -518,7 +519,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     if (unsafeCleanup) throw unsafeCleanup;
   }
 
-  async function observePowerOff(context: Attempt, adapter: WebOsAdapter): Promise<void> {
+  async function observePowerOff(context: Attempt, adapter: TvAdapter): Promise<void> {
     const signal = context.controller.signal;
     while (true) {
       check(context);
@@ -545,7 +546,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     const current = context.power!;
     if (current.operation.action === 'recover') { await run(context, { action: 'reconnect' }, previous); return; }
     const signal = context.controller.signal;
-    let adapter: WebOsAdapter | undefined;
+    let adapter: TvAdapter | undefined;
     let pending: Promise<void> | undefined;
     let ownedCleanup: Promise<void> | undefined;
     let observedSend = false;
@@ -556,9 +557,10 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       check(context);
       adapter = current.operation.action === 'power_off' ? activeAdapter! : dependencies.createAdapter(previous.host, createStagingKeyStore(), Math.min(5_000, context.expiresAt - scheduler.now()), false);
       if (current.operation.action === 'wake') activeAdapter = adapter;
+      if (current.operation.action === 'power_off' ? !adapter.powerOff : !adapter.wake) throw new WebOsError('UNSUPPORTED_CAPABILITY', 'Adapter does not support the requested power operation');
       current.operation = { ...current.operation, delivery: 'unknown' };
       observedSend = true;
-      pending = current.operation.action === 'power_off' ? adapter.powerOff(signal) : adapter.wake([previous.macAddress!], signal);
+      pending = current.operation.action === 'power_off' ? adapter.powerOff!(signal) : adapter.wake!([previous.macAddress!], signal);
       await abortable(pending, signal);
       check(context);
       current.operation = { ...current.operation, delivery: 'sent', phase: 'connecting' };
@@ -596,7 +598,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
         error = projectTvError(failure);
         finish(context, context.operation.status === 'cancelled' ? 'cancelled' : 'failed', failure);
       }
-      if (adapter && observedSend && (current.operation.action === 'wake' || current.operation.delivery !== 'not_sent')) {
+      if (adapter && (current.operation.action === 'wake' || observedSend && current.operation.delivery !== 'not_sent')) {
         try { await (ownedCleanup ?? disconnect(adapter)); }
         catch (cleanupCause) { if (attempt === context) { error = projectTvError(cleanupFailure(failure, cleanupCause)); finish(context, context.operation.status === 'cancelled' ? 'cancelled' : 'failed', cleanupFailure(failure, cleanupCause)); } }
       }
@@ -608,7 +610,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     // ownership while awaiting their result before touching the transport.
     if (work || cleanup || command) return { enabled: false, reason: 'BUSY' };
     if (closed || unsafeCleanup || connection !== 'available' || !activeAdapter || remoteCapability?.generation !== generation) return { enabled: false, reason: 'UNAVAILABLE' };
-    if (remoteCapability.pointer !== true) return { enabled: false, reason: 'UNSUPPORTED' };
+    if (remoteCapability.buttons !== true) return { enabled: false, reason: 'UNSUPPORTED' };
     return { enabled: true, reason: null };
   }
 
@@ -617,6 +619,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     if (!parsed.success) throw new TvServiceError('INVALID_REQUEST', 400);
     const state = remoteState();
     if (!state.enabled) throw new TvCommandAdmissionError(state.reason === 'BUSY' ? 'TV_BUSY' : state.reason === 'UNSUPPORTED' ? 'UNSUPPORTED_CAPABILITY' : 'TV_UNAVAILABLE');
+    if ('app' in parsed.data && remoteCapability?.apps !== true) throw new TvCommandAdmissionError('UNSUPPORTED_CAPABILITY');
     return parsed.data;
   }
 
@@ -649,12 +652,12 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       if (closed || version !== generation || controller.signal.aborted) return rejectTvCommand(input.id, 'COMMAND_NOT_SENT');
       if (scheduler.now() >= expiresAt) { expire(); return rejectTvCommand(input.id, 'COMMAND_NOT_SENT'); }
       if (unsafeCleanup || cleanup || connection !== 'available' || activeAdapter !== adapter || remoteCapability?.generation !== version) return rejectTvCommand(input.id, 'TV_UNAVAILABLE');
-      if (remoteCapability.pointer !== true) return rejectTvCommand(input.id, 'UNSUPPORTED_CAPABILITY');
+      if (remoteCapability.buttons !== true || 'app' in input && remoteCapability.apps !== true) return rejectTvCommand(input.id, 'UNSUPPORTED_CAPABILITY');
       started = true;
       const result = await executeTvCommand(input, adapter, controller.signal);
       if (scheduler.now() >= expiresAt && !controller.signal.aborted) expire();
       if (controller.signal.aborted && result.outcome === 'sent') return unknownTvCommand(input.id);
-      if (!('app' in input) && !closed && version === generation && result.outcome === 'rejected' && result.error.code === 'UNSUPPORTED_CAPABILITY') remoteCapability = { generation: version, pointer: false, powerOff: remoteCapability?.powerOff === true };
+      if (!('app' in input) && !closed && version === generation && result.outcome === 'rejected' && result.error.code === 'UNSUPPORTED_CAPABILITY') remoteCapability = { ...remoteCapability, buttons: false };
       return result;
     });
     const current: Command = { controller, promise: pending.finally(() => {

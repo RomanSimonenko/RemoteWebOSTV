@@ -108,6 +108,19 @@ function pair(adapter: Lgtv2Adapter, signal = new AbortController().signal) {
 }
 
 describe('Lgtv2Adapter', () => {
+  test('neutral credential reuses LG registration and prepareRemote opens the real pointer', async () => {
+    const mock = await startMock({ kind: 'success' });
+    const { adapter } = createHarness(mock, new MemoryKeyStore(), { allowPairingPrompt: false });
+    const result = await adapter.pair({ host: 'tv.invalid', credential: mockClientKey, signal: new AbortController().signal });
+    expect(result).toMatchObject({ credential: mockClientKey, clientKey: mockClientKey, capabilities: { buttons: true, pointer: true } });
+    expect(mock.pairingPromptCount).toBe(0);
+    await adapter.prepareRemote(new AbortController().signal);
+    await adapter.sendButton('UP', new AbortController().signal);
+    await mock.waitForPointerFrameCount(1);
+    expect(mock.pointerFrames).toEqual(['type:button\nname:UP\n\n']);
+    expect(mock.requests.filter((request) => request.uri === mockUris.pointer)).toHaveLength(1);
+  });
+
   test('wake routes the configured destination to the UDP owner without connecting', async () => {
     const wake = vi.fn(async () => undefined);
     const createClient = vi.fn(() => { throw new Error('Wake must not connect'); });

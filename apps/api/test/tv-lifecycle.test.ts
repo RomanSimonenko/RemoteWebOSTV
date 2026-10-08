@@ -200,12 +200,12 @@ describe('TV lifecycle barriers', () => {
 
   test('reconnect commits rotated key only after snapshot and uses it for the next reconnect', async () => {
     const h = harness(true); h.service.start({ action: 'reconnect' }); await drain();
-    const adapter = h.adapters[0]!; adapter.pairResult.resolve({ ...pairing, clientKey: 'rotated-synthetic-key' });
+    const adapter = h.adapters[0]!; adapter.pairResult.resolve({ ...pairing, credential: 'rotated-synthetic-key' });
     await adapter.enteredRead.promise; expect(h.cipher.decrypt(h.repository.load()!.encryptedClientKey)).toBe('synthetic-key');
     adapter.readResult.resolve(snapshot); await drain();
     expect(h.cipher.decrypt(h.repository.load()!.encryptedClientKey)).toBe('rotated-synthetic-key');
     h.service.start({ action: 'reconnect' }); await drain();
-    expect((await h.adapters[1]!.enteredPair.promise).clientKey).toBe('rotated-synthetic-key');
+    expect((await h.adapters[1]!.enteredPair.promise).credential).toBe('rotated-synthetic-key');
     await h.service.close();
   });
 
@@ -215,7 +215,7 @@ describe('TV lifecycle barriers', () => {
     await adapter.enteredRead.promise; adapter.readResult.resolve(snapshot); await drain();
     expect(h.repository.load()!.identity.firmwareVersion).toBe('updated-version');
     const saved = h.repository.load(); h.service.start({ action: 'reconnect' }); await drain();
-    const second = h.adapters[1]!; second.pairResult.resolve({ ...pairing, clientKey: 'rotated-synthetic-key' });
+    const second = h.adapters[1]!; second.pairResult.resolve({ ...pairing, credential: 'rotated-synthetic-key' });
     await second.enteredRead.promise; second.readResult.reject(new WebOsError('CONNECTION_LOST', 'private')); await drain();
     expect(h.repository.load()).toEqual(saved); expect(h.writes).toHaveLength(1); await h.service.close();
   });

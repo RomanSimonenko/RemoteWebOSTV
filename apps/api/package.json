@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@remote-webos-tv/contracts": "workspace:*",
+    "@remote-webos-tv/tv-adapter": "workspace:*",
     "@remote-webos-tv/web": "workspace:*",
     "@remote-webos-tv/webos": "workspace:*",
     "@fastify/rate-limit": "11.2.0",

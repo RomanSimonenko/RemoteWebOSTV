@@ -71,7 +71,7 @@ test('runtime migrates existing owner storage, persists TV, and reconnects witho
     await app.close();
     app = await createApiRuntime(f.config, f.options);
     const reconnect = await f.adapters[1]!.enteredPair.promise;
-    expect(reconnect.clientKey).toBe('synthetic-key');
+    expect(reconnect.credential).toBe('synthetic-key');
     expect(f.policies[1]).toMatchObject({ prompt: false });
     const response = await app.inject({ url: '/api/tv', headers });
     expect(response.json()).toMatchObject({ tv: { host: '192.168.1.10', identity: { model: 'Synthetic Model' } }, connection: 'connecting' });

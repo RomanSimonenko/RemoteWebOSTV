@@ -1,5 +1,6 @@
 import type { TvButton, TvSnapshot } from '@remote-webos-tv/contracts';
-import { createClientKeyCipher, type ClientKeyStore, type PairingRequest, type PairingResult, type WebOsAdapter } from '@remote-webos-tv/webos';
+import { createClientKeyCipher, type ClientKeyStore } from '@remote-webos-tv/webos';
+import type { PairingRequest, PairingResult, TvAdapter } from '@remote-webos-tv/tv-adapter';
 import { createTvService, type TvServiceDependencies, type TvScheduler } from '../../src/tv/service.js';
 import type { StoredTv, TvRepository } from '../../src/tv/repository.js';
 
@@ -12,7 +13,7 @@ export function barrier<T>() {
 
 export const identity = { model: 'Synthetic Model' };
 export const capabilities = { ssap: true, pointer: true, powerOff: true, wakeOnLan: false, apps: true, inputs: true, textInput: true, notifications: true };
-export const pairing: PairingResult = { clientKey: 'synthetic-key', identity, capabilities, transport: 'ws:3000', macAddresses: [] };
+export const pairing: PairingResult = { credential: 'synthetic-key', identity, capabilities, transport: 'ws:3000', macAddresses: [] };
 export const snapshot: TvSnapshot = { connection: 'available', identity, capabilities, volume: 17, muted: false };
 
 // Microtasks, not elapsed time: late-result doubles intentionally ignore AbortSignal.
@@ -37,7 +38,7 @@ export class ControlledScheduler implements TvScheduler {
   }
 }
 
-export class ControlledAdapter implements WebOsAdapter {
+export class ControlledAdapter implements TvAdapter {
   readonly enteredPair = barrier<PairingRequest>();
   readonly enteredRead = barrier<AbortSignal>();
   readonly disconnected = barrier<void>();
@@ -63,7 +64,7 @@ export class ControlledAdapter implements WebOsAdapter {
   }
   async readSnapshot(signal: AbortSignal) { this.reads++; this.enteredRead.resolve(signal); return this.readResult.promise; }
   async disconnect() { this.closed = true; this.enteredDisconnect.resolve(); await this.disconnectResult; this.disconnected.resolve(); }
-  async openPointerSocket() { throw new Error('outside test scope'); }
+  async prepareRemote() {}
   async listApps() { return []; }
   async listInputs() { return []; }
   async sendButton(button: TvButton, signal: AbortSignal) { this.sent.push(button); this.enteredSend.resolve(signal); await this.sendResult; }

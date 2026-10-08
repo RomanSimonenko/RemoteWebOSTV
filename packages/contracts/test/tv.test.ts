@@ -82,6 +82,12 @@ describe('tv contracts', () => {
     ).toBe(false);
   });
 
+  test('preserves buttons without pointer and the Tizen secure transport', () => {
+    expect(tvSnapshotSchema.parse({
+      connection: 'available', capabilities: { ...capabilities, buttons: true, pointer: false }, transport: 'wss:8002',
+    })).toMatchObject({ capabilities: { buttons: true, pointer: false }, transport: 'wss:8002' });
+  });
+
   test('strips address and authorization fields at the public boundary', () => {
     const parsed = tvSnapshotSchema.parse({
       connection: 'available',

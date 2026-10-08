@@ -245,6 +245,10 @@ export class Lgtv2Adapter implements WebOsAdapter {
     await this.#getPointerSocket(signal);
   }
 
+  async prepareRemote(signal: AbortSignal): Promise<void> {
+    await this.openPointerSocket(signal);
+  }
+
   async #getPointerSocket(
     signal: AbortSignal,
   ): Promise<Lgtv2SpecializedSocket> {
@@ -427,7 +431,7 @@ export class Lgtv2Adapter implements WebOsAdapter {
     await this.#disconnectClient();
     throwIfAborted(request.signal);
 
-    const loadedKey = request.clientKey ?? (await this.#options.keyStore.load());
+    const loadedKey = request.credential ?? request.clientKey ?? (await this.#options.keyStore.load());
     const initialKey = loadedKey && loadedKey.length > 0 ? loadedKey : undefined;
     let observedKey: string | undefined;
     let keySavePromise: Promise<void> | undefined;
@@ -535,6 +539,7 @@ export class Lgtv2Adapter implements WebOsAdapter {
           settled = true;
           removeControls();
           resolve({
+            credential: clientKey,
             clientKey,
             identity,
             capabilities,
@@ -645,6 +650,7 @@ export class Lgtv2Adapter implements WebOsAdapter {
         isUnsupportedCapabilityError(error)
       ) {
         this.#capabilities[capability] = false;
+        if (capability === 'pointer') this.#capabilities.buttons = false;
       }
       throw error;
     }
@@ -734,6 +740,7 @@ export function mapLgtv2Error(
 function createCapabilities(wakeOnLan: boolean): MutableCapabilities {
   return tvCapabilitiesSchema.parse({
     ssap: true,
+    buttons: true,
     pointer: true,
     powerOff: true,
     wakeOnLan,

@@ -37,7 +37,7 @@ test('isolatesTwoServices', async () => {
 test('deleting a pending draft closes it and prevents late pairing from saving it', async () => {
   const h = setup(); const accepted = h.registry.add(request(100), 'session'); await drain();
   const pending = h.registry.remove(accepted.tvId, () => {}); await drain(); await pending;
-  h.adapters[0]!.pairResult.resolve({ clientKey: 'synthetic-key', identity: { model: 'Synthetic' }, capabilities: { ssap: true, pointer: false, powerOff: false, wakeOnLan: false, apps: false, inputs: false, textInput: false, notifications: false }, transport: 'ws:3000', macAddresses: [] });
+  h.adapters[0]!.pairResult.resolve({ credential: 'synthetic-key', identity: { model: 'Synthetic' }, capabilities: { ssap: true, pointer: false, powerOff: false, wakeOnLan: false, apps: false, inputs: false, textInput: false, notifications: false }, transport: 'ws:3000', macAddresses: [] });
   await drain(); expect(h.repository.list()).toEqual([]);
   expect(h.registry.get(accepted.tvId)).toBeNull();
   expect(() => h.registry.add(request(100), 'session')).toThrowError(expect.objectContaining({ code: 'OPERATION_NOT_FOUND' }));

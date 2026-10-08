@@ -10,6 +10,64 @@ import { createStagingKeyStore } from '../src/tv/staging-key-store.js';
 import { harness, succeed, drain, pairing, snapshot, barrier, ControlledScheduler } from './support/tv-harness.js';
 
 describe('TV service persistence and projection', () => {
+  test('buttonsWithoutPointerCanPrepareAndSend', async () => {
+    const h = harness();
+    try {
+      h.service.start({ action: 'pair', host: '192.168.1.10' }); await drain();
+      const adapter = h.adapters[0]!;
+      const events: string[] = [];
+      Object.assign(adapter, { async prepareRemote() { events.push('prepared'); } });
+      const send = adapter.sendButton.bind(adapter);
+      adapter.sendButton = async (button, signal) => { events.push(button); await send(button, signal); };
+      const capabilities = { ...pairing.capabilities, buttons: true, pointer: false };
+      adapter.pairResult.resolve({ ...pairing, capabilities });
+      await adapter.enteredRead.promise; adapter.readResult.resolve({ ...snapshot, capabilities }); await drain();
+      expect(h.service.remoteState()).toEqual({ enabled: true, reason: null });
+      expect(await h.service.sendCommand({ id: '00000000-0000-4000-8000-000000000001', button: 'UP' }, new AbortController().signal)).toEqual({ id: '00000000-0000-4000-8000-000000000001', outcome: 'sent' });
+      expect(events).toEqual(['prepared', 'UP']);
+    } finally { await h.service.close(); }
+  });
+
+  test('unsupportedButtonsSendNothing', async () => {
+    const h = harness();
+    try {
+      h.service.start({ action: 'pair', host: '192.168.1.10' }); await drain();
+      const adapter = h.adapters[0]!;
+      const events: string[] = [];
+      Object.assign(adapter, { async prepareRemote() { events.push('prepared'); } });
+      const capabilities = { ...pairing.capabilities, buttons: false, pointer: true };
+      adapter.pairResult.resolve({ ...pairing, capabilities });
+      await adapter.enteredRead.promise; adapter.readResult.resolve({ ...snapshot, capabilities }); await drain();
+      expect(await h.service.sendCommand({ id: '00000000-0000-4000-8000-000000000001', button: 'UP' }, new AbortController().signal)).toMatchObject({ outcome: 'rejected', error: { code: 'UNSUPPORTED_CAPABILITY' } });
+      expect(events).toEqual([]);
+      expect(adapter.sent).toEqual([]);
+    } finally { await h.service.close(); }
+  });
+
+  test('remote preparation failure sends no button and reports not sent', async () => {
+    const h = harness();
+    try {
+      h.service.start({ action: 'pair', host: '192.168.1.10' }); await drain(); await succeed(h.adapters[0]!);
+      const adapter = h.adapters[0]!;
+      Object.assign(adapter, { async prepareRemote() { throw new WebOsError('CONNECTION_LOST', 'synthetic preparation failure'); } });
+      expect(await h.service.sendCommand({ id: '00000000-0000-4000-8000-000000000001', button: 'UP' }, new AbortController().signal)).toMatchObject({ outcome: 'rejected', error: { code: 'COMMAND_NOT_SENT' } });
+      expect(adapter.sent).toEqual([]);
+    } finally { await h.service.close(); }
+  });
+
+  test('optional app and power methods cannot advertise or perform unsupported work', async () => {
+    const h = harness();
+    try {
+      h.service.start({ action: 'pair', host: '192.168.1.10' }); await drain(); await succeed(h.adapters[0]!);
+      const adapter = h.adapters[0]!;
+      let launched = false;
+      Object.assign(adapter, { listApps: undefined, powerOff: undefined, async launchApp() { launched = true; } });
+      expect(await h.service.sendCommand({ id: '00000000-0000-4000-8000-000000000001', app: 'wink' }, new AbortController().signal)).toMatchObject({ outcome: 'rejected', error: { code: 'UNSUPPORTED_CAPABILITY' } });
+      expect(launched).toBe(false);
+      expect(h.service.powerState().canPowerOff).toBe(false);
+    } finally { await h.service.close(); }
+  });
+
   test('MAC discovery commits the first valid unicast address after snapshot succeeds', async () => {
     const h = harness(); h.service.start({ action: 'pair', host: '192.168.1.10' }); await drain();
     const adapter = h.adapters[0]!;
@@ -41,7 +99,7 @@ describe('TV service persistence and projection', () => {
     const h = harness(true, { repository: base.repository });
     h.service.start({ action }); await drain();
     const adapter = h.adapters[0]!;
-    adapter.pairResult.resolve({ ...pairing, clientKey: 'synthetic-new-key', macAddresses: ['02:00:00:00:00:02'] });
+    adapter.pairResult.resolve({ ...pairing, credential: 'synthetic-new-key', macAddresses: ['02:00:00:00:00:02'] });
     await adapter.enteredRead.promise; adapter.readResult.resolve(snapshot); await drain();
     expect(base.repository.load()?.macAddress).toBe('02:AB:CD:EF:00:01');
     expect(h.cipher.decrypt(base.repository.load()!.encryptedClientKey)).toBe('synthetic-new-key');
@@ -78,7 +136,7 @@ describe('TV service persistence and projection', () => {
     try {
       h.service.start({ action: 'reconnect' }); await drain();
       const adapter = h.adapters[0]!;
-      adapter.pairResult.resolve({ ...pairing, clientKey, macAddresses: ['02:00:00:00:00:02'] });
+      adapter.pairResult.resolve({ ...pairing, credential: clientKey, macAddresses: ['02:00:00:00:00:02'] });
       await adapter.enteredRead.promise; adapter.readResult.resolve(snapshot); await drain();
       expect(base.repository.load()?.macAddress).toBeNull();
       expect((await h.service.status()).operation?.status).toBe('succeeded');
@@ -141,7 +199,7 @@ describe('TV service persistence and projection', () => {
     expect(operation).toMatchObject({ id: 'operation-1', status: 'running', startedAt: 1_000_000, deadlineAt: 1_060_000 });
     await drain();
     const adapter = h.adapters[0]!;
-    await adapter.staging.save(pairing.clientKey);
+    await adapter.staging.save(pairing.credential);
     adapter.pairResult.resolve(pairing);
     await adapter.enteredRead.promise;
     expect(h.repository.load()).toBeNull();
@@ -173,9 +231,9 @@ describe('TV service persistence and projection', () => {
     expect(JSON.stringify(status)).not.toContain('raw private detail'); await h.service.close();
   });
 
-  test('rejects registered result without a client key', async () => {
+  test('rejects registered result without a credential', async () => {
     const h = harness(); h.service.start({ action: 'pair', host: '192.168.1.10' }); await drain();
-    h.adapters[0]!.pairResult.resolve({ ...pairing, clientKey: '' }); await drain();
+    h.adapters[0]!.pairResult.resolve({ ...pairing, credential: '' }); await drain();
     expect((await h.service.status()).operation).toMatchObject({ status: 'failed', error: { code: 'INVALID_TV_RESPONSE' } });
     expect(h.writes).toEqual([]); await h.service.close();
   });

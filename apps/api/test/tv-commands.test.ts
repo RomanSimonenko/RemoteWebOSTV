@@ -50,7 +50,7 @@ describe('TV commands', () => {
     old.readResult.resolve(snapshot); await reading; await drain();
     expect(h.service.remoteState().enabled).toBe(false);
     expect(await h.service.sendCommand(input, signal())).toMatchObject({ outcome: 'rejected', error: { code: 'TV_BUSY' } });
-    const next = h.adapters[1]!; next.pairResult.resolve({ clientKey: 'synthetic-key', identity: snapshot.identity!, capabilities: snapshot.capabilities, transport: 'ws:3000', macAddresses: [] });
+    const next = h.adapters[1]!; next.pairResult.resolve({ credential: 'synthetic-key', identity: snapshot.identity!, capabilities: snapshot.capabilities, transport: 'ws:3000', macAddresses: [] });
     await next.enteredRead.promise; next.readResult.resolve({ ...snapshot, capabilities: { ...snapshot.capabilities, pointer: false } }); await drain();
     expect(h.service.remoteState()).toEqual({ enabled: false, reason: 'UNSUPPORTED' }); expect(old.sent).toEqual([]); expect(next.sent).toEqual([]); await h.service.close();
   });
