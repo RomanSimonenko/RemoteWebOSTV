@@ -20,9 +20,10 @@ const cliPath = fileURLToPath(new URL('../dist/src/index.js', import.meta.url));
 const tokenCliPath = fileURLToPath(new URL('../dist/src/auth/cli.js', import.meta.url));
 
 beforeAll(() => {
-  const build = spawnSync('pnpm', ['--filter', '@remote-webos-tv/api', 'build'], { cwd: workspaceRoot, encoding: 'utf8' });
+  // Node subprocesses use built workspace exports, including shared TV errors.
+  const build = spawnSync('pnpm', ['--filter', '@remote-webos-tv/api...', 'build'], { cwd: workspaceRoot, encoding: 'utf8' });
   expect(build.status, build.stderr).toBe(0);
-}, 15_000);
+}, 30_000);
 
 test.each([
   ['newer', 'STORAGE_SCHEMA_NEWER', undefined],

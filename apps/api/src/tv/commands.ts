@@ -1,6 +1,6 @@
 import type { TvCommandRequest, TvCommandResult } from '@remote-webos-tv/contracts';
 import type { TvAdapter } from '@remote-webos-tv/tv-adapter';
-import { TvButtonSendError, WebOsError } from '@remote-webos-tv/webos';
+import { TvButtonSendError, WebOsError } from '@remote-webos-tv/tv-adapter';
 
 type RejectionCode = Extract<TvCommandResult, { outcome: 'rejected' }>['error']['code'];
 const messages: Record<RejectionCode | 'COMMAND_RESULT_UNKNOWN', string> = {

@@ -2,6 +2,8 @@ import type {
   TvApp, TvButton, TvCapabilities, TvIdentity, TvInput, TvSnapshot, TvTransport,
 } from '@remote-webos-tv/contracts';
 
+export * from './errors.js';
+
 export interface PairingRequest {
   readonly host: string;
   readonly credential?: string;

@@ -1,6 +1,7 @@
 import { startTvOperationSchema, supportsTvButtons, tvCommandRequestSchema, tvIdentitySchema, tvMacAddressSchema, tvPowerRequestSchema, tvSnapshotSchema, type StartTvOperation, type TvCommandRequest, type TvCommandResult, type TvConnectionState, type TvOperation, type TvPowerOperation, type TvPowerRequest, type TvPowerState, type TvRemoteState, type TvStatusResponse } from '@remote-webos-tv/contracts';
 import type { TvAdapter } from '@remote-webos-tv/tv-adapter';
-import { TvPowerSendError, WebOsError, type ClientKeyCipher, type ClientKeyStore, type EncryptedEnvelopeV1 } from '@remote-webos-tv/webos';
+import { TvPowerSendError, WebOsError } from '@remote-webos-tv/tv-adapter';
+import type { ClientKeyCipher, ClientKeyStore, EncryptedEnvelopeV1 } from '@remote-webos-tv/webos';
 import type { StoredTv, TvRepository } from './repository.js';
 import { createStagingKeyStore } from './staging-key-store.js';
 import { abortable, cleanupFailure, failedConnection, hasCleanupFailure, projectTvError, TvServiceError, type PublicTvError } from './operation.js';

@@ -1,4 +1,5 @@
-import { WebOsError, type ClientKeyStore } from '@remote-webos-tv/webos';
+import { WebOsError } from '@remote-webos-tv/tv-adapter';
+import type { ClientKeyStore } from '@remote-webos-tv/webos';
 
 export function createStagingKeyStore(initialKey?: string): ClientKeyStore {
   let key = initialKey;
