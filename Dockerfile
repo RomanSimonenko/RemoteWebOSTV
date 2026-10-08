@@ -5,6 +5,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY apps/api/package.json apps/api/tsconfig.json ./apps/api/
 COPY apps/web/package.json apps/web/tsconfig.json apps/web/vite.config.ts apps/web/index.html ./apps/web/
 COPY packages/contracts/package.json packages/contracts/tsconfig.json ./packages/contracts/
+COPY packages/tv-adapter/package.json packages/tv-adapter/tsconfig.json ./packages/tv-adapter/
 COPY packages/webos/package.json packages/webos/tsconfig.json ./packages/webos/
 
 FROM toolchain AS dependencies
@@ -14,8 +15,9 @@ COPY apps/api/src ./apps/api/src
 COPY apps/web/src ./apps/web/src
 COPY apps/web/public ./apps/web/public
 COPY packages/contracts/src ./packages/contracts/src
+COPY packages/tv-adapter/src ./packages/tv-adapter/src
 COPY packages/webos/src ./packages/webos/src
-RUN pnpm --filter @remote-webos-tv/contracts build && pnpm --filter @remote-webos-tv/webos build && pnpm --filter @remote-webos-tv/api build && pnpm --filter @remote-webos-tv/web build
+RUN pnpm --filter @remote-webos-tv/contracts build && pnpm --filter @remote-webos-tv/tv-adapter build && pnpm --filter @remote-webos-tv/webos build && pnpm --filter @remote-webos-tv/api build && pnpm --filter @remote-webos-tv/web build
 
 FROM toolchain AS production-dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/*
@@ -28,6 +30,7 @@ COPY --from=production-dependencies /app/node_modules ./node_modules
 COPY --from=production-dependencies /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=production-dependencies /app/apps/web/node_modules ./apps/web/node_modules
 COPY --from=production-dependencies /app/packages/contracts/node_modules ./packages/contracts/node_modules
+COPY --from=production-dependencies /app/packages/tv-adapter/node_modules ./packages/tv-adapter/node_modules
 COPY --from=production-dependencies /app/packages/webos/node_modules ./packages/webos/node_modules
 COPY --from=dependencies /app/apps/api/package.json ./apps/api/package.json
 COPY --from=dependencies /app/apps/api/dist ./apps/api/dist
@@ -35,6 +38,8 @@ COPY --from=dependencies /app/apps/web/package.json ./apps/web/package.json
 COPY --from=dependencies /app/apps/web/dist ./apps/web/dist
 COPY --from=dependencies /app/packages/contracts/package.json ./packages/contracts/package.json
 COPY --from=dependencies /app/packages/contracts/dist ./packages/contracts/dist
+COPY --from=dependencies /app/packages/tv-adapter/package.json ./packages/tv-adapter/package.json
+COPY --from=dependencies /app/packages/tv-adapter/dist ./packages/tv-adapter/dist
 COPY --from=dependencies /app/packages/webos/package.json ./packages/webos/package.json
 COPY --from=dependencies /app/packages/webos/dist ./packages/webos/dist
 RUN mkdir /data && chown node:node /data && chmod 700 /data

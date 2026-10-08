@@ -27,6 +27,11 @@
 !packages/contracts/tsconfig.json
 !packages/contracts/src/
 !packages/contracts/src/**
+!packages/tv-adapter/
+!packages/tv-adapter/package.json
+!packages/tv-adapter/tsconfig.json
+!packages/tv-adapter/src/
+!packages/tv-adapter/src/**
 !packages/webos/
 !packages/webos/package.json
 !packages/webos/tsconfig.json
