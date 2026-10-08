@@ -42,7 +42,16 @@ export function registerTvPowerRoutes(app: FastifyInstance, { service: defaultSe
   const receiptKey = (service: TvService, id: string) => `${subscriptions.get(service)!.key}:${id}`;
   const unsubscribe = sessions.onRevoke(async (token) => {
     receipts.delete(token);
-    const results = await Promise.allSettled([...subscriptions.keys()].map((service) => service.cancelOwnedPower(token)));
+    const watched = [...subscriptions];
+    const finalSession = !sessions.hasActiveSessions();
+    // Final revocation disposes saved services at their registry owner. Drop
+    // these receivers before yielding, so a new login can watch independently
+    // even while the previous session's transport cleanup is still pending.
+    if (finalSession) for (const [service, subscription] of watched) {
+      subscription.unsubscribe();
+      if (subscriptions.get(service) === subscription) subscriptions.delete(service);
+    }
+    const results = await Promise.allSettled(watched.map(([service]) => service.cancelOwnedPower(token)));
     const errors = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected').map((result) => result.reason as unknown);
     if (errors.length === 1) throw errors[0];
     if (errors.length > 1) throw new AggregateError(errors, 'TV power cleanup failed');

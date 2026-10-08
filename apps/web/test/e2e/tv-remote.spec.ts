@@ -78,6 +78,11 @@ test('all ten browser controls reach the pointer once; saved TV remains usable a
   })).status()).toBe(401);
   await tv.login(page);
   await openTvWorkspace(page);
+  await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Нет соединения');
+  expect(tv.tv.activeSocketCount).toBe(0);
+  await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+  await page.getByRole('button', { name: 'Подключиться снова', exact: true }).click();
+  await page.getByRole('button', { name: 'Закрыть настройки', exact: true }).click();
   await ready(page);
   await remote(page).focus();
   await press(page, tv, 'Home');

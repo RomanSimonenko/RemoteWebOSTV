@@ -236,6 +236,11 @@ test('lost genuine power response reports uncertainty and never replays shutdown
   await page.getByRole('dialog', { name: 'Выйти из приложения?' }).getByRole('button', { name: 'Выйти', exact: true }).click();
   await tv.login(page);
   await openTvWorkspace(page);
+  await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Нет соединения');
+  expect(tv.tv.activeSocketCount).toBe(0);
+  await openSettings(page);
+  await settings(page).getByRole('button', { name: 'Подключиться снова', exact: true }).click();
+  await page.keyboard.press('Escape');
   await ready(page);
   expect(posts).toBe(1);
   expect(original.requests.filter((request) => request.uri === off)).toHaveLength(1);
@@ -272,7 +277,8 @@ test('another session cannot cancel wake; initiating logout aborts transport and
     await tv.login(page);
   await openTvWorkspace(page);
     await expect(page.locator('.tv-info').getByText('43UP76906LE', { exact: true })).toBeVisible();
-    await expect.poll(async () => (await state(page, tv)).operation?.status).toBe('cancelled');
+    expect((await state(page, tv)).operation).toBeNull();
+    await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Нет соединения');
     const attempts = tv.policies.length;
     tv.clock.advance(120_000);
     await tv.status(page);

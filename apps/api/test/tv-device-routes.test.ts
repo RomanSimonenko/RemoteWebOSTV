@@ -93,6 +93,29 @@ async function fixture(realTransports = false) {
   return { app, headers, adapters, add, registry, createRegistry, repository, sessions, cipher, scheduler, transports: transports!, waitFinished: (operationId: string) => terminal(operationId).promise, token: login.token };
 }
 
+test('final logout releases watched services so later sessions do not revisit disposed owners', async () => {
+  const h = await fixture(); const tvId = await h.add(100, '10.2.3.4');
+  const oldService = h.registry.get(tvId)!;
+  const oldCancellation = vi.spyOn(oldService, 'cancelOwnedPower');
+  expect((await h.app.inject({ url: `/api/tvs/${tvId}/power`, headers: h.headers })).statusCode).toBe(200);
+  const other = (await h.sessions.login('owner', 'synthetic password 123'))!;
+  const headersFor = (token: string) => ({ cookie: `remote_webos_session=${token}`, origin, 'x-csrf-token': h.sessions.authenticate(token)!.csrfToken });
+  expect((await h.app.inject({ method: 'POST', url: '/api/auth/logout', headers: headersFor(other.token) })).statusCode).toBe(204);
+  expect(oldCancellation).toHaveBeenCalledTimes(2); // Registry and watched power receiver.
+  expect(h.registry.get(tvId)).toBe(oldService);
+  expect((await h.app.inject({ method: 'POST', url: '/api/auth/logout', headers: h.headers })).statusCode).toBe(204);
+  expect(oldCancellation).toHaveBeenCalledTimes(3);
+  const fresh = h.registry.get(tvId)!; expect(fresh).not.toBe(oldService);
+  const freshCancellation = vi.spyOn(fresh, 'cancelOwnedPower');
+  const next = (await h.sessions.login('owner', 'synthetic password 123'))!;
+  const nextHeaders = headersFor(next.token);
+  expect((await h.app.inject({ url: `/api/tvs/${tvId}/power`, headers: nextHeaders })).statusCode).toBe(200);
+  expect((await h.app.inject({ method: 'POST', url: '/api/auth/logout', headers: nextHeaders })).statusCode).toBe(204);
+  expect(freshCancellation).toHaveBeenCalledTimes(1);
+  expect(oldCancellation).toHaveBeenCalledTimes(3);
+  expect(h.repository.list().map(tv => tv.tvId)).toEqual([tvId]);
+});
+
 test('lgAndSamsungRemainConnectedWhenSelectionChanges', async () => {
   const h = await fixture(true); const lg = await h.add(100, '10.2.3.4'); const samsung = await h.add(101, '10.2.3.5', 'tizen');
   for (const tvId of [lg, samsung, lg, samsung]) {

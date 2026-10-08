@@ -1,3 +1,4 @@
+import { getEventListeners } from 'node:events';
 import { afterEach, expect, test } from 'vitest';
 import type { TvAdapter } from '@remote-webos-tv/tv-adapter';
 import { TvButtonSendError, WebOsError } from '@remote-webos-tv/tv-adapter';
@@ -178,6 +179,25 @@ test('preSendAbortIsNotSent', async () => {
   await expect(h.adapter.sendButton('UP', controller.signal)).rejects.toBeInstanceOf(TvButtonSendError);
   await expect(h.adapter.sendButton('UP', controller.signal)).rejects.toMatchObject({ delivery: 'not_sent' });
   expect(socket.frames).toEqual([]);
+});
+
+test.each(['success', 'failure'] as const)('postWriteAbortIsUnknownAndLateCallbackCannotSettleAgain: %s', async (late) => {
+  const h = harness(); const socket = await h.connect(); socket.deferSend = true;
+  const controller = new AbortController();
+  const pending = h.adapter.sendButton('UP', controller.signal);
+  const lateCallback = socket.sendCallback!;
+  expect(socket.frames).toHaveLength(1); expect(h.scheduler.timers.size).toBe(1);
+  expect(getEventListeners(controller.signal, 'abort')).toHaveLength(1);
+  controller.abort();
+  await expect(pending).rejects.toMatchObject({ delivery: 'unknown', code: 'CONNECTION_LOST' });
+  expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0);
+  expect(h.scheduler.timers.size).toBe(0);
+  lateCallback(late === 'failure' ? new Error('Synthetic late write failure') : undefined);
+  await expect(pending).rejects.toMatchObject({ delivery: 'unknown', code: 'CONNECTION_LOST' });
+  await h.adapter.disconnect();
+  expect(socket.frames).toHaveLength(1); expect(h.urls).toHaveLength(1);
+  expect(socket.listenerCount).toBe(0); expect(socket.terminateCount).toBe(1);
+  expect(h.scheduler.timers.size).toBe(0);
 });
 
 test('localPolicyPrecedesNetwork', async () => {

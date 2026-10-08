@@ -216,6 +216,38 @@ test('legacy authenticated manual reconnect gains session ownership and logout w
   } finally { cleanup.resolve(); await logout; }
 });
 
+test('new login can watch the same service while previous final revocation cleanup is pending', async () => {
+  const { app, h, sessions, login, headersFor } = await fixture();
+  const entered = barrier<void>(); const release = barrier<void>();
+  const admitting = barrier<void>(); const admit = barrier<void>();
+  const cancel = h.service.cancelOwnedPower.bind(h.service);
+  vi.spyOn(h.service, 'cancelOwnedPower').mockImplementationOnce(async (owner) => {
+    await cancel(owner); entered.resolve(); await release.promise;
+  });
+  const revoking = sessions.revoke(login.token); await entered.promise;
+  let sending: Promise<unknown> | undefined;
+  try {
+    const next = (await sessions.login('owner', 'synthetic password 123'))!;
+    const headers = headersFor(next.token);
+    expect((await app.inject({ url: '/api/tv/power', headers })).statusCode).toBe(200);
+    const createLimiter = app.createRateLimit.bind(app);
+    vi.spyOn(app, 'createRateLimit').mockImplementation((options) => {
+      const limiter = createLimiter(options);
+      return async (request, callOptions) => {
+        if (callOptions?.increment === false) { admitting.resolve(); await admit.promise; }
+        return limiter(request, callOptions);
+      };
+    });
+    const pending = app.inject({ method: 'POST', url: '/api/tv/power', headers, payload: off }).then(response => response);
+    sending = pending; await admitting.promise;
+    release.resolve(); await revoking;
+    admit.resolve(); const accepted = await pending;
+    expect(accepted.statusCode).toBe(202);
+    expect(accepted.json()).toMatchObject({ id, status: 'running' });
+    expect(h.adapters[0]!.powerOffs).toBe(1);
+  } finally { release.resolve(); admit.resolve(); await revoking; await sending; }
+});
+
 test.each(['revoke', 'lifecycle'] as const)('power admission rechecks %s after asynchronous limiter peek before effects or charging', async (change) => {
   const { app, h, login, sessions, post, headers } = await fixture();
   expect((await app.inject({ url: '/api/tv/power', headers })).statusCode).toBe(200);
