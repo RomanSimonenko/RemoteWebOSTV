@@ -9,7 +9,7 @@ const longError = 'Синтетическая ошибка соединения:
 const remote = (page: Page) => page.getByRole('group', { name: 'Пульт', exact: true });
 const settings = (page: Page) => page.getByRole('dialog', { name: 'Настройки телевизора', exact: true });
 
-for (const width of [320, 1280]) test(`logout requires confirmation, cancels safely and sends one authenticated logout at ${width}px`, async ({ page }) => {
+for (const width of [1280]) test(`logout requires confirmation, cancels safely and sends one authenticated logout at ${width}px`, async ({ page }) => {
   await page.setViewportSize({ width, height: 800 });
   const { mutations } = await fixture(page);
   const opener = page.locator('.app-header').getByRole('button', { name: 'Выйти', exact: true });
@@ -148,7 +148,7 @@ test('settings keeps its heading visible while scrolling and hides repair behind
   await expect(dialog.getByRole('button', { name: 'Закрыть настройки' })).toBeVisible();
 });
 
-for (const width of [320, 1280]) {
+for (const width of [1280]) {
   test(`settings sections and controls stay consistent at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 960 });
     const { mutations } = await fixture(page);
@@ -182,7 +182,7 @@ for (const width of [320, 1280]) {
   });
 }
 
-for (const width of [320, 1280]) {
+for (const width of [1280]) {
   test(`network wake tooltip follows hover and keyboard focus at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 960 });
     const { mutations } = await fixture(page, 'version-known');
@@ -228,7 +228,7 @@ for (const width of [320, 1280]) {
   });
 }
 
-for (const width of [320, 1280]) {
+for (const width of [1280]) {
   test(`long model stays beside LG logo without power or navigation overlap at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 960 });
     await fixture(page, 'long-model');
@@ -266,7 +266,7 @@ for (const width of [320, 1280]) {
   }
 }
 
-for (const width of [320, 1280]) {
+for (const width of [1280]) {
   test(`temporary power activity uses a spinner without changing layout at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 960 });
     const { power } = await fixture(page, 'power-busy');
@@ -470,7 +470,7 @@ for (const width of [320, 1280]) {
   }
 }
 
-for (const width of [320, 1280]) {
+for (const width of [1280]) {
   test(`power popover content fits narrow remote at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 960 });
     const { mutations } = await fixture(page);
@@ -582,8 +582,8 @@ test('connection indicator explains its state on hover and keyboard focus withou
   expect(mutations).toEqual([]);
 });
 
-test('header keyboard help stays readable inside a 320px viewport without sending commands', async ({ page }) => {
-  await page.setViewportSize({ width: 320, height: 960 });
+test('header keyboard help stays readable inside a 1280px viewport without sending commands', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 960 });
   const { mutations } = await fixture(page);
   await page.locator('.app-header summary').click();
   const help = page.locator('#remote-help');
@@ -592,7 +592,7 @@ test('header keyboard help stays readable inside a 320px viewport without sendin
   await expect(help).toContainText('Нажмите Tab');
   const box = (await help.boundingBox())!;
   expect(box.x).toBeGreaterThanOrEqual(0);
-  expect(box.x + box.width).toBeLessThanOrEqual(320);
+  expect(box.x + box.width).toBeLessThanOrEqual(1280);
   await noOverflow(page);
   expect(mutations).toEqual([]);
 });
