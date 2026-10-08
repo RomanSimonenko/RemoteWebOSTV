@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { startTvOperationSchema, type StartTvOperation, type TvOperation, type SavedTvView, type TvPowerState, type TvId } from '@remote-webos-tv/contracts';
 import { api, ApiFailure, friendlyError } from '../api.js';
 import { useTvStatus } from '../useTvStatus.js';
+import { Webcam } from '../components/Webcam.js';
 import { Remote } from './Remote.js';
 import { PowerControls } from './PowerControls.js';
 import { SettingsDialog } from '../components/SettingsDialog.js';
@@ -157,7 +158,7 @@ function TvSetupContent({ tvId, onReady, username, csrfToken, identityTarget, on
     <span className="activity-slot">{activityBusy && showActivity && <span className="led-activity" role="img" aria-label="Выполняется запрос" />}</span>
     {tv && <span id="connection-tooltip" role="tooltip" className="connection-tooltip">{connectionText}</span>}
   </div>;
-  return <>{identityTarget ? createPortal(identity, identityTarget) : identity}<section className={tv ? 'tv-layout' : 'form-card'}>
+  return <>{identityTarget ? createPortal(identity, identityTarget) : identity}<section className={tv ? 'tv-layout tv-layout-with-camera' : 'form-card'}>
     {!tv && status && <h1>Телевизор ещё не настроен</h1>}
     {!tv && !status && !error && showActivity && <p role="status">Загрузка телевизора…</p>}
     {tv && <div className={`connection-progress${settingsOpen ? ' reserved-activity' : ''}`} hidden={!running || powerRunning} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{running && !powerRunning && activity(!settingsOpen)}</div>}
@@ -166,6 +167,7 @@ function TvSetupContent({ tvId, onReady, username, csrfToken, identityTarget, on
       <PowerControls {...(tvId ? { tvId } : {})} csrfToken={csrfToken} active quietOffline={quietOffline || running} settingsOpen={settingsOpen} settingsTarget={settingsTarget} activityTarget={powerActivityTarget} {...(onConfirmationChange ? { onConfirmationChange } : {})} onSessionExpired={onSessionExpired} onStateChange={observePowerState} onBusyChange={setPowerBusy} />
       <Remote {...(tvId ? { tvId } : {})} csrfToken={csrfToken} active quietOffline={quietRemoteUnavailable} interactionBlocked={settingsOpen} activityTarget={remoteActivityTarget} onSessionExpired={onSessionExpired} onBusyChange={setRemoteBusy} />
     </div>}
+    {tv && <Webcam />}
     <div className="tv-activity">
       {!tv && (status || error) && <div className={status?.connection === 'unconfigured' ? 'visually-hidden' : undefined}>{connectionIndicator}</div>}
       <div className={settingsOpen ? 'reserved-activity' : undefined} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{!(tv && running && !powerRunning) && activity(true)}</div>
