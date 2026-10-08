@@ -92,10 +92,10 @@ test('strict power, MAC and cancel requests reject malformed input without effec
 
 test('MAC update normalizes, clears and preserves the stored encrypted key', async () => {
   const { app, h, headers } = await fixture(false);
-  const key = h.repository.load()!.encryptedClientKey;
+  const key = h.repository.load()!.encryptedCredential;
   const set = await app.inject({ method: 'PUT', url: '/api/tv/mac', headers, payload: { mac: '02-ab-cd-ef-00-01' } });
   expect(set.statusCode).toBe(200); expect(tvPowerStateSchema.parse(set.json())).toMatchObject({ mac: '02:AB:CD:EF:00:01', canWake: true });
-  expect(set.headers['cache-control']).toBe('no-store'); expect(h.repository.load()!.encryptedClientKey).toEqual(key);
+  expect(set.headers['cache-control']).toBe('no-store'); expect(h.repository.load()!.encryptedCredential).toEqual(key);
   const clear = await app.inject({ method: 'PUT', url: '/api/tv/mac', headers, payload: { mac: null } });
   expect(clear.statusCode).toBe(200); expect(clear.json()).toMatchObject({ mac: null, canWake: false });
 });
@@ -214,6 +214,38 @@ test('legacy authenticated manual reconnect gains session ownership and logout w
     await new Promise<void>((resolve) => setImmediate(resolve)); expect(request.signal.aborted).toBe(true); expect(ended).toBe(false);
     cleanup.resolve(); expect((await logout).statusCode).toBe(204); expect((await h.service.status()).operation?.status).toBe('cancelled');
   } finally { cleanup.resolve(); await logout; }
+});
+
+test('new login can watch the same service while previous final revocation cleanup is pending', async () => {
+  const { app, h, sessions, login, headersFor } = await fixture();
+  const entered = barrier<void>(); const release = barrier<void>();
+  const admitting = barrier<void>(); const admit = barrier<void>();
+  const cancel = h.service.cancelOwnedPower.bind(h.service);
+  vi.spyOn(h.service, 'cancelOwnedPower').mockImplementationOnce(async (owner) => {
+    await cancel(owner); entered.resolve(); await release.promise;
+  });
+  const revoking = sessions.revoke(login.token); await entered.promise;
+  let sending: Promise<unknown> | undefined;
+  try {
+    const next = (await sessions.login('owner', 'synthetic password 123'))!;
+    const headers = headersFor(next.token);
+    expect((await app.inject({ url: '/api/tv/power', headers })).statusCode).toBe(200);
+    const createLimiter = app.createRateLimit.bind(app);
+    vi.spyOn(app, 'createRateLimit').mockImplementation((options) => {
+      const limiter = createLimiter(options);
+      return async (request, callOptions) => {
+        if (callOptions?.increment === false) { admitting.resolve(); await admit.promise; }
+        return limiter(request, callOptions);
+      };
+    });
+    const pending = app.inject({ method: 'POST', url: '/api/tv/power', headers, payload: off }).then(response => response);
+    sending = pending; await admitting.promise;
+    release.resolve(); await revoking;
+    admit.resolve(); const accepted = await pending;
+    expect(accepted.statusCode).toBe(202);
+    expect(accepted.json()).toMatchObject({ id, status: 'running' });
+    expect(h.adapters[0]!.powerOffs).toBe(1);
+  } finally { release.resolve(); admit.resolve(); await revoking; await sending; }
 });
 
 test.each(['revoke', 'lifecycle'] as const)('power admission rechecks %s after asynchronous limiter peek before effects or charging', async (change) => {

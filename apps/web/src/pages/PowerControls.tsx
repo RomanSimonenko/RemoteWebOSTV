@@ -84,7 +84,8 @@ export function PowerControls({ tvId, csrfToken, active, onSessionExpired, onSta
   useEffect(() => { if (backgroundDiagnostic && !settingsOpen) alert.current?.focus({ preventScroll: true }); }, [backgroundDiagnostic]);
 
   if (!active) return null;
-  const unavailable = !state?.mac ? 'Для включения сохраните MAC-адрес телевизора в настройках.' : 'Питание сейчас недоступно. Обновите статус.';
+  const networkPowerUnsupported = state?.wakeSupported === false;
+  const unavailable = networkPowerUnsupported ? 'Включение по сети для этого телевизора пока недоступно в приложении.' : !state?.mac ? 'Для включения сохраните MAC-адрес телевизора в настройках.' : 'Питание сейчас недоступно. Обновите статус.';
   // Only the retained background diagnostic owns autofocus; modal teardown
   // must not clear its ref while the background paragraph remains mounted.
   const activity = (withFocusRef: boolean) => <>
@@ -94,7 +95,7 @@ export function PowerControls({ tvId, csrfToken, active, onSessionExpired, onSta
       {operation.action !== 'recover' && <button type="button" disabled={busy} onClick={() => cancel(operation.id)}>Отменить ожидание</button>}
     </div>}
   </>;
-  const settings = <section className="settings-section">
+  const settings = networkPowerUnsupported ? <section className="settings-section"><h3>Включение по сети</h3>{settingsOpen ? activity(false) : <p>{unavailable}</p>}</section> : <section className="settings-section">
     <div className="settings-network-heading"><h3>Включение по сети</h3><button className="settings-help" type="button" aria-label="О включении по сети" aria-describedby={networkHelpId}><IconInfoCircle aria-hidden="true" /></button>
       <div className="settings-tooltip" id={networkHelpId} role="tooltip">
         <p>Для включения нужен MAC-адрес телевизора. После изменения IP проверьте, что MAC принадлежит этому телевизору.</p>

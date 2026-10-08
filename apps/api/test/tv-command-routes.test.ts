@@ -19,7 +19,7 @@ const command = { id: '00000000-0000-4000-8000-000000000001', button: 'HOME' as 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { vi.restoreAllMocks(); for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
-async function fixture(ready = true, pointer = true) {
+async function fixture(ready = true, pointer = true, buttons?: boolean) {
   const directory = await mkdtemp(join(tmpdir(), 'tv-command-routes-'));
   const database = await openDatabase({ dataDir: directory });
   const repository = createOwnerRepository(database.sqlite);
@@ -35,9 +35,10 @@ async function fixture(ready = true, pointer = true) {
     h.service.start({ action: 'pair', host: '192.168.1.10' });
     await drain();
     const adapter = h.adapters[0]!;
-    adapter.pairResult.resolve({ ...pairing, capabilities: { ...pairing.capabilities, pointer } });
+    const capabilities = { ...pairing.capabilities, pointer, ...(buttons === undefined ? {} : { buttons }) };
+    adapter.pairResult.resolve({ ...pairing, capabilities });
     await adapter.enteredRead.promise;
-    adapter.readResult.resolve({ ...snapshot, capabilities: { ...snapshot.capabilities, pointer } });
+    adapter.readResult.resolve({ ...snapshot, capabilities });
     await drain();
   }
   const app = buildApp({
@@ -59,7 +60,7 @@ test('remote and command routes enforce session, Origin, CSRF and no-store inclu
     expect(denied.headers['cache-control']).toBe('no-store');
     const state = await app.inject({ url, headers });
     expect(state.statusCode).toBe(200);
-    expect(state.json()).toEqual({ enabled: true, reason: null });
+    expect(state.json()).toEqual({ enabled: true, reason: null, apps: true });
     expect(state.headers['cache-control']).toBe('no-store');
   }
   for (const url of ['/api/tv/commands', '/%61pi/tv/%63ommands']) {
@@ -140,6 +141,23 @@ test('unsupported commands use 422, remain safe and do not enter the adapter', a
   expect(response.statusCode).toBe(422);
   expect(response.json()).toMatchObject({ id: command.id, outcome: 'rejected', error: { code: 'UNSUPPORTED_CAPABILITY' } });
   expect(response.headers['cache-control']).toBe('no-store');
+  expect(h.adapters[0]!.sent).toEqual([]);
+});
+
+test('buttons without pointer are available through the authenticated command routes', async () => {
+  const { app, headers, post, h } = await fixture(true, false, true);
+  expect((await app.inject({ url: '/api/tv/remote', headers })).json()).toEqual({ enabled: true, reason: null, apps: true });
+  const response = await post({ ...command, button: 'UP' });
+  expect(response.statusCode).toBe(200);
+  expect(response.json()).toEqual({ id: command.id, outcome: 'sent' });
+  expect(h.adapters[0]!.sent).toEqual(['UP']);
+});
+
+test('explicitly unsupported buttons override legacy pointer through command routes', async () => {
+  const { post, h } = await fixture(true, true, false);
+  const response = await post({ ...command, button: 'UP' });
+  expect(response.statusCode).toBe(422);
+  expect(response.json()).toMatchObject({ outcome: 'rejected', error: { code: 'UNSUPPORTED_CAPABILITY' } });
   expect(h.adapters[0]!.sent).toEqual([]);
 });
 
@@ -281,7 +299,7 @@ test('premature response close cancels pending work while completed response clo
   expect(response.statusCode).toBe(200);
   expect(response.json()).toEqual({ id: command.id, outcome: 'sent' });
   reply.raw.emit('close');
-  expect(h.service.remoteState()).toEqual({ enabled: true, reason: null });
+  expect(h.service.remoteState()).toEqual({ enabled: true, reason: null, apps: true });
 });
 
 test('real HTTP body completion permits a command, while disconnect during admission prevents late sending', async () => {

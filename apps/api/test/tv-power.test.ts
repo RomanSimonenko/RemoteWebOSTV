@@ -12,6 +12,24 @@ async function connected() {
 }
 
 describe('owned TV power operations', () => {
+  test('offline Samsung cannot advertise or admit wake solely from a saved MAC', async () => {
+    const base = harness(true); base.repository.replace({ ...base.repository.load()!, platform: 'tizen', macAddress: '02:00:00:00:00:02' });
+    const h = harness(true, { repository: base.repository });
+    try {
+      expect(h.service.powerState().canWake).toBe(false);
+      expect(h.service.powerState()).toMatchObject({ wakeSupported: false });
+      expect(() => h.service.startPower(wake, 'owner')).toThrowError(expect.objectContaining({ code: 'UNSUPPORTED_CAPABILITY' }));
+      expect(h.adapters).toEqual([]);
+      await h.service.initialize(); await drain();
+      expect(h.service.powerState().canWake).toBe(false);
+      expect(h.adapters.flatMap(adapter => adapter.wakes)).toEqual([]);
+    } finally { await h.service.close(); await base.service.close(); }
+  });
+  test('LG wake support is distinct from a missing saved MAC', async () => {
+    const h = harness(true);
+    try { expect(h.service.powerState()).toMatchObject({ wakeSupported: true, canWake: false, mac: null }); }
+    finally { await h.service.close(); }
+  });
   test.each(['sent timeout', 'unknown delivery', 'send failure'] as const)('manual reconnect supersedes only the connection timeout: %s', async (scenario) => {
     const base = harness(true); base.repository.replace({ ...base.repository.load()!, macAddress: '02:00:00:00:00:01' });
     const adapters: ControlledAdapter[] = [];
@@ -129,7 +147,7 @@ describe('owned TV power operations', () => {
     const h = await connected(); h.service.startPower(off, 'owner'); await h.service.cancelOwnedPower('owner');
     expect(h.adapters[0]!.powerOffs).toBe(0); expect(h.service.powerState()).toMatchObject({ canPowerOff: true, operation: { status: 'cancelled', delivery: 'not_sent' } });
     expect(h.adapters[0]!.closed).toBe(false); expect((await h.service.status()).connection).toBe('available');
-    expect(h.service.remoteState()).toEqual({ enabled: true, reason: null }); await h.service.close();
+    expect(h.service.remoteState()).toEqual({ enabled: true, reason: null, apps: true }); await h.service.close();
   });
 
   test('off cleanup failure is visible and fail-closed even after observed unavailability', async () => {
@@ -186,9 +204,9 @@ describe('owned TV power operations', () => {
     pending.resolve(); await closing; expect(adapters).toHaveLength(1); expect(adapters[0]!.wakes).toHaveLength(1); await base.service.close();
   });
   test('MAC normalization preserves the encrypted key and obeys the common gate', async () => {
-    const h = harness(true); const key = h.repository.load()!.encryptedClientKey;
+    const h = harness(true); const key = h.repository.load()!.encryptedCredential;
     expect(h.service.setMac('02-ab-cd-ef-00-01')).toMatchObject({ mac: '02:AB:CD:EF:00:01', canWake: true });
-    expect(h.repository.load()!.encryptedClientKey).toEqual(key);
+    expect(h.repository.load()!.encryptedCredential).toEqual(key);
     expect(() => h.service.setMac('invalid')).toThrowError(expect.objectContaining({ code: 'INVALID_REQUEST' }));
     h.service.startPower(wake, 'owner');
     expect(() => h.service.setMac(null)).toThrowError(expect.objectContaining({ code: 'OPERATION_CONFLICT' }));

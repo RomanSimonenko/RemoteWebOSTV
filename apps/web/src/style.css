@@ -32,8 +32,8 @@ body { margin: 0; min-width: 320px; min-height: 100vh; background: radial-gradie
 .device-connection[data-connection="available"] { color: #60d994; }
 .device-connection[data-connection="authorization_error"], .device-connection[data-connection="compatibility_error"] { color: #ffa8b0; }
 .device-illustration { width: 160px; height: 120px; color: #a8b6bf; stroke-width: 1.2; }
-.platform-badge { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border: 1px solid #2c3e48; border-radius: 24px; font-size: .95rem; color: #c1ced6; }
-.platform-badge img { width: 34px; height: 24px; object-fit: contain; }
+.platform-badge { display: flex; align-items: center; min-height: 38px; gap: 8px; padding: 6px 12px; border: 1px solid #2c3e48; border-radius: 24px; font-size: .95rem; color: #c1ced6; }
+.platform-badge img { width: 34px; height: 24px; object-fit: contain; transform: scale(1.2); }
 .dashboard-empty { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 112px 16px 40px; }
 .empty-illustration svg { width: 144px; height: 112px; color: #9aaebd; stroke-width: 1.2; }
 .dashboard-empty h2 { margin-top: 24px; font-size: 2.2rem; }
@@ -79,7 +79,8 @@ p { line-height: 1.5; margin: 12px 0; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) { .activity-spinner { animation: none; } }
 form { display: grid; gap: 14px; margin-top: 20px; }
 label { display: grid; gap: 8px; font-size: .9rem; font-weight: 600; }
-input { min-width: 0; width: 100%; border: 1px solid #526674; border-radius: 10px; padding: 12px; font: inherit; color: #f1f5f8; background: #10191f; }
+input, .form-card select { min-width: 0; width: 100%; border: 1px solid #526674; border-radius: 10px; padding: 12px; font: inherit; color: #f1f5f8; background: #10191f; }
+span.tv-brand { width: auto; display: inline-flex; align-items: center; font-size: .95rem; font-weight: 700; }
 button { border: 1px solid #42525d; border-radius: 14px; min-height: 44px; padding: 12px 16px; background: linear-gradient(150deg, #303c45, #232d35); color: #f1f5f8; font: inherit; font-weight: 600; cursor: pointer; overflow-wrap: anywhere; }
 button:hover:not(:disabled) { background: #374953; border-color: #83bdce; }
 button:active:not(:disabled) { background: #1b4b59; }
@@ -225,9 +226,9 @@ body:has(.settings-dialog[open]) { overflow: hidden; }
 .webcam-actions { margin-top: 14px; }
 .webcam-card p { font-size: .9rem; overflow-wrap: anywhere; }
 
-.webcam-select { position: relative; display: block; }
-.webcam-select select { appearance: none; padding-right: 42px; }
-.webcam-select svg { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; pointer-events: none; }
+.webcam-select, .platform-select { position: relative; display: block; }
+.webcam-select select, .platform-select select { appearance: none; padding-right: 42px; }
+.webcam-select svg, .platform-select svg { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; pointer-events: none; }
 .webcam-status:empty { display: none; }
 
 .webcam-actions { display: flex; align-items: center; gap: 16px; height: 44px; }

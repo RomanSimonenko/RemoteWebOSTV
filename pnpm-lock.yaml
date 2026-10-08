@@ -32,6 +32,12 @@ importers:
       '@remote-webos-tv/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@remote-webos-tv/tizen':
+        specifier: workspace:*
+        version: link:../../packages/tizen
+      '@remote-webos-tv/tv-adapter':
+        specifier: workspace:*
+        version: link:../../packages/tv-adapter
       '@remote-webos-tv/web':
         specifier: workspace:*
         version: link:../web
@@ -104,11 +110,36 @@ importers:
         specifier: 4.1.5
         version: 4.1.5
 
+  packages/tizen:
+    dependencies:
+      '@remote-webos-tv/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@remote-webos-tv/tv-adapter':
+        specifier: workspace:*
+        version: link:../tv-adapter
+      ws:
+        specifier: 8.21.3
+        version: 8.21.3
+    devDependencies:
+      '@types/ws':
+        specifier: 8.18.1
+        version: 8.18.1
+
+  packages/tv-adapter:
+    dependencies:
+      '@remote-webos-tv/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+
   packages/webos:
     dependencies:
       '@remote-webos-tv/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@remote-webos-tv/tv-adapter':
+        specifier: workspace:*
+        version: link:../tv-adapter
       lgtv2:
         specifier: 2.0.0
         version: 2.0.0

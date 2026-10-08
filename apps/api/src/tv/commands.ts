@@ -1,5 +1,6 @@
 import type { TvCommandRequest, TvCommandResult } from '@remote-webos-tv/contracts';
-import { TvButtonSendError, type WebOsAdapter } from '@remote-webos-tv/webos';
+import type { TvAdapter } from '@remote-webos-tv/tv-adapter';
+import { TvButtonSendError, WebOsError } from '@remote-webos-tv/tv-adapter';
 
 type RejectionCode = Extract<TvCommandResult, { outcome: 'rejected' }>['error']['code'];
 const messages: Record<RejectionCode | 'COMMAND_RESULT_UNKNOWN', string> = {
@@ -29,11 +30,11 @@ export function unknownTvCommand(id: string): TvCommandResult {
 }
 
 /** Normalization only. Admission, timeout, and lifecycle ownership belong to TV Service. */
-export async function executeTvCommand(input: TvCommandRequest, adapter: WebOsAdapter, signal: AbortSignal): Promise<TvCommandResult> {
+export async function executeTvCommand(input: TvCommandRequest, adapter: TvAdapter, signal: AbortSignal): Promise<TvCommandResult> {
   if (signal.aborted) return rejectTvCommand(input.id, 'COMMAND_NOT_SENT');
   try {
     if ('app' in input) {
-      if (!adapter.launchApp) return rejectTvCommand(input.id, 'UNSUPPORTED_CAPABILITY');
+      if (!adapter.launchApp || !adapter.listApps) return rejectTvCommand(input.id, 'UNSUPPORTED_CAPABILITY');
       let apps;
       try { apps = await adapter.listApps(signal); }
       catch { return rejectTvCommand(input.id, 'APP_LIST_UNAVAILABLE'); }
@@ -41,7 +42,14 @@ export async function executeTvCommand(input: TvCommandRequest, adapter: WebOsAd
       const matches = apps.filter((app) => app.name.trim().toLowerCase() === 'wink');
       if (matches.length !== 1) return rejectTvCommand(input.id, 'APP_NOT_AVAILABLE');
       await adapter.launchApp(matches[0]!.id, signal);
-    } else await adapter.sendButton(input.button, signal);
+    } else {
+      try { await adapter.prepareRemote(signal); }
+      catch (cause) {
+        return rejectTvCommand(input.id, cause instanceof WebOsError && (cause.code === 'POINTER_FORBIDDEN' || cause.code === 'UNSUPPORTED_CAPABILITY') ? 'UNSUPPORTED_CAPABILITY' : 'COMMAND_NOT_SENT');
+      }
+      if (signal.aborted) return rejectTvCommand(input.id, 'COMMAND_NOT_SENT');
+      await adapter.sendButton(input.button, signal);
+    }
     return signal.aborted ? unknownTvCommand(input.id) : { id: input.id, outcome: 'sent' };
   } catch (cause) {
     if (cause instanceof TvButtonSendError && cause.delivery === 'not_sent') {

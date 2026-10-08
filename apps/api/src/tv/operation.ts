@@ -1,5 +1,5 @@
 import type { TvConnectionState, TvStatusResponse } from '@remote-webos-tv/contracts';
-import { WebOsError } from '@remote-webos-tv/webos';
+import { WebOsError } from '@remote-webos-tv/tv-adapter';
 
 export type PublicTvError = NonNullable<TvStatusResponse['error']>;
 const messages = {

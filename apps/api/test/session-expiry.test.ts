@@ -7,6 +7,32 @@ import { createOwnerRepository } from '../src/auth/repository.js';
 import { createAuthSessionService } from '../src/auth/sessions.js';
 import { openDatabase } from '../src/storage/database.js';
 
+test('active session query is read-only and distinguishes valid time windows from key-safety rows', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'remote-webos-active-sessions-'));
+  const database = await openDatabase({ dataDir: directory });
+  let now = 1_000;
+  try {
+    database.sqlite.prepare('INSERT INTO owner (id, username, password_hash) VALUES (1, ?, ?)').run('alice', 'synthetic-hash');
+    const repository = createOwnerRepository(database.sqlite);
+    const service = await createAuthSessionService({ repository, masterKey: Buffer.alloc(32, 1), now: () => now });
+    expect(service.hasActiveSessions()).toBe(false); expect(repository.hasSessions()).toBe(false);
+    const expired = 'a'.repeat(64); const future = 'b'.repeat(64); const current = 'c'.repeat(64);
+    repository.createSession({ tokenHash: expired, csrfHash: 'd'.repeat(64), now: 0, expiresAt: 1_000 });
+    repository.createSession({ tokenHash: future, csrfHash: 'e'.repeat(64), now: 1_001, expiresAt: 2_000 });
+    const changes = () => database.sqlite.prepare('SELECT total_changes()').pluck().get();
+    const before = changes();
+    expect(service.hasActiveSessions()).toBe(false); expect(repository.hasSessions()).toBe(true); expect(changes()).toBe(before);
+    repository.createSession({ tokenHash: current, csrfHash: 'f'.repeat(64), now: 1_000, expiresAt: 1_500 });
+    const rows = database.sqlite.prepare('SELECT * FROM sessions').all(); const afterInsert = changes();
+    expect(service.hasActiveSessions()).toBe(true);
+    now = 1_500; repository.revokeSession(future); const afterRevoke = changes();
+    expect(service.hasActiveSessions()).toBe(false); expect(repository.hasSessions()).toBe(true); expect(changes()).toBe(afterRevoke);
+    now = 1_499; expect(service.hasActiveSessions()).toBe(true);
+    expect(rows).toHaveLength(3); expect(afterInsert).not.toBe(before);
+    expect(database.sqlite.prepare('SELECT count(*) FROM sessions').pluck().get()).toBe(2);
+  } finally { database.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
 test('observed session expiry persists through clock rollback and database restart without changing owner or valid sessions', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'remote-webos-expiry-'));
   const dataDir = join(directory, 'data');

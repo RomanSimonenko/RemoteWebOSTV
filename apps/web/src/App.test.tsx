@@ -90,6 +90,28 @@ test('claimed installation shows login, then authenticated home after verified s
   expect(screen.getByLabelText('IP-адрес телевизора')).toBeTruthy();
 });
 
+test('account settings open on Add TV and close before returning to dashboard', async () => {
+  vi.stubGlobal('fetch', vi.fn()
+    .mockResolvedValueOnce(response(200, { state: 'claimed' }))
+    .mockResolvedValueOnce(response(200, { username: 'alice', csrfToken }))
+    .mockResolvedValue(response(200, { devices: [] })));
+  render(<App />);
+  await screen.findByRole('heading', { name: 'Пока нет телевизоров' });
+  fireEvent.click(screen.getByRole('button', { name: 'Добавить ТВ' }));
+  const settings = screen.getByRole('button', { name: 'Настройки' });
+  fireEvent.click(settings);
+  const dialog = screen.getByRole('dialog', { name: 'Настройки аккаунта' });
+  expect(dialog).toHaveProperty('open', true);
+  expect(within(dialog).getByText('Вы вошли как alice.')).toBeTruthy();
+  expect(within(dialog).queryByLabelText('MAC-адрес телевизора')).toBeNull();
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Закрыть настройки' }));
+  expect(dialog).toHaveProperty('open', false);
+  expect(document.activeElement).toBe(settings);
+  fireEvent.click(settings);
+  fireEvent.click(screen.getByRole('button', { name: 'Телевизоры' }));
+  expect(dialog).toHaveProperty('open', false);
+});
+
 test('expired session returns to login when an authenticated operation is rejected', async () => {
   const fetch = vi.fn().mockResolvedValueOnce(response(200, { state: 'claimed' }))
     .mockResolvedValueOnce(response(200, { username: 'alice', csrfToken }))

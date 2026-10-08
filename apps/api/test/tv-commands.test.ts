@@ -22,7 +22,7 @@ describe('TV commands', () => {
     const h = await ready(); const adapter = h.adapters[0]!; adapter.readResult = barrier();
     const reading = h.service.status();
     expect(h.service.powerState()).toMatchObject({ busy: true, canPowerOff: false, canWake: false });
-    expect(h.service.remoteState()).toEqual({ enabled: true, reason: null });
+    expect(h.service.remoteState()).toEqual({ enabled: true, reason: null, apps: true });
     const sending = h.service.sendCommand(input, signal()); await drain();
     expect(adapter.sent).toEqual([]);
     expect(await h.service.sendCommand({ ...input, button: 'UP' }, signal())).toMatchObject({ outcome: 'rejected', error: { code: 'TV_BUSY' } });
@@ -50,7 +50,7 @@ describe('TV commands', () => {
     old.readResult.resolve(snapshot); await reading; await drain();
     expect(h.service.remoteState().enabled).toBe(false);
     expect(await h.service.sendCommand(input, signal())).toMatchObject({ outcome: 'rejected', error: { code: 'TV_BUSY' } });
-    const next = h.adapters[1]!; next.pairResult.resolve({ clientKey: 'synthetic-key', identity: snapshot.identity!, capabilities: snapshot.capabilities, transport: 'ws:3000', macAddresses: [] });
+    const next = h.adapters[1]!; next.pairResult.resolve({ credential: 'synthetic-key', identity: snapshot.identity!, capabilities: snapshot.capabilities, transport: 'ws:3000', macAddresses: [] });
     await next.enteredRead.promise; next.readResult.resolve({ ...snapshot, capabilities: { ...snapshot.capabilities, pointer: false } }); await drain();
     expect(h.service.remoteState()).toEqual({ enabled: false, reason: 'UNSUPPORTED' }); expect(old.sent).toEqual([]); expect(next.sent).toEqual([]); await h.service.close();
   });
@@ -94,7 +94,7 @@ describe('TV commands', () => {
     expect(await h.service.sendCommand({ ...input, button: 'UP' }, signal())).toMatchObject({ outcome: 'rejected', error: { code: 'TV_BUSY' } });
     expect(() => h.service.start({ action: 'repair' })).toThrowError(expect.objectContaining({ code: 'OPERATION_CONFLICT' }));
     await adapter.enteredSend.promise; gate.resolve(); expect(await first).toEqual({ id: input.id, outcome: 'sent' });
-    expect(adapter.sent).toEqual(['HOME']); expect(h.service.remoteState()).toEqual({ enabled: true, reason: null }); await h.service.close();
+    expect(adapter.sent).toEqual(['HOME']); expect(h.service.remoteState()).toEqual({ enabled: true, reason: null, apps: true }); await h.service.close();
   });
 
   test.each(['abort', 'close'] as const)('%s before deferred send prevents transport use', async (ending) => {

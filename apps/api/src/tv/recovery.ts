@@ -1,4 +1,4 @@
-import { WebOsError } from '@remote-webos-tv/webos';
+import { WebOsError } from '@remote-webos-tv/tv-adapter';
 import type { TvScheduler } from './service.js';
 import { hasCleanupFailure } from './operation.js';
 

@@ -10,6 +10,8 @@ import type { TvStatusResponse } from '../../../../packages/contracts/src/index.
 import { Lgtv2Adapter, createLgtv2Client } from '../../../../packages/webos/dist/src/index.js';
 import { MockWebOsTv, type MockScenario } from '../../../../packages/webos/test/support/mock-webos-tv.js';
 import { mockClientKey } from '../../../../packages/webos/test/support/fixtures.js';
+import { createSamsungAdapter } from '../../../../packages/tizen/dist/src/index.js';
+import { ControlledSocket, identitySample, connectSample } from '../../../../packages/tizen/test/support/mock-samsung.js';
 import { createApiRuntime } from '../../../api/dist/src/runtime.js';
 import { runSetupTokenCli } from '../../../api/dist/src/auth/cli.js';
 import { formatStartupError } from '../../../api/dist/src/startup-errors.js';
@@ -19,6 +21,7 @@ const webRoot = fileURLToPath(new URL('../../dist/', import.meta.url));
 export const tvHost = '192.168.50.20';
 export const failedHost = '192.168.50.21';
 export const secondHost = '192.168.50.22';
+export const samsungHost = '192.168.50.23';
 const password = 'synthetic browser acceptance password';
 
 export function gate() {
@@ -64,6 +67,8 @@ export class TvFixture {
   readonly promptGate = gate();
   readonly policies: Array<{ host: string; prompt: boolean }> = [];
   readonly wakes: Array<{ macs: readonly string[]; signal: AbortSignal }> = [];
+  readonly samsungSockets: ControlledSocket[] = [];
+  readonly samsungConnections: Array<{ prompted: boolean }> = [];
   #wakeGate: ReturnType<typeof gate> | undefined;
   readonly #mocks: MockWebOsTv[] = [];
   readonly #logs: string[] = [];
@@ -140,7 +145,21 @@ export class TvFixture {
         webRoot, scheduler: this.clock, now: () => this.#epoch + this.clock.time,
         newId: () => `00000000-0000-4000-8000-${String(++this.#id).padStart(12, '0')}`,
         logStream: new Writable({ write: (chunk, _encoding, done) => { this.#logs.push(String(chunk)); done(); } }),
-        createAdapter: (host, keyStore, requestTimeoutMs, allowPairingPrompt) => {
+        createAdapter: (host, keyStore, requestTimeoutMs, allowPairingPrompt, platform = 'webos') => {
+          if (platform === 'tizen') {
+            if (host !== samsungHost) throw new Error('Unmapped synthetic Samsung address');
+            this.policies.push({ host, prompt: allowPairingPrompt });
+            return createSamsungAdapter({ host, requestTimeoutMs, handshakeTimeoutMs: requestTimeoutMs, allowPairingPrompt, scheduler: this.clock,
+              requestIdentity: async () => identitySample,
+              createSocket: (url) => {
+                const socket = new ControlledSocket();
+                this.samsungSockets.push(socket);
+                this.samsungConnections.push({ prompted: !new URL(url).searchParams.has('token') });
+                queueMicrotask(() => { socket.open(); socket.message(connectSample()); });
+                return socket;
+              },
+            });
+          }
           // Mapping is confined to this fixture: public validation and HTTP security remain real.
           if (host !== tvHost && host !== failedHost && !(host === secondHost && this.#secondTv)) throw new Error('Unmapped synthetic TV address');
           this.policies.push({ host, prompt: allowPairingPrompt });
@@ -235,7 +254,10 @@ export class TvFixture {
           })] : []),
         ]);
       }
-      finally { if (this.#directory) await rm(this.#directory, { recursive: true, force: true }); }
+      finally {
+        this.samsungSockets.forEach(socket => socket.terminate());
+        if (this.#directory) await rm(this.#directory, { recursive: true, force: true });
+      }
     }
   }
 }

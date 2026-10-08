@@ -37,7 +37,7 @@ test('isolatesTwoServices', async () => {
 test('deleting a pending draft closes it and prevents late pairing from saving it', async () => {
   const h = setup(); const accepted = h.registry.add(request(100), 'session'); await drain();
   const pending = h.registry.remove(accepted.tvId, () => {}); await drain(); await pending;
-  h.adapters[0]!.pairResult.resolve({ clientKey: 'synthetic-key', identity: { model: 'Synthetic' }, capabilities: { ssap: true, pointer: false, powerOff: false, wakeOnLan: false, apps: false, inputs: false, textInput: false, notifications: false }, transport: 'ws:3000', macAddresses: [] });
+  h.adapters[0]!.pairResult.resolve({ credential: 'synthetic-key', identity: { model: 'Synthetic' }, capabilities: { ssap: true, pointer: false, powerOff: false, wakeOnLan: false, apps: false, inputs: false, textInput: false, notifications: false }, transport: 'ws:3000', macAddresses: [] });
   await drain(); expect(h.repository.list()).toEqual([]);
   expect(h.registry.get(accepted.tvId)).toBeNull();
   expect(() => h.registry.add(request(100), 'session')).toThrowError(expect.objectContaining({ code: 'OPERATION_NOT_FOUND' }));
@@ -85,6 +85,19 @@ test('closesAllAfterOneCloseFailure', async () => {
   void h.adapters[0]!.disconnectResult.catch(() => undefined);
   await expect(h.registry.close()).rejects.toThrow(); expect(h.adapters[1]!.closed).toBe(true);
   cleanups.pop();
+});
+
+test('final logout cleanup failure keeps the failed saved service closed and still closes its sibling', async () => {
+  const h = setup(); const first = h.registry.add(request(100), 'session'); await drain(); await succeed(h.adapters[0]!);
+  h.registry.add(request(101, '10.2.3.5'), 'session'); await drain(); await succeed(h.adapters[1]!);
+  const unsafe = h.registry.get(first.tvId)!; const before = h.repository.list();
+  h.adapters[0]!.disconnectResult = Promise.reject(new Error('synthetic cleanup failure')); void h.adapters[0]!.disconnectResult.catch(() => undefined);
+  await expect(h.registry.revoke('session', true)).rejects.toThrow();
+  expect(h.adapters[1]!.closed).toBe(true); expect(h.repository.list()).toEqual(before);
+  expect(h.registry.get(first.tvId)).toBe(unsafe);
+  expect(() => unsafe.start({ action: 'reconnect' })).toThrowError(expect.objectContaining({ code: 'SERVICE_CLOSED' }));
+  expect(h.adapters).toHaveLength(2);
+  await expect(h.registry.close()).rejects.toThrow(); cleanups.pop();
 });
 
 test('retryingDraftCancelsOldRetentionAndKeepsSuccessfullySavedService', async () => {

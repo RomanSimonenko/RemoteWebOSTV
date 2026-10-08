@@ -19,13 +19,22 @@ export const tvConfigTableSql = `CREATE TABLE tv_config (
           encrypted_client_key_json TEXT NOT NULL
         )`;
 
-export const tvDevicesTableSql = `CREATE TABLE tv_devices (
+export const tvDevicesV4TableSql = `CREATE TABLE tv_devices (
   position INTEGER PRIMARY KEY AUTOINCREMENT,
   tv_id TEXT NOT NULL UNIQUE,
   platform TEXT NOT NULL CHECK (platform = 'webos'),
   host TEXT NOT NULL UNIQUE,
   identity_json TEXT NOT NULL,
   encrypted_client_key_json TEXT NOT NULL,
+  mac_address TEXT
+)`;
+export const tvDevicesTableSql = `CREATE TABLE tv_devices (
+  position INTEGER PRIMARY KEY AUTOINCREMENT,
+  tv_id TEXT NOT NULL UNIQUE,
+  platform TEXT NOT NULL CHECK (platform IN ('webos', 'tizen')),
+  host TEXT NOT NULL UNIQUE,
+  identity_json TEXT NOT NULL,
+  encrypted_credential_json TEXT NOT NULL,
   mac_address TEXT
 )`;
 export const tvDefaultTableSql = `CREATE TABLE tv_default (
@@ -69,7 +78,7 @@ export const schemaMigrations: readonly Migration[] = [
   {
     version: 4,
     up(sqlite) {
-      sqlite.exec(`${tvDevicesTableSql}; ${tvDefaultTableSql};`);
+      sqlite.exec(`${tvDevicesV4TableSql}; ${tvDefaultTableSql};`);
       const existing = sqlite.prepare('SELECT host, identity_json, encrypted_client_key_json, mac_address FROM tv_config WHERE id = 1').get() as { host: string; identity_json: string; encrypted_client_key_json: string; mac_address: string | null } | undefined;
       if (existing) {
         const tvId = randomUUID();
@@ -78,6 +87,21 @@ export const schemaMigrations: readonly Migration[] = [
         sqlite.prepare('INSERT INTO tv_default VALUES (1, ?)').run(tvId);
       }
       sqlite.exec('DROP TABLE tv_config');
+    },
+  },
+  {
+    version: 5,
+    up(sqlite) {
+      const defaultTv = sqlite.prepare('SELECT tv_id FROM tv_default WHERE id = 1').get() as { tv_id: string } | undefined;
+      sqlite.exec(`DROP TABLE tv_default;
+        ALTER TABLE tv_devices RENAME TO tv_devices_v4;
+        ${tvDevicesTableSql};
+        INSERT INTO tv_devices (position, tv_id, platform, host, identity_json, encrypted_credential_json, mac_address)
+          SELECT position, tv_id, platform, host, identity_json, encrypted_client_key_json, mac_address FROM tv_devices_v4;
+        UPDATE sqlite_sequence SET seq = (SELECT seq FROM sqlite_sequence WHERE name = 'tv_devices_v4') WHERE name = 'tv_devices';
+        DROP TABLE tv_devices_v4;
+        ${tvDefaultTableSql};`);
+      if (defaultTv) sqlite.prepare('INSERT INTO tv_default VALUES (1, ?)').run(defaultTv.tv_id);
     },
   },
 ];

@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import type { Writable } from 'node:stream';
 import { Lgtv2Adapter, loadClientKeyCipher } from '@remote-webos-tv/webos';
+import { createSamsungAdapter } from '@remote-webos-tv/tizen';
 import { createOwnerRepository } from './auth/repository.js';
 import { createOwnerSetupService } from './auth/service.js';
 import { createAuthSessionService, loadAuthMasterKey } from './auth/sessions.js';
@@ -58,17 +59,20 @@ export async function createApiRuntime(config: AppConfig, options: {
     const cipher = await loadClientKeyCipher({ directory: config.dataDir, hasStoredKey: tvRepository.list().length > 0 });
     const now = options.now ?? Date.now;
     tvs = createTvDeviceRegistry({ repository: tvRepository, scheduler: options.scheduler ?? runtimeScheduler, newId: randomUUID,
-      createService: (repository, onOperationFinished) => createTvService({
-      repository, cipher, now, newId: options.newId ?? randomUUID, onOperationFinished,
+      createService: (repository, onOperationFinished, platform) => createTvService({
+      repository, platform, cipher, now, newId: options.newId ?? randomUUID, onOperationFinished,
       scheduler: options.scheduler ?? runtimeScheduler,
       recoveryTimeoutMs: config.recoveryTimeoutMs ?? 60_000,
       onVersionDiagnostic: logVersionDiagnostic,
-      createAdapter: options.createAdapter ?? ((host, keyStore, requestTimeoutMs, allowPairingPrompt) => new Lgtv2Adapter({
+      createAdapter: options.createAdapter ?? ((host, keyStore, requestTimeoutMs, allowPairingPrompt, platform = 'webos') => platform === 'tizen' ? createSamsungAdapter({
+        host, requestTimeoutMs, handshakeTimeoutMs: requestTimeoutMs, allowPairingPrompt,
+        scheduler: options.scheduler ?? runtimeScheduler,
+      }) : new Lgtv2Adapter({
         host, keyStore, requestTimeoutMs, handshakeTimeoutMs: requestTimeoutMs, allowPairingPrompt, now: () => new Date(now()),
         ...(config.wolBroadcastAddress === undefined ? {} : { wolBroadcastAddress: config.wolBroadcastAddress }),
       })),
     }) });
-    unsubscribeRegistry = sessions.onRevoke((owner) => tvs!.revoke(owner));
+    unsubscribeRegistry = sessions.onRevoke((owner) => tvs!.revoke(owner, !sessions.hasActiveSessions()));
     await tvs.initialize();
     tv = tvs.legacy();
     const app = buildApp({

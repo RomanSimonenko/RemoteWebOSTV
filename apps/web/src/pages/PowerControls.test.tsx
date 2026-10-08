@@ -3,6 +3,25 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { PowerControls } from './PowerControls.js';
 
 const csrfToken = 'c'.repeat(43);
+test('unsupported network power explains its limit without enabling MAC guidance', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ mac: null, canPowerOff: false, canWake: false, wakeSupported: false, operation: null })));
+  await mount();
+  expect(powerButton().disabled).toBe(true);
+  expect(screen.getByRole('status', { name: 'Питание телевизора' }).textContent).toBe('Включение по сети для этого телевизора пока недоступно в приложении.');
+  expect(screen.queryByText('Для включения сохраните MAC-адрес телевизора в настройках.')).toBeNull();
+  expect(screen.queryByLabelText('MAC-адрес телевизора')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Сохранить MAC' })).toBeNull();
+});
+test('unsupported wake retains recovery diagnostics while settings hide background activity', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ mac: null, canPowerOff: false, canWake: false, wakeSupported: false,
+    operation: { ...operation, action: 'recover', status: 'failed', phase: 'finished', error: { code: 'CLEANUP_FAILED', message: 'Synthetic recovery cleanup failed.' } } })));
+  const settings = document.createElement('div'); document.body.append(settings);
+  try {
+    render(<PowerControls csrfToken={csrfToken} active settingsOpen settingsTarget={settings} onSessionExpired={vi.fn()} />); await act(async () => {});
+    expect(within(settings).getByRole('alert').textContent).toBe('Synthetic recovery cleanup failed.');
+    expect(within(settings).queryByLabelText('MAC-адрес телевизора')).toBeNull();
+  } finally { settings.remove(); }
+});
 test('server-authorized wake stays usable during automatic recovery', async () => {
   const fetch = vi.fn().mockResolvedValue(response({ ...wake, busy: true, operation: { ...operation, action: 'recover', status: 'running' } }));
   vi.stubGlobal('fetch', fetch); await mount();

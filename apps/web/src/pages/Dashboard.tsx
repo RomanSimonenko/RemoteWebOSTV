@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { SettingsDialog } from '../components/SettingsDialog.js';
 import { friendlyError } from '../api.js';
 import { connectionLabels } from '../tv-connection.js';
+import { TvBrand, tvPlatformLabel } from '../tv-presentation.js';
 
 interface Props { devices: TvDevice[] | null; loading: boolean; error: string; onOpenTv(tvId: TvId): void; onAddTv(): void; onRetry(): void; onDeleteTv(tvId: TvId, signal: AbortSignal): Promise<void> }
 export function Dashboard({ devices, loading, error, onOpenTv, onAddTv, onRetry, onDeleteTv }: Props) {
@@ -27,12 +28,12 @@ export function Dashboard({ devices, loading, error, onOpenTv, onAddTv, onRetry,
   return <section className="dashboard" aria-labelledby="dashboard-title">
     <div className="dashboard-heading"><h1 ref={heading} tabIndex={-1} id="dashboard-title">Телевизоры</h1>{!!devices?.length && <button type="button" onClick={onAddTv}><IconPlus aria-hidden="true" />Добавить ТВ</button>}</div>
     {loading ? <p role="status">Загрузка телевизоров…</p> : error ? <div className="dashboard-error"><p role="alert" className="error">{error}</p><button type="button" onClick={onRetry}>Повторить</button></div> : devices?.length ?
-      <div className="device-grid">{devices.map(({ tvId, status }) => <article key={tvId} className="device-card">
+      <div className="device-grid">{devices.map(({ tvId, platform, status }) => <article key={tvId} className="device-card">
         <button type="button" className="device-delete" aria-label={`Удалить телевизор ${status.tv?.identity.model ?? 'ТВ'}`} title="Удалить телевизор" aria-haspopup="dialog" onClick={() => { setDeleteError(''); setSelected(devices.find(device => device.tvId === tvId)!); }}><IconTrash aria-hidden="true" /></button>
         <button type="button" className="device-card-main" aria-label={`Открыть телевизор ${status.tv?.identity.model ?? 'ТВ'}`} onClick={() => onOpenTv(tvId)}>
           <span className="device-connection" data-connection={status.connection}><IconCircleFilled aria-hidden="true" />{connectionLabels[status.connection]}</span>
           <IconDeviceDesktop className="device-illustration" stroke={1.2} aria-hidden="true" />
-          <h2>{status.tv?.identity.model ?? 'ТВ'}</h2><span className="platform-badge"><img src="/lg-logo.svg" alt="LG" />{status.tv?.identity.platformVersion ? `webOS ${status.tv.identity.platformVersion}` : 'webOS'}</span>
+          <h2>{status.tv?.identity.model ?? 'ТВ'}</h2><span className="platform-badge"><TvBrand platform={platform} /><span>{tvPlatformLabel(platform, status.tv?.identity)}</span></span>
         </button>
       </article>)}</div> : devices ? <div className="dashboard-empty">
         <div className="empty-illustration"><IconDeviceDesktopPlus stroke={1.2} aria-hidden="true" /></div>

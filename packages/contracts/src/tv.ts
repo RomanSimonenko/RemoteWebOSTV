@@ -2,6 +2,9 @@ import { z } from 'zod';
 
 const nonEmptyTextSchema = z.string().trim().min(1);
 
+export const tvPlatformSchema = z.enum(['webos', 'tizen']);
+export type TvPlatform = z.infer<typeof tvPlatformSchema>;
+
 export const tvConnectionStateSchema = z.enum([
   'unconfigured',
   'pairing',
@@ -15,7 +18,7 @@ export const tvConnectionStateSchema = z.enum([
 
 export type TvConnectionState = z.infer<typeof tvConnectionStateSchema>;
 
-export const tvTransportSchema = z.enum(['wss:3001', 'ws:3000']);
+export const tvTransportSchema = z.enum(['wss:3001', 'ws:3000', 'wss:8002']);
 
 export type TvTransport = z.infer<typeof tvTransportSchema>;
 
@@ -31,6 +34,8 @@ export type TvIdentity = Readonly<z.infer<typeof tvIdentitySchema>>;
 // when the active TV rejects a capability-owned endpoint as unsupported.
 export const tvCapabilitiesSchema = z.object({
   ssap: z.boolean(),
+  // Optional for legacy webOS payloads. Explicit false overrides pointer.
+  buttons: z.boolean().optional(),
   pointer: z.boolean(),
   powerOff: z.boolean(),
   wakeOnLan: z.boolean(),
@@ -41,6 +46,10 @@ export const tvCapabilitiesSchema = z.object({
 });
 
 export type TvCapabilities = Readonly<z.infer<typeof tvCapabilitiesSchema>>;
+
+export function supportsTvButtons(capabilities: TvCapabilities): boolean {
+  return (capabilities.buttons ?? capabilities.pointer) === true;
+}
 
 export const tvAppSchema = z.object({
   id: nonEmptyTextSchema,

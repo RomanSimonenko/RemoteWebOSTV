@@ -94,6 +94,43 @@ test('adds another TV with CSRF and returns to the refreshed dashboard', async (
   expect(screen.getAllByRole('button', { name: /^Открыть телевизор / })).toHaveLength(2);
   expect(fetch.mock.calls.filter(([path]) => path.endsWith('/cancel'))).toHaveLength(0);
 });
+test('chooseTizenSendsTizen', async () => {
+  let submitted: unknown;
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+    if (init?.method === 'POST') {
+      submitted = JSON.parse(init.body as string);
+      return response({ tvId: second, operation: { id: 'pair', action: 'pair', status: 'running', startedAt: 10000, deadlineAt: 70000 } }, 202);
+    }
+    return response(path === '/api/tvs' ? { devices: [] } : { tv: null, connection: 'pairing', operation: null });
+  }));
+  render(home()); await act(async () => {});
+  fireEvent.click(screen.getByRole('button', { name: 'Добавить ТВ' }));
+  fireEvent.change(screen.getByLabelText('Платформа телевизора'), { target: { value: 'tizen' } });
+  fireEvent.change(screen.getByLabelText('IP-адрес телевизора'), { target: { value: '192.168.1.21' } });
+  fireEvent.submit(screen.getByRole('button', { name: 'Подключить' }).closest('form')!); await act(async () => {});
+  expect(submitted).toMatchObject({ platform: 'tizen', host: '192.168.1.21' });
+});
+test('tizenBadgeDoesNotUseLgLogoOrApiVersion', async () => {
+  await mount([{ tvId: second, platform: 'tizen', status: { ...saved, tv: { ...saved.tv, identity: { model: 'Synthetic Samsung', firmwareVersion: '2.0.25' } } } }]);
+  const card = screen.getByRole('button', { name: 'Открыть телевизор Synthetic Samsung' });
+  expect(within(card).getByText('Tizen')).toBeTruthy();
+  expect(within(card).getByText('Samsung')).toBeTruthy();
+  expect(within(card).queryByRole('img', { name: 'LG' })).toBeNull();
+  expect(card.textContent).not.toContain('2.0.25');
+});
+test('selected Tizen uses Samsung identity and OS label in shared settings', async () => {
+  const status = { ...saved, tv: { ...saved.tv, identity: { model: 'Synthetic Samsung', firmwareVersion: '2.0.25' } } };
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => response(path === '/api/tvs' ? { devices: [{ tvId: second, platform: 'tizen', status }] }
+    : path.endsWith('/remote') ? { enabled: true, reason: null, apps: false } : path.endsWith('/power') ? { mac: null, canPowerOff: false, canWake: false, operation: null } : status)));
+  render(home()); await act(async () => {});
+  fireEvent.click(screen.getByRole('button', { name: 'Открыть телевизор Synthetic Samsung' })); await act(async () => {});
+  expect(screen.queryByRole('img', { name: 'LG' })).toBeNull();
+  expect(screen.getByText('Samsung')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Настройки' }));
+  const dialog = screen.getByRole('dialog', { name: 'Настройки телевизора' });
+  expect(within(dialog).getByText('Tizen')).toBeTruthy();
+  expect(dialog.textContent).not.toContain('2.0.25');
+});
 test('reload returns to dashboard', async () => {
   await mount(); fireEvent.click(screen.getByRole('button', { name: /^Открыть телевизор / })); await act(async () => {});
   cleanup(); render(home()); await act(async () => {});

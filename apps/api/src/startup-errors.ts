@@ -3,7 +3,7 @@ import { AppConfigError } from './config.js';
 import { OwnerSetupError } from './auth/service.js';
 import { StorageStartupError } from './storage/errors.js';
 import { systemDiagnosticCodes } from './security/diagnostic-codes.js';
-import { WebOsError } from '@remote-webos-tv/webos';
+import { WebOsError } from '@remote-webos-tv/tv-adapter';
 import { TvServiceError } from './tv/service.js';
 
 export function formatStartupError(error: unknown, fallback = 'API startup failed'): string {

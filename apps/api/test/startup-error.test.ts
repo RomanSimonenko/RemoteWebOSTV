@@ -20,9 +20,10 @@ const cliPath = fileURLToPath(new URL('../dist/src/index.js', import.meta.url));
 const tokenCliPath = fileURLToPath(new URL('../dist/src/auth/cli.js', import.meta.url));
 
 beforeAll(() => {
-  const build = spawnSync('pnpm', ['--filter', '@remote-webos-tv/api', 'build'], { cwd: workspaceRoot, encoding: 'utf8' });
+  // Node subprocesses use built workspace exports, including shared TV errors.
+  const build = spawnSync('pnpm', ['--filter', '@remote-webos-tv/api...', 'build'], { cwd: workspaceRoot, encoding: 'utf8' });
   expect(build.status, build.stderr).toBe(0);
-}, 15_000);
+}, 30_000);
 
 test.each([
   ['newer', 'STORAGE_SCHEMA_NEWER', undefined],
@@ -66,7 +67,7 @@ test('migration and cleanup failures retain separate safe codes and original cau
   const close = vi.spyOn(Database.prototype, 'close').mockImplementationOnce(() => { throw cleanup; });
   try {
     const failure = await openDatabase({ dataDir: join(directory, 'data'), migrations: [...schemaMigrations, {
-      version: 5, up(sqlite) { connection = sqlite; throw primary; },
+      version: 6, up(sqlite) { connection = sqlite; throw primary; },
     }] }).catch((error: unknown) => error);
     const diagnostic = formatStartupError(failure);
     expect.soft(diagnostic).toContain('STORAGE_MIGRATION_FAILED');

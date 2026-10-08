@@ -34,6 +34,22 @@ const csrfToken = 'c'.repeat(43);
 const saved = { tv: { host: '192.168.1.20', identity: { model: 'Synthetic TV' } }, connection: 'available', operation: null };
 const deviceList = (status: unknown) => ({ devices: [{ tvId: '00000000-0000-4000-8000-000000000001', platform: 'webos', status }] });
 const ready = { enabled: true, reason: null };
+test('unsupportedWinkAndPowerAreUnavailable', async () => {
+  const requests: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+    if (init?.method === 'POST') requests.push(path);
+    return response(path === '/api/tvs' ? deviceList(saved) : path.endsWith('/remote') ? { enabled: true, reason: null, apps: false }
+      : path.endsWith('/power') ? { mac: null, canPowerOff: false, canWake: false, operation: null } : saved);
+  }));
+  render(home()); await act(async () => {});
+  fireEvent.click(screen.getByRole('button', { name: /^Открыть телевизор / })); await act(async () => {});
+  const wink = screen.getByRole('button', { name: 'Запустить Wink' });
+  expect(wink.hasAttribute('disabled')).toBe(true);
+  expect(screen.getByRole('button', { name: 'Питание ТВ' }).hasAttribute('disabled')).toBe(true);
+  expect(screen.getByRole('button', { name: 'OK' }).hasAttribute('disabled')).toBe(false);
+  fireEvent.click(wink); fireEvent.click(screen.getByRole('button', { name: 'Питание ТВ' }));
+  expect(requests).toEqual([]);
+});
 const unknown = 'Результат команды неизвестен. Автоматический повтор не выполняется';
 function response(data: unknown, status = 200) { return new Response(JSON.stringify(data), { status }); }
 function barrier<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
@@ -72,6 +88,20 @@ function pointer(target: Element | Window, type: string) {
   Object.defineProperties(event, { button: { value: 0 }, isPrimary: { value: true }, pointerId: { value: 1 } });
   fireEvent(target, event);
 }
+test('switchTvStopsHeldCommand', async () => {
+  vi.useFakeTimers(); const commands: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+    if (path.endsWith('/remote')) return response(ready);
+    commands.push(path);
+    return response({ id: JSON.parse(init!.body as string).id, outcome: 'sent' });
+  }));
+  const props = { csrfToken, active: true, onSessionExpired: vi.fn() };
+  const view = render(<Remote tvId="00000000-0000-4000-8000-000000000001" {...props} />); await act(async () => {});
+  pointer(screen.getByRole('button', { name: 'Вверх' }), 'pointerdown'); await act(async () => {});
+  view.rerender(<Remote tvId="00000000-0000-4000-8000-000000000002" {...props} />); await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  expect(commands).toEqual(['/api/tvs/00000000-0000-4000-8000-000000000001/commands']);
+});
 test.each(['Вверх', 'Вниз', 'Влево', 'Вправо', 'Громкость −', 'Громкость +'])('pointer hold repeats %s and release click does not add another command', async (label) => {
   vi.useFakeTimers(); const view = await mount(); const button = screen.getByRole('button', { name: label });
   pointer(button, 'pointerdown'); await act(async () => {});

@@ -23,7 +23,7 @@ test('optional platform metadata persists without delaying availability or remot
   const h = versionHarness();
   try {
     h.service.start({ action: 'pair', host: '192.168.1.10' }); await drain(); await succeed(h.adapters[0]!);
-    expect(h.service.remoteState()).toEqual({ enabled: true, reason: null });
+    expect(h.service.remoteState()).toEqual({ enabled: true, reason: null, apps: true });
     expect((await h.service.status()).operation?.status).toBe('succeeded');
     expect(await h.service.sendCommand({ id: '15e082b2-de7e-4d86-a049-19c7448264f1', button: 'HOME' }, new AbortController().signal))
       .toEqual({ id: '15e082b2-de7e-4d86-a049-19c7448264f1', outcome: 'sent' });
@@ -42,7 +42,7 @@ test.each(['timeout', 'invalid_response', 'version_unavailable', 'request_reject
     h.result.resolve({ diagnostic: { operation: 'hello', code } }); await drain();
     expect(h.diagnostics).toEqual([{ operation: 'hello', code }]);
     expect(h.writes).toHaveLength(1);
-    expect(h.service.remoteState()).toEqual({ enabled: true, reason: null });
+    expect(h.service.remoteState()).toEqual({ enabled: true, reason: null, apps: true });
   } finally { await h.service.close(); }
 });
 
@@ -91,7 +91,7 @@ test('metadata persistence failure remains observable without disabling remote',
     h.result.resolve({ version: '6.5.3' }); await drain();
     expect(h.diagnostics).toEqual([{ operation: 'hello', code: 'storage_failed' }]);
     expect(h.repository.load()?.identity.platformVersion).toBeUndefined();
-    expect(h.service.remoteState()).toEqual({ enabled: true, reason: null });
+    expect(h.service.remoteState()).toEqual({ enabled: true, reason: null, apps: true });
   } finally { await h.service.close(); }
 });
 
@@ -168,4 +168,45 @@ test('metadata read rejection is safe and a broken diagnostic sink stays observa
     expect(failed.service.remoteState().enabled).toBe(true);
     expect(safeLog.mock.calls).toEqual([[{ operation: 'hello', code: 'diagnostic_failed' }, 'Optional TV metadata diagnostic failed']]);
   } finally { await h.service.close(); await failed.service.close(); safeLog.mockRestore(); }
+});
+
+test('Tizen cached version is hidden until current session capability confirms it, preserving MAC', async () => {
+  const base = harness(true);
+  base.repository.replace({ ...base.repository.load()!, platform: 'tizen', identity: { model: 'Synthetic Model', platformVersion: '8.0' }, macAddress: '02:00:00:00:00:03' });
+  const result = barrier<PlatformVersionResult>(); let adapter!: ControlledAdapter;
+  const diagnostics: unknown[] = [];
+  const h = harness(true, { repository: base.repository, onVersionDiagnostic: (d) => diagnostics.push(d),
+    createAdapter(_host, staging) { adapter = Object.assign(new ControlledAdapter(staging), { readPlatformVersion: () => result.promise }); return adapter; },
+  });
+  try {
+    expect((await h.service.status()).tv?.identity.platformVersion).toBeUndefined();
+    h.service.start({ action: 'reconnect' }); await drain(); await succeed(adapter);
+    expect((await h.service.status()).tv?.identity.platformVersion).toBeUndefined();
+    expect(base.repository.load()?.macAddress).toBe('02:00:00:00:00:03');
+    result.resolve({ version: '9.0' }); await drain();
+    expect((await h.service.status()).tv?.identity.platformVersion).toBe('9.0');
+    expect(base.repository.load()?.macAddress).toBe('02:00:00:00:00:03');
+    expect(h.service.remoteState().enabled).toBe(true);
+    const cleanup = barrier<void>(); adapter.disconnectResult = cleanup.promise;
+    h.service.start({ action: 'reconnect' });
+    const immediate = await h.service.status();
+    cleanup.resolve();
+    expect(immediate.connection).toBe('connecting');
+    expect(immediate.tv?.identity.platformVersion).toBeUndefined();
+  } finally { await h.service.close(); await base.service.close(); }
+});
+
+test('unavailable Tizen capability removes cached version and emits SDB diagnostic without blocking remote', async () => {
+  const base = harness(true); base.repository.replace({ ...base.repository.load()!, platform: 'tizen', identity: { model: 'Synthetic Model', platformVersion: '9.0' } });
+  let adapter!: ControlledAdapter; const diagnostics: unknown[] = [];
+  const h = harness(true, { repository: base.repository, onVersionDiagnostic: (d) => diagnostics.push(d),
+    createAdapter(_host, staging) { adapter = Object.assign(new ControlledAdapter(staging), { readPlatformVersion: async () => ({ diagnostic: { operation: 'sdb_capability', code: 'request_rejected' } }) }); return adapter; },
+  });
+  try {
+    h.service.start({ action: 'reconnect' }); await drain(); await succeed(adapter);
+    expect((await h.service.status()).tv?.identity.platformVersion).toBeUndefined();
+    expect(base.repository.load()?.identity.platformVersion).toBeUndefined();
+    expect(diagnostics).toEqual([{ operation: 'sdb_capability', code: 'request_rejected' }]);
+    expect(h.service.remoteState().enabled).toBe(true);
+  } finally { await h.service.close(); await base.service.close(); }
 });

@@ -29,6 +29,7 @@ const capabilities: TvCapabilities = {
 };
 
 const pairingResult: PairingResult = {
+  credential: 'synthetic-probe-client-key',
   clientKey: 'synthetic-probe-client-key',
   identity: {
     model: '43UP76906LE',
@@ -66,6 +67,10 @@ class FakeProbeAdapter implements ProbeAdapter {
 
   async openPointerSocket(_signal: AbortSignal): Promise<void> {
     this.record('pointer');
+  }
+
+  async prepareRemote(signal: AbortSignal): Promise<void> {
+    await this.openPointerSocket(signal);
   }
 
   async listApps(_signal: AbortSignal): Promise<readonly TvApp[]> {
