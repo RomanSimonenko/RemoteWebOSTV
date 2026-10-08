@@ -85,7 +85,7 @@ export function PowerControls({ tvId, csrfToken, active, onSessionExpired, onSta
 
   if (!active) return null;
   const networkPowerUnsupported = state?.wakeSupported === false;
-  const unavailable = networkPowerUnsupported ? 'Включение по сети не поддерживается этим телевизором.' : !state?.mac ? 'Для включения сохраните MAC-адрес телевизора в настройках.' : 'Питание сейчас недоступно. Обновите статус.';
+  const unavailable = networkPowerUnsupported ? 'Включение по сети для этого телевизора пока недоступно в приложении.' : !state?.mac ? 'Для включения сохраните MAC-адрес телевизора в настройках.' : 'Питание сейчас недоступно. Обновите статус.';
   // Only the retained background diagnostic owns autofocus; modal teardown
   // must not clear its ref while the background paragraph remains mounted.
   const activity = (withFocusRef: boolean) => <>

@@ -140,7 +140,7 @@ test('Samsung uses shared desktop geometry, unsupported controls and camera clea
   await page.getByRole('button', { name: 'Настройки', exact: true }).click();
   await expect(page.getByRole('dialog')).toContainText('Tizen');
   await expect(page.getByRole('dialog')).not.toContainText('2.0.25');
-  await expect(page.getByRole('dialog')).toContainText('Включение по сети не поддерживается этим телевизором.');
+  await expect(page.getByRole('dialog')).toContainText('Включение по сети для этого телевизора пока недоступно в приложении.');
   await expect(page.getByRole('button', { name: 'Сохранить MAC', exact: true })).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('samsung-shared-settings.png'), fullPage: true });
   await page.getByRole('button', { name: 'Закрыть настройки', exact: true }).click();

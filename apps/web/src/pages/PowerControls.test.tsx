@@ -7,7 +7,7 @@ test('unsupported network power explains its limit without enabling MAC guidance
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ mac: null, canPowerOff: false, canWake: false, wakeSupported: false, operation: null })));
   await mount();
   expect(powerButton().disabled).toBe(true);
-  expect(screen.getByRole('status', { name: 'Питание телевизора' }).textContent).toBe('Включение по сети не поддерживается этим телевизором.');
+  expect(screen.getByRole('status', { name: 'Питание телевизора' }).textContent).toBe('Включение по сети для этого телевизора пока недоступно в приложении.');
   expect(screen.queryByText('Для включения сохраните MAC-адрес телевизора в настройках.')).toBeNull();
   expect(screen.queryByLabelText('MAC-адрес телевизора')).toBeNull();
   expect(screen.queryByRole('button', { name: 'Сохранить MAC' })).toBeNull();
