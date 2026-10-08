@@ -1,11 +1,15 @@
 import { describe, expect, test } from 'vitest';
 import { tvStatusResponseSchema } from '@remote-webos-tv/contracts';
-import { Lgtv2Adapter, createLgtv2Client, createClientKeyCipher, WebOsError } from '@remote-webos-tv/webos';
+import { Lgtv2Adapter, createLgtv2Client, createClientKeyCipher, loadClientKeyCipher, WebOsError } from '@remote-webos-tv/webos';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { createTvService, type TvServiceDependencies } from '../src/tv/service.js';
 import { projectTvError, TvServiceError } from '../src/tv/operation.js';
 import { createTvRepository } from '../src/tv/repository.js';
 import { tvConfigTableSql, schemaMigrations } from '../src/storage/migrations.js';
+import { openDatabase, type AppDatabase } from '../src/storage/database.js';
 import { createStagingKeyStore } from '../src/tv/staging-key-store.js';
 import { harness, succeed, drain, pairing, snapshot, barrier, ControlledScheduler } from './support/tv-harness.js';
 
@@ -282,6 +286,61 @@ describe('TV service persistence and projection', () => {
       expect(fixture.repository.load()?.macAddress).toBe('02:00:00:00:00:01');
       expect(fixture.sql.prepare('SELECT count(*) AS count FROM tv_devices').get()).toEqual({ count: 1 });
     } finally { await service.close(); await fixture.mock.stop(); fixture.sql.close(); }
+  });
+
+  test('v4 LG authorization survives migration and real adapter reconnect without another PROMPT', async () => {
+    const fixture = await protocolFixture('success');
+    const host = '192.168.1.10';
+    const tvId = '00000000-0000-4000-8000-000000000001';
+    const bootstrap = fixture.dependencies.createAdapter(host, createStagingKeyStore(), 500, true);
+    let dataDir: string | undefined;
+    let database: AppDatabase | undefined;
+    let service: ReturnType<typeof createTvService> | undefined;
+    try {
+      const registered = await bootstrap.pair({ host, signal: new AbortController().signal });
+      expect(registered.credential).toBe('synthetic-mock-client-key');
+      expect(fixture.mock.pairingPromptCount).toBe(1);
+      await bootstrap.disconnect();
+      dataDir = await mkdtemp(join(tmpdir(), 'lg-v4-reconnect-'));
+      const originalCipher = await loadClientKeyCipher({ directory: dataDir, hasStoredKey: false });
+      const encryptedCredential = originalCipher.encrypt(registered.credential);
+      const old = new Database(join(dataDir, 'app.sqlite'));
+      try {
+        for (const migration of schemaMigrations.slice(0, 4)) {
+          migration.up(old); old.prepare('INSERT INTO migration_version VALUES (?, 1)').run(migration.version);
+        }
+        old.prepare("INSERT INTO tv_devices (tv_id, platform, host, identity_json, encrypted_client_key_json, mac_address) VALUES (?, 'webos', ?, ?, ?, ?)")
+          .run(tvId, host, JSON.stringify(registered.identity), JSON.stringify(encryptedCredential), registered.macAddresses[0]);
+        old.prepare('INSERT INTO tv_default VALUES (1, ?)').run(tvId);
+        expect(old.prepare('SELECT max(version) AS version FROM migration_version').get()).toEqual({ version: 4 });
+      } finally { old.close(); }
+      database = await openDatabase({ dataDir });
+      const repository = createTvRepository(database.sqlite);
+      const reloadedCipher = await loadClientKeyCipher({ directory: dataDir, hasStoredKey: repository.hasStoredKey() });
+      expect(reloadedCipher.decrypt(repository.load()!.encryptedCredential)).toBe('synthetic-mock-client-key');
+      fixture.resetRead();
+      service = createTvService({ ...fixture.dependencies, repository, cipher: reloadedCipher });
+      await service.initialize(); await fixture.readFinished.promise; await drain();
+      expect((await service.status()).connection).toBe('available');
+      expect(fixture.mock.pairingPromptCount).toBe(1);
+      const registrations = fixture.mock.requests.filter((request: { readonly type: string }) => request.type === 'register');
+      expect(registrations).toHaveLength(2);
+      expect(repository.load()).toMatchObject({ platform: 'webos', host, encryptedCredential, macAddress: '02:00:00:00:00:01' });
+      expect(database.sqlite.prepare('SELECT tv_id FROM tv_default').get()).toEqual({ tv_id: tvId });
+      expect(await readdir(join(dataDir, 'backups'))).toHaveLength(1);
+    } finally {
+      try { await service?.close(); } finally {
+        try { await bootstrap.disconnect(); } finally {
+          try { await fixture.mock.stop(); } finally {
+            try { database?.close(); } finally {
+              try { fixture.sql.close(); } finally {
+                if (dataDir) await rm(dataDir, { recursive: true, force: true });
+              }
+            }
+          }
+        }
+      }
+    }
   });
 
   test('real mock-TV identity failure after saveKey never commits SQLite', async () => {
