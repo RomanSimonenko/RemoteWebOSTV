@@ -1,4 +1,4 @@
-import { startTvOperationSchema, supportsTvButtons, tvCommandRequestSchema, tvIdentitySchema, tvMacAddressSchema, tvPowerRequestSchema, tvSnapshotSchema, type StartTvOperation, type TvCommandRequest, type TvCommandResult, type TvConnectionState, type TvOperation, type TvPowerOperation, type TvPowerRequest, type TvPowerState, type TvRemoteState, type TvStatusResponse } from '@remote-webos-tv/contracts';
+import { startTvOperationSchema, supportsTvButtons, tvCommandRequestSchema, tvIdentitySchema, tvMacAddressSchema, tvPlatformSchema, tvPowerRequestSchema, tvSnapshotSchema, type StartTvOperation, type TvCommandRequest, type TvCommandResult, type TvConnectionState, type TvOperation, type TvPlatform, type TvPowerOperation, type TvPowerRequest, type TvPowerState, type TvRemoteState, type TvStatusResponse } from '@remote-webos-tv/contracts';
 import type { TvAdapter } from '@remote-webos-tv/tv-adapter';
 import { TvPowerSendError, WebOsError } from '@remote-webos-tv/tv-adapter';
 import type { ClientKeyCipher, ClientKeyStore, EncryptedEnvelopeV1 } from '@remote-webos-tv/webos';
@@ -17,12 +17,13 @@ export interface TvScheduler {
   clearTimeout(handle: unknown): void;
 }
 export interface TvServiceDependencies {
+  readonly platform?: TvPlatform;
   readonly repository: TvRepository;
   readonly cipher: {
     decrypt: ClientKeyCipher['decrypt'];
     encrypt(key: string): EncryptedEnvelopeV1 | Promise<EncryptedEnvelopeV1>;
   };
-  readonly createAdapter: (host: string, staging: ClientKeyStore, requestTimeoutMs: number, allowPairingPrompt: boolean) => TvAdapter;
+  readonly createAdapter: (host: string, staging: ClientKeyStore, requestTimeoutMs: number, allowPairingPrompt: boolean, platform?: TvPlatform) => TvAdapter;
   readonly now: () => number;
   readonly newId: () => string;
   readonly scheduler: TvScheduler;
@@ -77,6 +78,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
   const recoveryTimeoutMs = dependencies.recoveryTimeoutMs ?? 60_000;
   if (!Number.isInteger(recoveryTimeoutMs) || recoveryTimeoutMs < 1_000 || recoveryTimeoutMs > 300_000) throw new Error('Invalid TV recovery timeout');
   let saved = repository.load();
+  const platform = tvPlatformSchema.parse(saved?.platform ?? dependencies.platform ?? 'webos');
   let connection: TvConnectionState = saved ? 'unavailable' : 'unconfigured';
   let error: PublicTvError | undefined;
   let attempt: Attempt | undefined;
@@ -154,7 +156,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     const allowPrompt = input.action === 'pair' || input.action === 'repair';
     const initialKey = allowPrompt ? undefined : cipher.decrypt(previous!.encryptedCredential);
     const staging = createStagingKeyStore(initialKey);
-    const adapter = dependencies.createAdapter(host, staging, budget, allowPrompt);
+    const adapter = dependencies.createAdapter(host, staging, budget, allowPrompt, platform);
     activeAdapter = adapter;
     const result = await abortable(adapter.pair({ host, signal, ...(initialKey === undefined ? {} : { credential: initialKey }) }), signal);
     checkConnection();
@@ -186,7 +188,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       let encryptedCredential: EncryptedEnvelopeV1;
       try { encryptedCredential = await abortable(Promise.resolve(cipher.encrypt(result.credential)), signal); }
       catch (cause) { if (signal.aborted) throw signal.reason; if (cause instanceof WebOsError) throw cause; throw new WebOsError('KEY_STORE_WRITE_FAILED', 'Unable to encrypt the registered key', { cause }); }
-      const replacement: StoredTv = { platform: 'webos', host, identity: identity.data, encryptedCredential, macAddress };
+      const replacement: StoredTv = { platform, host, identity: identity.data, encryptedCredential, macAddress };
       checkConnection();
       try { repository.replace(replacement); }
       catch (cause) { throw new TvServiceError('STORAGE_FAILED', 500, { cause }); }
@@ -448,7 +450,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       busy: !!(work || cleanup || command || probe),
       mac: saved?.macAddress ?? null,
       canPowerOff: idle && connection === 'available' && !!activeAdapter?.powerOff && remoteCapability?.generation === generation && remoteCapability.powerOff === true,
-      canWake: !!saved?.macAddress && (idle && connection === 'unavailable' || canReplaceReconnect()),
+      canWake: platform === 'webos' && !!saved?.macAddress && (idle && connection === 'unavailable' || canReplaceReconnect()),
       operation: power ? { ...power.operation, ...(power.operation.error ? { error: { ...power.operation.error } } : {}) } : null,
     };
   }
@@ -470,6 +472,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     if (!parsed.success) throw new TvServiceError('INVALID_REQUEST', 400);
     if (!(parsed.data.action === 'wake' && canReplaceReconnect())) assertIdle();
     if (parsed.data.action === 'wake') {
+      if (platform !== 'webos') throw new TvServiceError('UNSUPPORTED_CAPABILITY', 409);
       if (!saved?.macAddress) throw new TvServiceError('WOL_NOT_CONFIGURED', 409);
       if (connection !== 'unavailable' && !canReplaceReconnect()) throw new TvServiceError('INVALID_ACTION', 409);
     } else {
@@ -556,7 +559,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       // A timeout or cancellation must not release this cleanup gate early.
       if (previousWork) await abortable(previousWork, signal);
       check(context);
-      adapter = current.operation.action === 'power_off' ? activeAdapter! : dependencies.createAdapter(previous.host, createStagingKeyStore(), Math.min(5_000, context.expiresAt - scheduler.now()), false);
+      adapter = current.operation.action === 'power_off' ? activeAdapter! : dependencies.createAdapter(previous.host, createStagingKeyStore(), Math.min(5_000, context.expiresAt - scheduler.now()), false, platform);
       if (current.operation.action === 'wake') activeAdapter = adapter;
       if (current.operation.action === 'power_off' ? !adapter.powerOff : !adapter.wake) throw new WebOsError('UNSUPPORTED_CAPABILITY', 'Adapter does not support the requested power operation');
       current.operation = { ...current.operation, delivery: 'unknown' };

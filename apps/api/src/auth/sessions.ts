@@ -66,6 +66,7 @@ export async function loadAuthMasterKey(dataDir: string, hasSessions: () => bool
 }
 
 export interface AuthSessionService {
+  hasActiveSessions(): boolean;
   login(username: string, password: string): Promise<{ readonly username: string; readonly token: string } | undefined>;
   authenticate(token: string | undefined): { readonly username: string; readonly csrfToken: string } | undefined;
   verifyCsrf(token: string, supplied: unknown): boolean;
@@ -87,6 +88,7 @@ export async function createAuthSessionService(input: {
   const revocationListeners = new Set<(token: string) => void | Promise<void>>();
   const revocations = new Map<string, Promise<void>>();
   return {
+    hasActiveSessions: () => repository.hasActiveSessions(now()),
     async login(username, password) {
       const owner = repository.getOwnerCredentials(username);
       const accepted = await verifyPassword(password, owner?.passwordHash ?? dummyHash);

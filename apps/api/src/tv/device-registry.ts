@@ -1,4 +1,4 @@
-import { addTvRequestSchema, tvIdSchema, type AddTvRequest, type AddTvResponse, type TvDevice, type TvId, type TvOperation, type StartTvOperation } from '@remote-webos-tv/contracts';
+import { addTvRequestSchema, tvIdSchema, type AddTvRequest, type AddTvResponse, type TvDevice, type TvId, type TvOperation, type TvPlatform, type StartTvOperation } from '@remote-webos-tv/contracts';
 import type { TvDeviceRepository, TvRepository } from './repository.js';
 import { TvServiceError, type TvScheduler, type TvService } from './service.js';
 
@@ -11,7 +11,7 @@ export interface TvDeviceRegistry {
   assertCanAdd(request: AddTvRequest, owner: string): AddTvResponse | null;
   legacy(): TvService;
   initialize(): Promise<void>;
-  revoke(owner: string): Promise<void>;
+  revoke(owner: string, disconnectSaved?: boolean): Promise<void>;
   close(): Promise<void>;
 }
 interface Receipt { readonly request: AddTvRequest; readonly tvId: TvId; operation: TvOperation; expired: boolean }
@@ -23,7 +23,7 @@ export function createTvDeviceRegistry(dependencies: {
   repository: TvDeviceRepository;
   scheduler: TvScheduler;
   newId(): string;
-  createService(repository: TvRepository, onFinished: (operation: TvOperation) => void): TvService;
+  createService(repository: TvRepository, onFinished: (operation: TvOperation) => void, platform: TvPlatform): TvService;
 }): TvDeviceRegistry {
   const { repository, scheduler } = dependencies;
   const entries = new Map<TvId, Entry>();
@@ -55,13 +55,13 @@ export function createTvDeviceRegistry(dependencies: {
     if (entry.disposal) return entry.disposal;
     if (entry.timer !== undefined) scheduler.clearTimeout(entry.timer);
     // Keep address reservations until the service has finished releasing its adapter.
-    const pending = entry.service.close().finally(() => { if (entry.timer !== undefined) scheduler.clearTimeout(entry.timer); releaseHosts(tvId); entries.delete(tvId); });
+    const pending = entry.service.close().then(() => { if (entry.timer !== undefined) scheduler.clearTimeout(entry.timer); releaseHosts(tvId); entries.delete(tvId); });
     entry.disposal = pending;
     pendingClosures.add(pending);
     void pending.then(() => pendingClosures.delete(pending), (cause: unknown) => { pendingClosures.delete(pending); cleanupFailures.push(cause); });
     return pending;
   }
-  function ensure(tvId: TvId): TvService {
+  function ensure(tvId: TvId, platform: TvPlatform = 'webos'): TvService {
     const existing = entries.get(tvId); if (existing) return existing.service;
     const scoped = repository.forDevice(tvId);
     const finished = (operation: TvOperation) => {
@@ -74,7 +74,7 @@ export function createTvDeviceRegistry(dependencies: {
         }, draftRetentionMs);
       }
     };
-    const inner = dependencies.createService({ ...scoped, replace(value) { checkHost(value.host, tvId); scoped.replace(value); } }, finished);
+    const inner = dependencies.createService({ ...scoped, replace(value) { checkHost(value.host, tvId); scoped.replace(value); } }, finished, scoped.load()?.platform ?? platform);
     const assertCanStart = (input: StartTvOperation) => {
       if (closed) throw new TvServiceError('SERVICE_CLOSED', 409);
       const parsed = inner.assertCanStart(input); if ('host' in parsed) checkHost(parsed.host, tvId); return parsed;
@@ -97,8 +97,6 @@ export function createTvDeviceRegistry(dependencies: {
   function assertCanAdd(input: AddTvRequest, owner: string): AddTvResponse | null {
     if (closed) throw new TvServiceError('SERVICE_CLOSED', 409);
     const request = addTvRequestSchema.parse(input);
-    // Storage accepts Tizen; admission requires its platform factory first.
-    if (request.platform !== 'webos') throw new TvServiceError('UNSUPPORTED_CAPABILITY', 409);
     const owned = receipts.get(owner);
     const previous = owned?.get(request.id);
     if (previous) {
@@ -148,17 +146,23 @@ export function createTvDeviceRegistry(dependencies: {
       const request = addTvRequestSchema.parse(input);
       const owned = receipts.get(owner) ?? new Map<string, Receipt>();
       const tvId = tvIdSchema.parse(dependencies.newId()); checkHost(request.host, tvId);
-      const service = ensure(tvId);
-      const operation = service.start({ action: 'pair', host: request.host });
+      const service = ensure(tvId, request.platform);
+      const operation = service.start({ action: 'pair', host: request.host }, owner);
       entries.get(tvId)!.owner = owner;
       owned.set(request.id, { request, tvId, operation, expired: false }); receipts.set(owner, owned);
       return { tvId, operation };
     },
     legacy() { legacyId = repository.legacyId() ?? legacyId ?? tvIdSchema.parse(dependencies.newId()); return ensure(legacyId); },
     async initialize() { for (const { tvId } of repository.list()) await ensure(tvId).initialize(); },
-    async revoke(owner) {
+    async revoke(owner, disconnectSaved = false) {
       receipts.delete(owner);
-      const results = await Promise.allSettled([...entries].map(([tvId, entry]) => entry.owner === owner && !repository.forDevice(tvId).hasStoredKey() ? dispose(tvId) : entry.service.cancelOwnedPower(owner)));
+      // Saved transports are shared by the sole owner's authenticated sessions.
+      // Final-session revocation releases them, including startup/recreated entries;
+      // another active session retains its transport and operation ownership.
+      const results = await Promise.allSettled([...entries].map(([tvId, entry]) => {
+        const saved = repository.forDevice(tvId).hasStoredKey();
+        return (saved && disconnectSaved || !saved && entry.owner === owner) ? dispose(tvId) : entry.service.cancelOwnedPower(owner);
+      }));
       const errors = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected').map((result) => result.reason as unknown);
       if (errors.length === 1) throw errors[0];
       if (errors.length > 1) throw new AggregateError(errors, 'TV session cleanup failed');

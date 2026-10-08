@@ -8,6 +8,7 @@ export interface OwnerRepository {
   claimOwner(input: { readonly tokenHash: string; readonly username: string; readonly passwordHash: string; readonly now: number }): boolean;
   getOwnerCredentials(username: string): { readonly username: string; readonly passwordHash: string } | undefined;
   hasSessions(): boolean;
+  hasActiveSessions(now: number): boolean;
   createSession(input: { readonly tokenHash: string; readonly csrfHash: string; readonly now: number; readonly expiresAt: number }): void;
   findSession(tokenHash: string, now: number): { readonly username: string; readonly csrfHash: string } | undefined;
   revokeSession(tokenHash: string): void;
@@ -22,6 +23,7 @@ export function createOwnerRepository(sqlite: Database.Database): OwnerRepositor
   const deleteToken = sqlite.prepare('DELETE FROM setup_token WHERE id = 1');
   const selectOwner = sqlite.prepare('SELECT username, password_hash FROM owner WHERE id = 1 AND username = ?');
   const selectAnySession = sqlite.prepare('SELECT 1 FROM sessions LIMIT 1');
+  const selectActiveSession = sqlite.prepare('SELECT 1 FROM sessions JOIN owner ON sessions.owner_id = owner.id WHERE sessions.created_at <= ? AND sessions.expires_at > ? LIMIT 1');
   const insertSession = sqlite.prepare('INSERT INTO sessions (token_hash, owner_id, created_at, expires_at, csrf_hash) VALUES (?, 1, ?, ?, ?)');
   const selectSession = sqlite.prepare('SELECT owner.username, sessions.csrf_hash, sessions.created_at, sessions.expires_at FROM sessions JOIN owner ON sessions.owner_id = owner.id WHERE sessions.token_hash = ?');
   const deleteSession = sqlite.prepare('DELETE FROM sessions WHERE token_hash = ?');
@@ -51,6 +53,7 @@ export function createOwnerRepository(sqlite: Database.Database): OwnerRepositor
       return row ? { username: row.username, passwordHash: row.password_hash } : undefined;
     },
     hasSessions: () => Boolean(selectAnySession.get()),
+    hasActiveSessions: (now) => Boolean(selectActiveSession.get(now, now)),
     createSession({ tokenHash, csrfHash, now, expiresAt }) {
       insertSession.run(tokenHash, now, expiresAt, csrfHash);
     },

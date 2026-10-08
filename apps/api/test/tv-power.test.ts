@@ -12,6 +12,18 @@ async function connected() {
 }
 
 describe('owned TV power operations', () => {
+  test('offline Samsung cannot advertise or admit wake solely from a saved MAC', async () => {
+    const base = harness(true); base.repository.replace({ ...base.repository.load()!, platform: 'tizen', macAddress: '02:00:00:00:00:02' });
+    const h = harness(true, { repository: base.repository });
+    try {
+      expect(h.service.powerState().canWake).toBe(false);
+      expect(() => h.service.startPower(wake, 'owner')).toThrowError(expect.objectContaining({ code: 'UNSUPPORTED_CAPABILITY' }));
+      expect(h.adapters).toEqual([]);
+      await h.service.initialize(); await drain();
+      expect(h.service.powerState().canWake).toBe(false);
+      expect(h.adapters.flatMap(adapter => adapter.wakes)).toEqual([]);
+    } finally { await h.service.close(); await base.service.close(); }
+  });
   test.each(['sent timeout', 'unknown delivery', 'send failure'] as const)('manual reconnect supersedes only the connection timeout: %s', async (scenario) => {
     const base = harness(true); base.repository.replace({ ...base.repository.load()!, macAddress: '02:00:00:00:00:01' });
     const adapters: ControlledAdapter[] = [];

@@ -3,9 +3,11 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, expect, test, vi } from 'vitest';
 import { WebOsError, loadClientKeyCipher } from '@remote-webos-tv/webos';
+import * as webos from '@remote-webos-tv/webos';
+import * as tizen from '@remote-webos-tv/tizen';
 import { createApiRuntime } from '../src/runtime.js';
 import { openDatabase, type AppDatabase } from '../src/storage/database.js';
-import { createTvRepository } from '../src/tv/repository.js';
+import { createTvDeviceRepository, createTvRepository } from '../src/tv/repository.js';
 import { schemaMigrations } from '../src/storage/migrations.js';
 import type { AppConfig } from '../src/config.js';
 import { barrier, ControlledAdapter, ControlledScheduler, drain, succeed } from './support/tv-harness.js';
@@ -47,6 +49,35 @@ async function authenticate(app: Awaited<ReturnType<typeof createApiRuntime>>, d
   const session = await app.inject({ url: '/api/auth/session', headers: { cookie } });
   return { cookie, origin: config.publicOrigin, 'x-csrf-token': session.json().csrfToken as string };
 }
+
+test('runtime default factory reconnects saved Tizen with the Samsung adapter and sends only its protocol', async () => {
+  const f = await fixture();
+  const { ControlledSocket, identitySample, connectSample } = await import(new URL('../../../packages/tizen/test/support/mock-samsung.js', import.meta.url).href);
+  const socket = new ControlledSocket(); const entered = barrier<void>();
+  const actualFactory = tizen.createSamsungAdapter;
+  vi.spyOn(webos, 'Lgtv2Adapter').mockImplementation(() => { throw new Error('Tizen must never acquire an LG transport'); });
+  vi.spyOn(tizen, 'createSamsungAdapter').mockImplementation(options => actualFactory({ ...options,
+    requestIdentity: async () => identitySample, createSocket() { entered.resolve(); return socket; },
+  }));
+  const database = await openDatabase({ dataDir: f.config.dataDir });
+  const tvId = '00000000-0000-4000-8000-000000000001';
+  try {
+    const cipher = await loadClientKeyCipher({ directory: f.config.dataDir, hasStoredKey: false });
+    createTvDeviceRepository(database.sqlite).forDevice(tvId).replace({ platform: 'tizen', host: '10.2.3.5', identity: { model: 'Synthetic Samsung', firmwareVersion: 'synthetic-fw' }, macAddress: '02:00:00:00:00:02', encryptedCredential: cipher.encrypt('synthetic-token') });
+  } finally { database.close(); }
+  const { createAdapter: _customAdapter, ...options } = f.options;
+  const app = await createApiRuntime(f.config, options);
+  try {
+    await entered.promise; socket.open(); socket.message(connectSample()); await drain();
+    const headers = await authenticate(app, f.database(), f.config);
+    const response = await app.inject({ method: 'POST', url: `/api/tvs/${tvId}/commands`, headers, payload: { id: '00000000-0000-4000-8000-000000000200', button: 'UP' } });
+    expect(response.statusCode).toBe(200);
+    expect(socket.frames).toEqual(['{"method":"ms.remote.control","params":{"Cmd":"Click","DataOfCmd":"KEY_UP","Option":"false","TypeOfRemote":"SendRemoteKey"}}']);
+    expect((await app.inject({ url: '/api/tvs', headers })).json().devices).toMatchObject([{ tvId, platform: 'tizen', status: { connection: 'available' } }]);
+    expect(f.adapters).toEqual([]);
+  } finally { await app.close(); }
+  expect(socket.terminateCount).toBe(1); expect(socket.listenerCount).toBe(0);
+});
 
 test('runtime migrates existing owner storage, persists TV, and reconnects without a prompt after restart', async () => {
   const f = await fixture();
@@ -137,7 +168,7 @@ test('runtime wires commands; shutdown aborts HTTP command then awaits adapter w
   } finally { gate.resolve(); await (closing ?? app.close()); }
 });
 
-test('runtime logout revokes its owned command and a new login keeps the saved TV without repeating it', async () => {
+test('runtime final logout closes its owned transport and a new login reconnects the saved TV without repeating the command', async () => {
   const f = await fixture();
   const app = await createApiRuntime(f.config, f.options);
   const headers = await authenticate(app, f.database(), f.config);
@@ -150,18 +181,27 @@ test('runtime logout revokes its owned command and a new login keeps the saved T
     const command = { id: '00000000-0000-4000-8000-000000000001', button: 'HOME' };
     const pending = app.inject({ method: 'POST', url: '/api/tv/commands', headers, payload: command });
     const signal = await adapter.enteredSend.promise;
-    expect((await app.inject({ method: 'POST', url: '/api/auth/logout', headers })).statusCode).toBe(204);
+    const aborted = new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }));
+    let loggedOut = false;
+    const logout = app.inject({ method: 'POST', url: '/api/auth/logout', headers }).then(response => { loggedOut = true; return response; });
+    await aborted;
     expect(signal.aborted).toBe(true);
     expect((await pending).json()).toMatchObject({ id: command.id, outcome: 'unknown' });
-    gate.resolve(); await drain();
+    await drain(); expect(loggedOut).toBe(false);
+    gate.resolve(); expect((await logout).statusCode).toBe(204); expect(adapter.closed).toBe(true);
     expect((await app.inject({ url: '/api/auth/session', headers })).statusCode).toBe(401);
     const login = await app.inject({ method: 'POST', url: '/api/auth/login', headers: { origin: f.config.publicOrigin }, payload: { username: 'owner', password: 'synthetic password 123' } });
     expect(login.statusCode).toBe(200);
     const cookie = String(login.headers['set-cookie']).split(';', 1)[0]!;
-    expect((await app.inject({ url: '/api/tv/remote', headers: { cookie } })).json()).toEqual({ enabled: true, reason: null });
+    expect((await app.inject({ url: '/api/tv/remote', headers: { cookie } })).json()).toEqual({ enabled: false, reason: 'UNAVAILABLE' });
     expect(createTvRepository(f.database().sqlite).hasStoredKey()).toBe(true);
     expect(adapter.sent).toEqual(['HOME']);
-    expect(f.adapters).toHaveLength(1);
+    const session = await app.inject({ url: '/api/auth/session', headers: { cookie } });
+    const reconnect = await app.inject({ method: 'POST', url: '/api/tv/operations', headers: { ...headers, cookie, 'x-csrf-token': session.json().csrfToken }, payload: { action: 'reconnect' } }); expect(reconnect.statusCode).toBe(202);
+    expect((await f.adapters[1]!.enteredPair.promise).credential).toBe('synthetic-key'); expect(f.policies[1]!.prompt).toBe(false);
+    await succeed(f.adapters[1]!);
+    expect((await app.inject({ url: '/api/tv/remote', headers: { cookie } })).json()).toEqual({ enabled: true, reason: null });
+    expect(f.adapters[1]!.sent).toEqual([]); expect(f.adapters).toHaveLength(2);
   } finally { gate.resolve(); await app.close(); }
 });
 

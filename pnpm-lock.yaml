@@ -32,6 +32,9 @@ importers:
       '@remote-webos-tv/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@remote-webos-tv/tizen':
+        specifier: workspace:*
+        version: link:../../packages/tizen
       '@remote-webos-tv/tv-adapter':
         specifier: workspace:*
         version: link:../../packages/tv-adapter
