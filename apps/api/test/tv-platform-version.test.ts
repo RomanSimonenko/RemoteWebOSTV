@@ -23,7 +23,7 @@ test('optional platform metadata persists without delaying availability or remot
   const h = versionHarness();
   try {
     h.service.start({ action: 'pair', host: '192.168.1.10' }); await drain(); await succeed(h.adapters[0]!);
-    expect(h.service.remoteState()).toEqual({ enabled: true, reason: null });
+    expect(h.service.remoteState()).toEqual({ enabled: true, reason: null, apps: true });
     expect((await h.service.status()).operation?.status).toBe('succeeded');
     expect(await h.service.sendCommand({ id: '15e082b2-de7e-4d86-a049-19c7448264f1', button: 'HOME' }, new AbortController().signal))
       .toEqual({ id: '15e082b2-de7e-4d86-a049-19c7448264f1', outcome: 'sent' });
@@ -42,7 +42,7 @@ test.each(['timeout', 'invalid_response', 'version_unavailable', 'request_reject
     h.result.resolve({ diagnostic: { operation: 'hello', code } }); await drain();
     expect(h.diagnostics).toEqual([{ operation: 'hello', code }]);
     expect(h.writes).toHaveLength(1);
-    expect(h.service.remoteState()).toEqual({ enabled: true, reason: null });
+    expect(h.service.remoteState()).toEqual({ enabled: true, reason: null, apps: true });
   } finally { await h.service.close(); }
 });
 
@@ -91,7 +91,7 @@ test('metadata persistence failure remains observable without disabling remote',
     h.result.resolve({ version: '6.5.3' }); await drain();
     expect(h.diagnostics).toEqual([{ operation: 'hello', code: 'storage_failed' }]);
     expect(h.repository.load()?.identity.platformVersion).toBeUndefined();
-    expect(h.service.remoteState()).toEqual({ enabled: true, reason: null });
+    expect(h.service.remoteState()).toEqual({ enabled: true, reason: null, apps: true });
   } finally { await h.service.close(); }
 });
 

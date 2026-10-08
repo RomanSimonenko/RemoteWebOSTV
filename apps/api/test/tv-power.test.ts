@@ -17,12 +17,18 @@ describe('owned TV power operations', () => {
     const h = harness(true, { repository: base.repository });
     try {
       expect(h.service.powerState().canWake).toBe(false);
+      expect(h.service.powerState()).toMatchObject({ wakeSupported: false });
       expect(() => h.service.startPower(wake, 'owner')).toThrowError(expect.objectContaining({ code: 'UNSUPPORTED_CAPABILITY' }));
       expect(h.adapters).toEqual([]);
       await h.service.initialize(); await drain();
       expect(h.service.powerState().canWake).toBe(false);
       expect(h.adapters.flatMap(adapter => adapter.wakes)).toEqual([]);
     } finally { await h.service.close(); await base.service.close(); }
+  });
+  test('LG wake support is distinct from a missing saved MAC', async () => {
+    const h = harness(true);
+    try { expect(h.service.powerState()).toMatchObject({ wakeSupported: true, canWake: false, mac: null }); }
+    finally { await h.service.close(); }
   });
   test.each(['sent timeout', 'unknown delivery', 'send failure'] as const)('manual reconnect supersedes only the connection timeout: %s', async (scenario) => {
     const base = harness(true); base.repository.replace({ ...base.repository.load()!, macAddress: '02:00:00:00:00:01' });
@@ -141,7 +147,7 @@ describe('owned TV power operations', () => {
     const h = await connected(); h.service.startPower(off, 'owner'); await h.service.cancelOwnedPower('owner');
     expect(h.adapters[0]!.powerOffs).toBe(0); expect(h.service.powerState()).toMatchObject({ canPowerOff: true, operation: { status: 'cancelled', delivery: 'not_sent' } });
     expect(h.adapters[0]!.closed).toBe(false); expect((await h.service.status()).connection).toBe('available');
-    expect(h.service.remoteState()).toEqual({ enabled: true, reason: null }); await h.service.close();
+    expect(h.service.remoteState()).toEqual({ enabled: true, reason: null, apps: true }); await h.service.close();
   });
 
   test('off cleanup failure is visible and fail-closed even after observed unavailability', async () => {

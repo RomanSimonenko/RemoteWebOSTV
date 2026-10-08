@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { startTvOperationSchema, type StartTvOperation, type TvOperation, type SavedTvView, type TvPowerState, type TvId } from '@remote-webos-tv/contracts';
+import { startTvOperationSchema, type StartTvOperation, type TvOperation, type SavedTvView, type TvPowerState, type TvId, type TvPlatform } from '@remote-webos-tv/contracts';
 import { api, ApiFailure, friendlyError } from '../api.js';
 import { useTvStatus } from '../useTvStatus.js';
 import { Webcam } from '../components/Webcam.js';
@@ -8,8 +8,9 @@ import { Remote } from './Remote.js';
 import { PowerControls } from './PowerControls.js';
 import { SettingsDialog } from '../components/SettingsDialog.js';
 import { connectionLabels } from '../tv-connection.js';
+import { TvBrand, tvPlatformLabel } from '../tv-presentation.js';
 
-interface Props { tvId?: TvId; onReady?(): void; username?: string; csrfToken: string; identityTarget?: HTMLElement | null; onSessionExpired(): void; settingsOpen: boolean; onCloseSettings(): void; onConfirmationChange?(confirming: boolean): void; statusState?: ReturnType<typeof useTvStatus> }
+interface Props { tvId?: TvId; platform?: TvPlatform; onReady?(): void; username?: string; csrfToken: string; identityTarget?: HTMLElement | null; onSessionExpired(): void; settingsOpen: boolean; onCloseSettings(): void; onConfirmationChange?(confirming: boolean): void; statusState?: ReturnType<typeof useTvStatus> }
 
 export function TvSetup(props: Props) {
   return props.statusState ? <TvSetupContent {...props} statusState={props.statusState} /> : <StandaloneTvSetup {...props} />;
@@ -18,7 +19,7 @@ function StandaloneTvSetup(props: Props) {
   const statusState = useTvStatus(props.onSessionExpired, props.tvId);
   return <TvSetupContent {...props} statusState={statusState} />;
 }
-function TvSetupContent({ tvId, onReady, username, csrfToken, identityTarget, onSessionExpired, settingsOpen, onCloseSettings, onConfirmationChange, statusState }: Props & { statusState: ReturnType<typeof useTvStatus> }) {
+function TvSetupContent({ tvId, platform = 'webos', onReady, username, csrfToken, identityTarget, onSessionExpired, settingsOpen, onCloseSettings, onConfirmationChange, statusState }: Props & { statusState: ReturnType<typeof useTvStatus> }) {
   const { status, statusReadVersion, getReadVersion, loading, refreshing, error, refresh } = statusState;
   const [host, setHost] = useState('');
   const [message, setMessage] = useState('');
@@ -151,7 +152,7 @@ function TvSetupContent({ tvId, onReady, username, csrfToken, identityTarget, on
     </div>}
     {tv && <details className="settings-advanced"><summary>Дополнительно</summary><p>Повторите сопряжение, если телевизор отозвал доступ. Потребуется подтверждение на экране ТВ.</p><button type="button" disabled={controlsBusy} onClick={() => start({ action: 'repair' })}>Повторить сопряжение</button></details>}
   </>;
-  const identity = tv && <div className="tv-info"><img className="tv-brand" src="/lg-logo.svg" alt="LG" /><p className="tv-model">{tv.identity.model}</p></div>;
+  const identity = tv && <div className="tv-info"><TvBrand className="tv-brand" platform={platform} /><p className="tv-model">{tv.identity.model}</p></div>;
   const ledColor = error || status?.connection === 'authorization_error' || status?.connection === 'compatibility_error' || backgroundDiagnostic ? 'red' : progress || poweringOff ? 'gray' : connectionAppearance === 'available' ? 'green' : 'gray';
   const connectionIndicator = <div className={tv ? 'connection-led' : 'connection-row'} tabIndex={tv ? 0 : undefined} aria-describedby={tv ? 'connection-tooltip' : undefined} data-color={ledColor} data-active={activityBusy && showActivity || undefined} title={tv ? undefined : connectionText}>
     <p className={tv ? 'visually-hidden' : 'connection-status'} data-connection={connectionAppearance} role="status" aria-label="Соединение с телевизором" aria-live="polite">{connectionText}</p>
@@ -177,7 +178,7 @@ function TvSetupContent({ tvId, onReady, username, csrfToken, identityTarget, on
     {!tv && (status || error) && <>{addressForm}<button type="button" disabled={loading} onClick={refresh}>Обновить статус</button></>}
     <SettingsDialog open={settingsOpen} onClose={onCloseSettings}>
       {tv ? <><section className="settings-section">
-        <p className="settings-identity"><span className="settings-model">Модель: {tv.identity.model}</span>{settingsOpen && <span className="tv-version">{tv.identity.platformVersion ? `webOS ${tv.identity.platformVersion}` : 'Версия неизвестна'}</span>}</p>
+        <p className="settings-identity"><span className="settings-model">Модель: {tv.identity.model}</span>{settingsOpen && <span className="tv-version">{tv.identity.platformVersion ? tvPlatformLabel(platform, tv.identity) : platform === 'tizen' ? 'Tizen' : 'Версия неизвестна'}</span>}</p>
       </section><section className="settings-section"><h3>Подключение</h3>
         {settingsOpen && activity(false)}<p>Соединение: {connectionText}</p><p>Сохранённый IP: {tv.host}</p>{addressForm}
       </section></> : <>{settingsOpen && activity(false)}<p>Добавьте телевизор на основном экране.</p></>}

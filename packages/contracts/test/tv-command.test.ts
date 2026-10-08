@@ -83,6 +83,8 @@ describe('basic remote command contracts', () => {
 
   test.each([
     { enabled: true, reason: null },
+    { enabled: true, reason: null, apps: false },
+    { enabled: true, reason: null, apps: true },
     { enabled: false, reason: 'UNAVAILABLE' },
     { enabled: false, reason: 'BUSY' },
     { enabled: false, reason: 'UNSUPPORTED' },
@@ -99,6 +101,7 @@ describe('basic remote command contracts', () => {
     { enabled: false },
     { reason: null },
     { enabled: true, reason: null, host: 'synthetic-host' },
+    { enabled: true, reason: null, apps: 'false' },
     { enabled: false, reason: 'BUSY', operation: 'synthetic-operation' },
   ])('rejects invalid remote state %j', (state) => {
     expect(tvRemoteStateSchema.safeParse(state).success).toBe(false);

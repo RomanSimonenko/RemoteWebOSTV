@@ -449,11 +449,14 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     return {
       busy: !!(work || cleanup || command || probe),
       mac: saved?.macAddress ?? null,
+      wakeSupported: supportsWake(),
       canPowerOff: idle && connection === 'available' && !!activeAdapter?.powerOff && remoteCapability?.generation === generation && remoteCapability.powerOff === true,
-      canWake: platform === 'webos' && !!saved?.macAddress && (idle && connection === 'unavailable' || canReplaceReconnect()),
+      canWake: supportsWake() && !!saved?.macAddress && (idle && connection === 'unavailable' || canReplaceReconnect()),
       operation: power ? { ...power.operation, ...(power.operation.error ? { error: { ...power.operation.error } } : {}) } : null,
     };
   }
+
+  function supportsWake(): boolean { return platform === 'webos'; }
 
   function setMac(mac: string | null): TvPowerState {
     assertIdle();
@@ -472,7 +475,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     if (!parsed.success) throw new TvServiceError('INVALID_REQUEST', 400);
     if (!(parsed.data.action === 'wake' && canReplaceReconnect())) assertIdle();
     if (parsed.data.action === 'wake') {
-      if (platform !== 'webos') throw new TvServiceError('UNSUPPORTED_CAPABILITY', 409);
+      if (!supportsWake()) throw new TvServiceError('UNSUPPORTED_CAPABILITY', 409);
       if (!saved?.macAddress) throw new TvServiceError('WOL_NOT_CONFIGURED', 409);
       if (connection !== 'unavailable' && !canReplaceReconnect()) throw new TvServiceError('INVALID_ACTION', 409);
     } else {
@@ -615,7 +618,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     if (work || cleanup || command) return { enabled: false, reason: 'BUSY' };
     if (closed || unsafeCleanup || connection !== 'available' || !activeAdapter || remoteCapability?.generation !== generation) return { enabled: false, reason: 'UNAVAILABLE' };
     if (remoteCapability.buttons !== true) return { enabled: false, reason: 'UNSUPPORTED' };
-    return { enabled: true, reason: null };
+    return { enabled: true, reason: null, apps: remoteCapability.apps };
   }
 
   function assertCanSendCommand(input: TvCommandRequest): TvCommandRequest {

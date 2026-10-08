@@ -14,6 +14,17 @@ import { createStagingKeyStore } from '../src/tv/staging-key-store.js';
 import { harness, succeed, drain, pairing, snapshot, barrier, ControlledScheduler } from './support/tv-harness.js';
 
 describe('TV service persistence and projection', () => {
+  test.each([true, false])('remote state exposes the active app capability %s', async (apps) => {
+    const h = harness();
+    try {
+      h.service.start({ action: 'pair', host: '192.168.1.10' }); await drain();
+      const adapter = h.adapters[0]!;
+      const capabilities = { ...pairing.capabilities, apps };
+      adapter.pairResult.resolve({ ...pairing, capabilities });
+      await adapter.enteredRead.promise; adapter.readResult.resolve({ ...snapshot, capabilities }); await drain();
+      expect(h.service.remoteState()).toEqual({ enabled: true, reason: null, apps });
+    } finally { await h.service.close(); }
+  });
   test('buttonsWithoutPointerCanPrepareAndSend', async () => {
     const h = harness();
     try {
@@ -26,7 +37,7 @@ describe('TV service persistence and projection', () => {
       const capabilities = { ...pairing.capabilities, buttons: true, pointer: false };
       adapter.pairResult.resolve({ ...pairing, capabilities });
       await adapter.enteredRead.promise; adapter.readResult.resolve({ ...snapshot, capabilities }); await drain();
-      expect(h.service.remoteState()).toEqual({ enabled: true, reason: null });
+      expect(h.service.remoteState()).toEqual({ enabled: true, reason: null, apps: true });
       expect(await h.service.sendCommand({ id: '00000000-0000-4000-8000-000000000001', button: 'UP' }, new AbortController().signal)).toEqual({ id: '00000000-0000-4000-8000-000000000001', outcome: 'sent' });
       expect(events).toEqual(['prepared', 'UP']);
     } finally { await h.service.close(); }

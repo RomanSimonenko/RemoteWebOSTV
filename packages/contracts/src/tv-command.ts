@@ -60,7 +60,7 @@ export const tvCommandResultSchema = z.discriminatedUnion('outcome', [
 export type TvCommandResult = Readonly<z.infer<typeof tvCommandResultSchema>>;
 
 export const tvRemoteStateSchema = z.discriminatedUnion('enabled', [
-  z.strictObject({ enabled: z.literal(true), reason: z.null() }),
+  z.strictObject({ enabled: z.literal(true), reason: z.null(), apps: z.boolean().optional() }),
   z.strictObject({
     enabled: z.literal(false),
     reason: z.enum(['UNAVAILABLE', 'BUSY', 'UNSUPPORTED']),

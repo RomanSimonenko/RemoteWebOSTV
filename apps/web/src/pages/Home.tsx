@@ -6,7 +6,7 @@ import { SettingsDialog } from '../components/SettingsDialog.js';
 import { useTvStatus } from '../useTvStatus.js';
 import { Dashboard } from './Dashboard.js';
 import { useTvDevices } from '../useTvDevices.js';
-import type { TvId } from '@remote-webos-tv/contracts';
+import type { TvId, TvPlatform } from '@remote-webos-tv/contracts';
 import { AddTv } from './AddTv.js';
 import { api, ApiFailure } from '../api.js';
 
@@ -18,6 +18,7 @@ export function Home({ username, csrfToken, tvActive, busy, error, onLogout, onS
 function HomeContent({ username, csrfToken, tvActive, busy, error, onLogout, onSessionExpired }: Props) {
   const [screen, setScreen] = useState<'dashboard' | 'add' | 'remote'>('dashboard');
   const [tvId, setTvId] = useState<TvId | null>(null);
+  const [platform, setPlatform] = useState<TvPlatform>('webos');
   const devicesState = useTvDevices(onSessionExpired, tvActive && screen === 'dashboard');
   const statusState = useTvStatus(onSessionExpired, tvId ?? undefined, tvActive && screen === 'remote' && tvId !== null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -62,14 +63,14 @@ function HomeContent({ username, csrfToken, tvActive, busy, error, onLogout, onS
     </header>
     <LogoutConfirmation open={confirmingLogout && !busy} anchor={logoutButton} onClose={() => setConfirmingLogout(false)} onConfirm={() => { setConfirmingLogout(false); onLogout(); }} />
     {tvActive && (screen === 'dashboard' ? <>
-      <Dashboard devices={devicesState.devices} loading={devicesState.loading} error={devicesState.error} onRetry={devicesState.refresh} onOpenTv={(id) => { setTvId(id); navigate('remote'); }} onAddTv={() => navigate('add')} onDeleteTv={async (id, signal) => {
+      <Dashboard devices={devicesState.devices} loading={devicesState.loading} error={devicesState.error} onRetry={devicesState.refresh} onOpenTv={(id) => { setTvId(id); setPlatform(devicesState.devices!.find(device => device.tvId === id)!.platform); navigate('remote'); }} onAddTv={() => navigate('add')} onDeleteTv={async (id, signal) => {
         try { await api.deleteTv(id, csrfToken, signal); devicesState.remove(id); }
         catch (cause) { devicesState.refresh(); if (cause instanceof ApiFailure && cause.status === 401) onSessionExpired(); throw cause; }
       }} />
       <SettingsDialog title="Настройки аккаунта" open={settingsOpen} onClose={() => setSettingsOpen(false)}><p className="session-caption">Вы вошли как {username}.</p></SettingsDialog>
     </> : <>
       <nav className="tv-navigation" aria-label="Телевизоры"><button type="button" disabled={confirmingPower} onClick={() => navigate('dashboard')}><IconArrowLeft aria-hidden="true" />Телевизоры</button></nav>
-      {screen === 'add' ? <AddTv csrfToken={csrfToken} onSessionExpired={onSessionExpired} onReady={() => navigate('dashboard')} /> : tvId && <TvSetup key={tvId} tvId={tvId} username={username} csrfToken={csrfToken} identityTarget={identityTarget} statusState={statusState} settingsOpen={settingsOpen} onCloseSettings={() => setSettingsOpen(false)} onConfirmationChange={setConfirmingPower} onSessionExpired={onSessionExpired} />}
+      {screen === 'add' ? <AddTv csrfToken={csrfToken} onSessionExpired={onSessionExpired} onReady={() => navigate('dashboard')} /> : tvId && <TvSetup key={tvId} tvId={tvId} platform={platform} username={username} csrfToken={csrfToken} identityTarget={identityTarget} statusState={statusState} settingsOpen={settingsOpen} onCloseSettings={() => setSettingsOpen(false)} onConfirmationChange={setConfirmingPower} onSessionExpired={onSessionExpired} />}
     </>)}
     {error}
   </section>;

@@ -60,7 +60,7 @@ test('remote and command routes enforce session, Origin, CSRF and no-store inclu
     expect(denied.headers['cache-control']).toBe('no-store');
     const state = await app.inject({ url, headers });
     expect(state.statusCode).toBe(200);
-    expect(state.json()).toEqual({ enabled: true, reason: null });
+    expect(state.json()).toEqual({ enabled: true, reason: null, apps: true });
     expect(state.headers['cache-control']).toBe('no-store');
   }
   for (const url of ['/api/tv/commands', '/%61pi/tv/%63ommands']) {
@@ -146,7 +146,7 @@ test('unsupported commands use 422, remain safe and do not enter the adapter', a
 
 test('buttons without pointer are available through the authenticated command routes', async () => {
   const { app, headers, post, h } = await fixture(true, false, true);
-  expect((await app.inject({ url: '/api/tv/remote', headers })).json()).toEqual({ enabled: true, reason: null });
+  expect((await app.inject({ url: '/api/tv/remote', headers })).json()).toEqual({ enabled: true, reason: null, apps: true });
   const response = await post({ ...command, button: 'UP' });
   expect(response.statusCode).toBe(200);
   expect(response.json()).toEqual({ id: command.id, outcome: 'sent' });
@@ -299,7 +299,7 @@ test('premature response close cancels pending work while completed response clo
   expect(response.statusCode).toBe(200);
   expect(response.json()).toEqual({ id: command.id, outcome: 'sent' });
   reply.raw.emit('close');
-  expect(h.service.remoteState()).toEqual({ enabled: true, reason: null });
+  expect(h.service.remoteState()).toEqual({ enabled: true, reason: null, apps: true });
 });
 
 test('real HTTP body completion permits a command, while disconnect during admission prevents late sending', async () => {

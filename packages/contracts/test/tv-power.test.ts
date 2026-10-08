@@ -39,6 +39,10 @@ test('accepts explicit null MAC and requires all power state fields', () => {
   expect(contracts.tvPowerStateSchema.parse(state)).toEqual(state);
   expect(contracts.tvPowerStateSchema.safeParse({ canPowerOff: false, canWake: false, operation: null }).success).toBe(false);
   expect(contracts.tvPowerStateSchema.safeParse({ ...state, extra: true }).success).toBe(false);
+  expect(contracts.tvPowerStateSchema.safeParse({ ...state, wakeSupported: 'false' }).success).toBe(false);
+});
+test.each([true, false])('accepts an explicit wake support discriminator %s', (wakeSupported) => {
+  expect(contracts.tvPowerStateSchema.parse({ ...state, wakeSupported })).toEqual({ ...state, wakeSupported });
 });
 
 test.each(['power_off', 'wake', 'recover'])('accepts operation action %s', (action) => {

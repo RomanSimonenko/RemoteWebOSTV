@@ -147,7 +147,7 @@ test('runtime wires commands; shutdown aborts HTTP command then awaits adapter w
   try {
     expect((await app.inject({ method: 'POST', url: '/api/tv/operations', headers, payload: { action: 'pair', host: '192.168.1.10' } })).statusCode).toBe(202);
     await succeed(f.adapters[0]!);
-    expect((await app.inject({ url: '/api/tv/remote', headers })).json()).toEqual({ enabled: true, reason: null });
+    expect((await app.inject({ url: '/api/tv/remote', headers })).json()).toEqual({ enabled: true, reason: null, apps: true });
     const adapter = f.adapters[0]!;
     adapter.sendResult = gate.promise;
     const pending = app.inject({ method: 'POST', url: '/api/tv/commands', headers, payload: command });
@@ -200,7 +200,7 @@ test('runtime final logout closes its owned transport and a new login reconnects
     const reconnect = await app.inject({ method: 'POST', url: '/api/tv/operations', headers: { ...headers, cookie, 'x-csrf-token': session.json().csrfToken }, payload: { action: 'reconnect' } }); expect(reconnect.statusCode).toBe(202);
     expect((await f.adapters[1]!.enteredPair.promise).credential).toBe('synthetic-key'); expect(f.policies[1]!.prompt).toBe(false);
     await succeed(f.adapters[1]!);
-    expect((await app.inject({ url: '/api/tv/remote', headers: { cookie } })).json()).toEqual({ enabled: true, reason: null });
+    expect((await app.inject({ url: '/api/tv/remote', headers: { cookie } })).json()).toEqual({ enabled: true, reason: null, apps: true });
     expect(f.adapters[1]!.sent).toEqual([]); expect(f.adapters).toHaveLength(2);
   } finally { gate.resolve(); await app.close(); }
 });

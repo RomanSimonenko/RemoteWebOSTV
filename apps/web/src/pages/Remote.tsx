@@ -139,7 +139,7 @@ export function Remote({ tvId, csrfToken, active, onSessionExpired, onBusyChange
 
   async function send(button: BasicTvButton | 'wink') {
     const current = runtime.current;
-    if (interactionBlocked || !active || !current?.active || current.pending || !state?.enabled || document.visibilityState === 'hidden') return;
+    if (interactionBlocked || !active || !current?.active || current.pending || !state?.enabled || button === 'wink' && state.apps === false || document.visibilityState === 'hidden') return;
     current.pending = true; current.command = new AbortController();
     setBusy(true); setFeedback(null);
     try {
@@ -225,7 +225,7 @@ export function Remote({ tvId, csrfToken, active, onSessionExpired, onBusyChange
     <div role="group" aria-label="Громкость" className="remote-buttons volume">{controls(buttons.slice(7))}</div>
     <div role="group" aria-label="Каналы" className="remote-buttons channels">{controls(channelButtons)}</div>
     <div role="group" aria-label="Цветные кнопки" className="remote-buttons color-buttons">{colorButtons.map(([button, label]) => <button type="button" key={button} aria-label={label} title={label} data-color={button} disabled={disabled} onClick={() => void send(button)}><span aria-hidden="true" className="color-mark" /></button>)}</div>
-    <button type="button" className="wink-button" data-app="wink" aria-label="Запустить Wink" title="Запустить Wink" disabled={disabled} onClick={() => { stopHold(); void send('wink'); }}>
+    <button type="button" className="wink-button" data-app="wink" aria-label="Запустить Wink" title="Запустить Wink" disabled={disabled || state?.enabled && state.apps === false} onClick={() => { stopHold(); void send('wink'); }}>
       <img src="/wink-logo.svg" alt="" aria-hidden="true" width="100" height="27" />
     </button>
   </div>{activityTarget ? createPortal(activity, activityTarget) : activity}</>;

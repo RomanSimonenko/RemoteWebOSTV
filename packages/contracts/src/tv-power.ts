@@ -34,6 +34,7 @@ export const tvPowerStateSchema = z.strictObject({
   mac: tvMacAddressSchema.nullable(),
   canPowerOff: z.boolean(),
   canWake: z.boolean(),
+  wakeSupported: z.boolean().optional(),
   operation: tvPowerOperationSchema.nullable(),
 });
 export type TvPowerState = Readonly<z.infer<typeof tvPowerStateSchema>>;
