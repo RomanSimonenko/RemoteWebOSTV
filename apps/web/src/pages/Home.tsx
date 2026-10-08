@@ -67,11 +67,11 @@ function HomeContent({ username, csrfToken, tvActive, busy, error, onLogout, onS
         try { await api.deleteTv(id, csrfToken, signal); devicesState.remove(id); }
         catch (cause) { devicesState.refresh(); if (cause instanceof ApiFailure && cause.status === 401) onSessionExpired(); throw cause; }
       }} />
-      <SettingsDialog title="Настройки аккаунта" open={settingsOpen} onClose={() => setSettingsOpen(false)}><p className="session-caption">Вы вошли как {username}.</p></SettingsDialog>
     </> : <>
       <nav className="tv-navigation" aria-label="Телевизоры"><button type="button" disabled={confirmingPower} onClick={() => navigate('dashboard')}><IconArrowLeft aria-hidden="true" />Телевизоры</button></nav>
       {screen === 'add' ? <AddTv csrfToken={csrfToken} onSessionExpired={onSessionExpired} onReady={() => navigate('dashboard')} /> : tvId && <TvSetup key={tvId} tvId={tvId} platform={platform} username={username} csrfToken={csrfToken} identityTarget={identityTarget} statusState={statusState} settingsOpen={settingsOpen} onCloseSettings={() => setSettingsOpen(false)} onConfirmationChange={setConfirmingPower} onSessionExpired={onSessionExpired} />}
     </>)}
+    {tvActive && screen !== 'remote' && <SettingsDialog title="Настройки аккаунта" open={settingsOpen} onClose={() => setSettingsOpen(false)}><p className="session-caption">Вы вошли как {username}.</p></SettingsDialog>}
     {error}
   </section>;
 }

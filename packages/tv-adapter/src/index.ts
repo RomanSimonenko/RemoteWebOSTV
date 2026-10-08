@@ -19,7 +19,7 @@ export interface PairingResult {
 }
 
 export interface PlatformVersionDiagnostic {
-  readonly operation: 'hello';
+  readonly operation: 'hello' | 'sdb_capability';
   readonly code: 'timeout' | 'invalid_response' | 'version_unavailable' | 'request_rejected' | 'send_failed';
 }
 

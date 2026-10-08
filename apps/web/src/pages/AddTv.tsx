@@ -3,6 +3,7 @@ import { addTvRequestSchema, tvPlatformSchema, type TvId, type TvPlatform } from
 import { api, ApiFailure, friendlyError } from '../api.js';
 import { requestId } from '../requestId.js';
 import { TvSetup } from './TvSetup.js';
+import { IconChevronDown } from '@tabler/icons-react';
 
 interface Props { csrfToken: string; onSessionExpired(): void; onReady(): void }
 export function AddTv({ csrfToken, onSessionExpired, onReady }: Props) {
@@ -34,7 +35,7 @@ export function AddTv({ csrfToken, onSessionExpired, onReady }: Props) {
     <h1>Добавить телевизор</h1>
     <p>Включите телевизор и подтвердите доступ на его экране.</p>
     <form noValidate onSubmit={(event) => { event.preventDefault(); void submit(); }}>
-      <label>Платформа телевизора<select disabled={busy} value={platform} onChange={(event) => setPlatform(tvPlatformSchema.parse(event.target.value))}><option value="webos">LG webOS</option><option value="tizen">Samsung Tizen</option></select></label>
+      <label>Платформа телевизора<span className="platform-select"><select disabled={busy} value={platform} onChange={(event) => setPlatform(tvPlatformSchema.parse(event.target.value))}><option value="webos">LG webOS</option><option value="tizen">Samsung Tizen</option></select><IconChevronDown aria-hidden="true" /></span></label>
       <label>IP-адрес телевизора<input inputMode="decimal" autoComplete="off" disabled={busy} value={host} onChange={(event) => setHost(event.target.value)} /></label>
       <button type="submit" disabled={busy}>{busy ? 'Подключение…' : 'Подключить'}</button>
     </form>

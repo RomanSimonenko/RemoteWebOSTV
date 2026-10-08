@@ -1,4 +1,4 @@
-import { getEventListeners } from 'node:events';
+import { EventEmitter, getEventListeners } from 'node:events';
 import { afterEach, expect, test } from 'vitest';
 import type { TvAdapter } from '@remote-webos-tv/tv-adapter';
 import { TvButtonSendError, WebOsError } from '@remote-webos-tv/tv-adapter';
@@ -59,6 +59,26 @@ test('connectEventCommitsToken', async () => {
   });
   expect(h.identities).toEqual(['http://tv.invalid:8001/api/v2/']);
   expect(h.scheduler.timers.size).toBe(0);
+});
+
+test('optional SDB failure preserves paired control and does not mutate identity', async () => {
+  const sdb = Object.assign(new EventEmitter(), { write: () => true, destroy: () => {} });
+  const h = harness({ createSdbSocket: () => sdb }); await h.connect();
+  const pending = h.adapter.readPlatformVersion!(h.signal);
+  sdb.emit('error', new Error('synthetic private network detail'));
+  expect(await pending).toEqual({ diagnostic: { operation: 'sdb_capability', code: 'request_rejected' } });
+  expect((await h.adapter.readSnapshot(h.signal)).identity?.platformVersion).toBeUndefined();
+  await expect(h.adapter.sendButton('HOME', h.signal)).resolves.toBeUndefined();
+});
+
+test('disconnect aborts optional SDB transport and releases its listeners', async () => {
+  let destroyed = false;
+  const sdb = Object.assign(new EventEmitter(), { write: () => true, destroy: () => { destroyed = true; } });
+  const h = harness({ createSdbSocket: () => sdb }); await h.connect();
+  const pending = h.adapter.readPlatformVersion!(h.signal);
+  await h.adapter.disconnect();
+  await expect(pending).rejects.toMatchObject({ code: 'CONNECTION_LOST' });
+  expect(destroyed).toBe(true); expect(sdb.eventNames()).toEqual([]); expect(h.scheduler.timers.size).toBe(0);
 });
 
 test('ownedConnectAllowsBothBooleanHostValuesBecauseSampleDidNotEstablishAValueRule', async () => {

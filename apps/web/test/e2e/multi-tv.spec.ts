@@ -125,6 +125,21 @@ test('Samsung uses shared desktop geometry, unsupported controls and camera clea
   });
   await page.setViewportSize({ width: 1440, height: 1100 });
   await pairMixed(page, tv);
+  const badges = page.locator('.platform-badge');
+  const lgBadge = (await badges.nth(0).boundingBox())!;
+  const samsungBadge = (await badges.nth(1).boundingBox())!;
+  expect(lgBadge.height).toBe(38);
+  expect(samsungBadge.height).toBe(lgBadge.height);
+  const cards = await page.locator('.device-card').evaluateAll((elements) => elements.map(element => {
+    const { width, height } = element.getBoundingClientRect(); return { width, height };
+  }));
+  await badges.evaluateAll((elements) => elements.forEach(element => { (element as HTMLElement).style.minHeight = '0'; }));
+  expect((await badges.nth(0).boundingBox())!.width).toBe(lgBadge.width);
+  expect((await badges.nth(1).boundingBox())!.width).toBe(samsungBadge.width);
+  expect(await page.locator('.device-card').evaluateAll((elements) => elements.map(element => {
+    const { width, height } = element.getBoundingClientRect(); return { width, height };
+  }))).toEqual(cards);
+  await badges.evaluateAll((elements) => elements.forEach(element => { (element as HTMLElement).style.removeProperty('min-height'); }));
   await page.screenshot({ path: testInfo.outputPath('mixed-dashboard.png'), fullPage: true });
   await open(page, 0);
   const lgGeometry = await page.locator('.tv-card').boundingBox();

@@ -32,7 +32,7 @@ export interface TvServiceDependencies {
   readonly onOperationFinished?: (operation: TvOperation) => void;
 }
 export interface TvVersionDiagnostic {
-  readonly operation: 'hello';
+  readonly operation: 'hello' | 'sdb_capability';
   readonly code: 'timeout' | 'invalid_response' | 'version_unavailable' | 'request_rejected' | 'send_failed' | 'read_failed' | 'storage_failed';
 }
 export interface TvService {
@@ -88,6 +88,8 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
   let cleanup: Cleanup | undefined;
   let command: Command | undefined;
   let metadata: Metadata | undefined;
+  // Samsung SDB metadata is authoritative only for the currently owned session.
+  let currentTizenVersion = false;
   let remoteCapability: { readonly generation: number; readonly buttons: boolean; readonly apps: boolean; readonly powerOff: boolean } | undefined;
   let power: Power | undefined;
   let intentionalOff = false;
@@ -101,7 +103,8 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
   const powerFinishedListeners = new Set<(operation: TvPowerOperation, owner: string | symbol) => void>();
 
   const view = (): TvStatusResponse => ({
-    tv: saved ? { host: saved.host, identity: { ...saved.identity } } : null,
+    tv: saved ? { host: saved.host, identity: platform === 'tizen' && !currentTizenVersion
+      ? withoutPlatformVersion(saved.identity) : { ...saved.identity } } : null,
     connection,
     operation: attempt && !attempt.power ? copyOperation(attempt.operation) : null,
     ...(error ? { error: { ...error } } : {}),
@@ -116,6 +119,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     if (cleanup?.adapter === adapter) return cleanup.promise;
     if (activeAdapter === adapter) {
       activeAdapter = undefined; remoteCapability = undefined;
+      currentTizenVersion = false;
       // Disposing the owned connection cannot prove physical TV power state.
       if (connection === 'available') connection = 'unavailable';
     }
@@ -164,7 +168,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     const identity = tvIdentitySchema.strict().safeParse(result.identity);
     if (!identity.success) throw new WebOsError('INVALID_TV_RESPONSE', 'Registration identity is invalid');
     // Optional metadata absence is not an identity change on a verified ordinary reconnect.
-    if (input.action === 'reconnect' && previous?.host === host
+    if (platform !== 'tizen' && input.action === 'reconnect' && previous?.host === host
       && previous.identity.model === identity.data.model
       && previous.identity.firmwareVersion === identity.data.firmwareVersion
       && identity.data.platformVersion === undefined && previous.identity.platformVersion !== undefined) {
@@ -174,7 +178,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     checkConnection();
     if (!tvSnapshotSchema.safeParse(snapshot).success || snapshot.connection !== 'available') throw new WebOsError('INVALID_TV_RESPONSE', 'Snapshot did not confirm availability');
     const identityChanged = previous?.identity.model !== identity.data.model
-      || previous.identity.platformVersion !== identity.data.platformVersion
+      || (platform !== 'tizen' && previous.identity.platformVersion !== identity.data.platformVersion)
       || previous.identity.firmwareVersion !== identity.data.firmwareVersion;
     let discoveredMac: string | null = null;
     for (const candidate of result.macAddresses) {
@@ -184,7 +188,8 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     const macAddress = input.action === 'change_address' || identityChanged
       ? discoveredMac
       : input.action === 'reconnect' ? previous!.macAddress : previous?.macAddress ?? discoveredMac;
-    if (input.action !== 'reconnect' || initialKey !== result.credential || identityChanged) {
+    if (input.action !== 'reconnect' || initialKey !== result.credential || identityChanged
+      || previous?.identity.platformVersion !== identity.data.platformVersion) {
       let encryptedCredential: EncryptedEnvelopeV1;
       try { encryptedCredential = await abortable(Promise.resolve(cipher.encrypt(result.credential)), signal); }
       catch (cause) { if (signal.aborted) throw signal.reason; if (cause instanceof WebOsError) throw cause; throw new WebOsError('KEY_STORE_WRITE_FAILED', 'Unable to encrypt the registered key', { cause }); }
@@ -200,18 +205,19 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
   }
 
   function reportVersionDiagnostic(code: TvVersionDiagnostic['code']): void {
-    const diagnostic: TvVersionDiagnostic = { operation: 'hello', code };
+    const operation = platform === 'tizen' ? 'sdb_capability' : 'hello';
+    const diagnostic: TvVersionDiagnostic = { operation, code };
     try {
       if (dependencies.onVersionDiagnostic) dependencies.onVersionDiagnostic(diagnostic);
       else console.warn(diagnostic, 'Optional TV metadata unavailable');
     } catch {
       // A failing diagnostic consumer must remain visible without leaking its error data.
-      console.error({ operation: 'hello', code: 'diagnostic_failed' }, 'Optional TV metadata diagnostic failed');
+      console.error({ operation, code: 'diagnostic_failed' }, 'Optional TV metadata diagnostic failed');
     }
   }
 
   function startVersionRead(adapter: TvAdapter): void {
-    if (!saved || saved.identity.platformVersion !== undefined || !adapter.readPlatformVersion) return;
+    if (!saved || (platform !== 'tizen' && saved.identity.platformVersion !== undefined) || !adapter.readPlatformVersion) return;
     const controller = new AbortController();
     const version = generation;
     const host = saved.host;
@@ -233,7 +239,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       if (!result || typeof result !== 'object') { reportVersionDiagnostic('invalid_response'); return; }
       if (result.diagnostic !== undefined) {
         const diagnostic = result.diagnostic;
-        const valid = result.version === undefined && diagnostic?.operation === 'hello'
+        const valid = result.version === undefined && diagnostic?.operation === (platform === 'tizen' ? 'sdb_capability' : 'hello')
           && ['timeout', 'invalid_response', 'version_unavailable', 'request_rejected', 'send_failed'].includes(diagnostic.code);
         reportVersionDiagnostic(valid ? diagnostic.code : 'invalid_response'); return;
       }
@@ -244,6 +250,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       try { repository.replace(replacement); }
       catch { reportVersionDiagnostic('storage_failed'); return; }
       saved = replacement;
+      if (platform === 'tizen') currentTizenVersion = true;
     });
     const current: Metadata = { adapter, controller, promise: pending.finally(() => {
       scheduler.clearTimeout(timer);
@@ -360,6 +367,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     const context: Attempt = { operation, controller, timer, expiresAt: scheduler.now() + budget, ...(owner === undefined ? {} : { owner }) };
     intentionalOff = false; recoverAfterProbe = false;
     attempt = context; generation++;
+    currentTizenVersion = false;
     metadata?.controller.abort(new TvServiceError('CANCELLED'));
     remoteCapability = undefined;
     connection = input.action === 'pair' || input.action === 'repair' ? 'pairing' : 'connecting';
@@ -712,4 +720,9 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
 
 function copyOperation(operation: TvOperation): TvOperation {
   return { ...operation, ...(operation.error ? { error: { ...operation.error } } : {}) };
+}
+
+function withoutPlatformVersion(identity: StoredTv['identity']): StoredTv['identity'] {
+  const { platformVersion: _version, ...rest } = identity;
+  return rest;
 }

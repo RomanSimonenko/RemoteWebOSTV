@@ -2,6 +2,26 @@ import { expect } from '@playwright/test';
 import { test, tvHost } from '../support/tv-fixture.js';
 import { openTvWorkspace } from '../support/dashboard.js';
 
+test('Add TV keeps the platform arrow inset and opens shared account settings', async ({ page, tv }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await tv.setupAndLogin(page);
+  await page.getByRole('button', { name: 'Добавить ТВ' }).click();
+  const select = page.getByRole('combobox', { name: 'Платформа телевизора' });
+  await expect(select).toHaveCSS('appearance', 'none');
+  const bounds = (await select.boundingBox())!;
+  const arrow = (await select.locator('..').locator('svg').boundingBox())!;
+  expect(bounds.x + bounds.width - arrow.x - arrow.width).toBe(12);
+  expect(Math.abs(bounds.y + bounds.height / 2 - arrow.y - arrow.height / 2)).toBeLessThan(1);
+  await select.selectOption('tizen');
+  await expect(select).toHaveValue('tizen');
+  await page.screenshot({ path: testInfo.outputPath('add-tv-platform.png'), fullPage: true });
+  await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Настройки аккаунта' })).toBeVisible();
+  await expect(page.getByLabel('MAC-адрес телевизора')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Закрыть настройки' }).click();
+  await expect(page.getByRole('button', { name: 'Настройки', exact: true })).toBeFocused();
+});
+
 test('dashboard adds the first TV, opens remote and returns without another pairing or TV mutation', async ({ page, tv }) => {
   await tv.setupAndLogin(page);
   await expect(page.getByRole('heading', { name: 'Пока нет телевизоров' })).toBeVisible();
@@ -21,6 +41,17 @@ test('dashboard adds the first TV, opens remote and returns without another pair
   await expect(card).toHaveCSS('border-color', 'rgb(131, 189, 206)');
   await expect(page.getByRole('heading', { name: 'Телевизоры', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Добавить ТВ' })).toBeVisible();
+  const badge = page.locator('.platform-badge');
+  const logo = badge.getByRole('img', { name: 'LG', exact: true });
+  const badgeBounds = (await badge.boundingBox())!;
+  const logoBounds = (await logo.boundingBox())!;
+  expect(logoBounds.width).toBeGreaterThan(34);
+  expect(logoBounds.x).toBeGreaterThan(badgeBounds.x);
+  expect(logoBounds.y).toBeGreaterThan(badgeBounds.y);
+  expect(logoBounds.y + logoBounds.height).toBeLessThan(badgeBounds.y + badgeBounds.height);
+  await logo.evaluate((image) => { (image as HTMLElement).style.transform = 'none'; });
+  expect(await badge.boundingBox()).toEqual(badgeBounds);
+  await logo.evaluate((image) => { (image as HTMLElement).style.removeProperty('transform'); });
   await page.setViewportSize({ width: 795, height: 1248 });
   const add = page.getByRole('button', { name: 'Добавить ТВ' });
   const alignment = await add.evaluate((button) => {

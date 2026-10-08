@@ -169,3 +169,44 @@ test('metadata read rejection is safe and a broken diagnostic sink stays observa
     expect(safeLog.mock.calls).toEqual([[{ operation: 'hello', code: 'diagnostic_failed' }, 'Optional TV metadata diagnostic failed']]);
   } finally { await h.service.close(); await failed.service.close(); safeLog.mockRestore(); }
 });
+
+test('Tizen cached version is hidden until current session capability confirms it, preserving MAC', async () => {
+  const base = harness(true);
+  base.repository.replace({ ...base.repository.load()!, platform: 'tizen', identity: { model: 'Synthetic Model', platformVersion: '8.0' }, macAddress: '02:00:00:00:00:03' });
+  const result = barrier<PlatformVersionResult>(); let adapter!: ControlledAdapter;
+  const diagnostics: unknown[] = [];
+  const h = harness(true, { repository: base.repository, onVersionDiagnostic: (d) => diagnostics.push(d),
+    createAdapter(_host, staging) { adapter = Object.assign(new ControlledAdapter(staging), { readPlatformVersion: () => result.promise }); return adapter; },
+  });
+  try {
+    expect((await h.service.status()).tv?.identity.platformVersion).toBeUndefined();
+    h.service.start({ action: 'reconnect' }); await drain(); await succeed(adapter);
+    expect((await h.service.status()).tv?.identity.platformVersion).toBeUndefined();
+    expect(base.repository.load()?.macAddress).toBe('02:00:00:00:00:03');
+    result.resolve({ version: '9.0' }); await drain();
+    expect((await h.service.status()).tv?.identity.platformVersion).toBe('9.0');
+    expect(base.repository.load()?.macAddress).toBe('02:00:00:00:00:03');
+    expect(h.service.remoteState().enabled).toBe(true);
+    const cleanup = barrier<void>(); adapter.disconnectResult = cleanup.promise;
+    h.service.start({ action: 'reconnect' });
+    const immediate = await h.service.status();
+    cleanup.resolve();
+    expect(immediate.connection).toBe('connecting');
+    expect(immediate.tv?.identity.platformVersion).toBeUndefined();
+  } finally { await h.service.close(); await base.service.close(); }
+});
+
+test('unavailable Tizen capability removes cached version and emits SDB diagnostic without blocking remote', async () => {
+  const base = harness(true); base.repository.replace({ ...base.repository.load()!, platform: 'tizen', identity: { model: 'Synthetic Model', platformVersion: '9.0' } });
+  let adapter!: ControlledAdapter; const diagnostics: unknown[] = [];
+  const h = harness(true, { repository: base.repository, onVersionDiagnostic: (d) => diagnostics.push(d),
+    createAdapter(_host, staging) { adapter = Object.assign(new ControlledAdapter(staging), { readPlatformVersion: async () => ({ diagnostic: { operation: 'sdb_capability', code: 'request_rejected' } }) }); return adapter; },
+  });
+  try {
+    h.service.start({ action: 'reconnect' }); await drain(); await succeed(adapter);
+    expect((await h.service.status()).tv?.identity.platformVersion).toBeUndefined();
+    expect(base.repository.load()?.identity.platformVersion).toBeUndefined();
+    expect(diagnostics).toEqual([{ operation: 'sdb_capability', code: 'request_rejected' }]);
+    expect(h.service.remoteState().enabled).toBe(true);
+  } finally { await h.service.close(); await base.service.close(); }
+});

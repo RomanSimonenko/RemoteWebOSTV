@@ -2,6 +2,7 @@ import { localTvHostSchema, tvButtonSchema, type TvButton, type TvIdentity, type
 import { TvButtonSendError, WebOsCleanupError, WebOsError, type PairingRequest, type PairingResult, type TvAdapter } from '@remote-webos-tv/tv-adapter';
 import { createSamsungSocket, requestSamsungIdentity } from './transport.js';
 import { parseSamsungEvent, parseSamsungIdentity } from './response-parsers.js';
+import { readSdbPlatformVersion, type SdbSocket } from './sdb-capability.js';
 
 export interface SamsungSocket {
   readonly readyState: number;
@@ -28,6 +29,7 @@ export interface SamsungAdapterDependencies {
   readonly acceptHost?: (host: string) => boolean;
   readonly requestIdentity?: (url: string, signal: AbortSignal) => Promise<unknown>;
   readonly createSocket?: (url: string, options: { readonly rejectUnauthorized: false }) => SamsungSocket;
+  readonly createSdbSocket?: (host: string) => SdbSocket;
 }
 
 const capabilities: TvCapabilities = Object.freeze({
@@ -57,6 +59,7 @@ interface Connection {
   disposed: boolean;
   rejectPair?: (cause: WebOsError) => void;
   releaseAbort?: () => void;
+  versionRead?: Promise<import('@remote-webos-tv/tv-adapter').PlatformVersionResult>;
 }
 
 const defaultScheduler: SamsungScheduler = {
@@ -216,6 +219,22 @@ export function createSamsungAdapter(dependencies: SamsungAdapterDependencies): 
 
   return {
     pair,
+    async readPlatformVersion(signal) {
+      const connection = requireReady(signal);
+      if (connection.versionRead) throw new WebOsError('UNKNOWN', 'Samsung metadata was already requested on this connection');
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      signal.addEventListener('abort', abort, { once: true });
+      connection.controller.signal.addEventListener('abort', abort, { once: true });
+      connection.versionRead = readSdbPlatformVersion(dependencies.host, controller.signal, {
+        scheduler, timeoutMs: dependencies.requestTimeoutMs,
+        ...(dependencies.createSdbSocket ? { createSocket: dependencies.createSdbSocket } : {}),
+      }).finally(() => {
+        signal.removeEventListener('abort', abort);
+        connection.controller.signal.removeEventListener('abort', abort);
+      });
+      return connection.versionRead;
+    },
     async readSnapshot(signal) {
       const connection = requireReady(signal);
       return { connection: 'available', identity: connection.identity!, capabilities, transport: 'wss:8002' };
