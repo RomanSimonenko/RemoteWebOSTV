@@ -214,3 +214,23 @@ body:has(.settings-dialog[open]) { overflow: hidden; }
 
 .remote .wink-button { display: flex; align-items: center; justify-content: center; gap: .5rem; width: 156px; min-height: 40px; height: 40px; padding: 0; border-radius: 11px; margin: 10px auto 0; background: #24201e; border-color: #ff5f00; color: #fff; font-weight: 700; }
 .remote .wink-button:disabled { opacity: .45; }
+
+.tv-layout-with-camera { max-width: 880px; display: grid; grid-template-columns: 194px minmax(0, 1fr); gap: 20px; align-items: start; }
+.tv-layout-with-camera .tv-card { grid-column: 1; grid-row: 2; }
+.tv-layout-with-camera .tv-activity { grid-column: 1; grid-row: 3; }
+.tv-layout-with-camera .connection-progress { grid-column: 1 / -1; grid-row: 1; }
+.webcam-card { grid-column: 2; grid-row: 2 / span 2; min-width: 0; padding: 20px; border: 1px solid #334955; border-radius: 24px; background: #17232b; }
+.webcam-card video { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #080d11; border-radius: 12px; margin-bottom: 16px; }
+.webcam-card select { width: 100%; min-width: 0; padding: 10px; font: inherit; border: 1px solid #526674; border-radius: 8px; background: #10171d; color: inherit; }
+.webcam-actions { margin-top: 14px; }
+.webcam-card p { font-size: .9rem; overflow-wrap: anywhere; }
+
+.webcam-select { position: relative; display: block; }
+.webcam-select select { appearance: none; padding-right: 42px; }
+.webcam-select svg { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; pointer-events: none; }
+.webcam-status:empty { display: none; }
+
+.webcam-actions { display: flex; align-items: center; gap: 16px; height: 44px; }
+.webcam-actions > button { flex: 0 0 auto; min-width: 124px; }
+.webcam-feedback { flex: 1; min-width: 0; height: 44px; overflow-y: auto; display: flex; align-items: center; }
+.webcam-feedback p { margin: 0; line-height: 1.4; }
