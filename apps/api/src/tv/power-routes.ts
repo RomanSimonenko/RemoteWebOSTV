@@ -60,7 +60,11 @@ export function registerTvPowerRoutes(app: FastifyInstance, { service: defaultSe
   app.addHook('onClose', async () => { unsubscribe(); for (const subscription of subscriptions.values()) subscription.unsubscribe(); subscriptions.clear(); receipts.clear(); });
 
   for (const prefix of prefixes) {
-  app.get(`${prefix}/power`, async (request) => tvPowerStateSchema.parse(serviceFor(request).powerState()));
+  app.get(`${prefix}/power`, async (request) => {
+    const service = serviceFor(request);
+    if (service.powerState().observedPower !== undefined) await service.status();
+    return tvPowerStateSchema.parse(service.powerState());
+  });
   app.put(`${prefix}/mac`, async (request, reply) => {
     const service = serviceFor(request);
     const body = request.body;

@@ -1,7 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 import { openTvWorkspace } from "../support/dashboard.js";
 import type { TvPowerState } from '../../../../packages/contracts/src/index.js';
-import { test, tvHost, type TvFixture } from '../support/tv-fixture.js';
+import { test, tvHost, samsungHost, type TvFixture } from '../support/tv-fixture.js';
 
 const power = (page: Page) => page.getByRole('group', { name: 'Питание телевизора', exact: true });
 const settings = (page: Page) => page.getByRole('dialog', { name: 'Настройки телевизора', exact: true });
@@ -11,6 +11,48 @@ async function openSettings(page: Page) {
 const off = 'ssap://system/turnOff';
 const mac = '02:00:00:00:00:03';
 const offRequests = (tv: TvFixture) => tv.tv.requests.filter((request) => request.uri === off);
+
+test('Samsung confirms shutdown and wakes without MAC with one toggle per action', async ({ page, tv }) => {
+  await tv.setupAndLogin(page);
+  await page.getByRole('button', { name: 'Добавить ТВ', exact: true }).click();
+  await page.getByLabel('Платформа телевизора').selectOption('tizen');
+  await page.getByLabel('IP-адрес телевизора').fill(samsungHost);
+  await page.getByRole('button', { name: 'Подключить', exact: true }).click();
+  await expect(page.locator('.device-card')).toHaveCount(1);
+  await openTvWorkspace(page);
+  await ready(page);
+  await openSettings(page);
+  await expect(settings(page).getByLabel('IP-адрес телевизора')).toHaveValue(samsungHost);
+  await expect(settings(page).getByRole('heading', { name: 'Включение по сети' })).toHaveCount(0);
+  await expect(settings(page).getByLabel('MAC-адрес телевизора')).toHaveCount(0);
+  await expect(settings(page).getByRole('button', { name: 'Обновить статус питания' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await power(page).getByRole('button', { name: 'Выключить ТВ', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Выключить телевизор?' })).not.toContainText('Потеря соединения');
+  await page.getByRole('button', { name: 'Отмена', exact: true }).click();
+  expect(tv.samsungSockets.flatMap(socket => socket.frames)).toEqual([]);
+  await confirmOff(page);
+  await expect.poll(async () => (await state(page, tv)).observedPower).toBe('standby');
+  await expect(power(page).getByRole('button', { name: 'Включить ТВ', exact: true })).toBeEnabled();
+  await expect(page.getByRole('status', { name: 'Питание телевизора', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Подключён');
+  await expect(page.locator('.connection-led')).toHaveAttribute('data-color', 'gray');
+  await expect(page.getByRole('button', { name: 'Вверх', exact: true })).toBeDisabled();
+  expect(tv.samsungSockets[0]!.readyState).toBe(1);
+  expect((await state(page, tv)).mac).toBeNull();
+  tv.samsungSockets[0]!.close();
+  await expect.poll(async () => (await state(page, tv)).observedPower).toBe('standby');
+  await expect(page.getByRole('status', { name: 'Соединение с телевизором' })).toHaveText('Нет соединения');
+  await power(page).getByRole('button', { name: 'Включить ТВ', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Выключить телевизор?' })).toHaveCount(0);
+  await expect.poll(async () => (await state(page, tv)).observedPower).toBe('on');
+  await expect(page.getByRole('button', { name: 'Вверх', exact: true })).toBeEnabled();
+  await expect(page.locator('.connection-led')).toHaveAttribute('data-color', 'green');
+  expect(tv.samsungSockets).toHaveLength(3);
+  const frames = tv.samsungSockets.flatMap(socket => socket.frames).map(text => JSON.parse(text));
+  expect(frames).toEqual(Array.from({ length: 2 }, () => ({ method: 'ms.remote.control', params: { Cmd: 'Click', DataOfCmd: 'KEY_POWER', Option: 'false', TypeOfRemote: 'SendRemoteKey' } })));
+  expect(tv.wakes).toEqual([]);
+});
 
 async function state(page: Page, tv: TvFixture): Promise<TvPowerState> {
   const response = await page.context().request.get(`${tv.origin}${tv.tvPath}/power`);

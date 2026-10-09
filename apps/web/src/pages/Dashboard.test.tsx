@@ -79,7 +79,7 @@ test('adds another TV with CSRF and returns to the refreshed dashboard', async (
   const fetch = vi.fn(async (path: string, init?: RequestInit) => {
     if (path === '/api/tvs' && init?.method === 'POST') {
       expect(init.headers).toMatchObject({ 'x-csrf-token': 'c'.repeat(43) });
-      expect(JSON.parse(init.body as string)).toMatchObject({ platform: 'webos', host: '192.168.1.21' });
+      expect(JSON.parse(init.body as string)).toMatchObject({ platform: 'webos', host: '192.168.1.21', mac: '02:00:00:00:00:02' });
       added = true;
       return response({ tvId: second, operation: { id: 'pair', action: 'pair', status: 'running', startedAt: 10000, deadlineAt: 70000 } }, 202);
     }
@@ -90,6 +90,7 @@ test('adds another TV with CSRF and returns to the refreshed dashboard', async (
   vi.stubGlobal('fetch', fetch); render(home()); await act(async () => {});
   fireEvent.click(screen.getByRole('button', { name: 'Добавить ТВ' }));
   fireEvent.change(screen.getByLabelText('IP-адрес телевизора'), { target: { value: '192.168.1.21' } });
+  fireEvent.change(screen.getByLabelText(/MAC-адрес телевизора/), { target: { value: '02:00:00:00:00:02' } });
   fireEvent.submit(screen.getByRole('button', { name: 'Подключить' }).closest('form')!); await act(async () => {});
   expect(screen.getAllByRole('button', { name: /^Открыть телевизор / })).toHaveLength(2);
   expect(fetch.mock.calls.filter(([path]) => path.endsWith('/cancel'))).toHaveLength(0);

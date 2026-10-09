@@ -5,6 +5,13 @@ const tvId = '00000000-0000-4000-8000-000000000001';
 const request = { id: tvId, platform: 'webos', host: '10.2.3.4' };
 const status = { tv: { host: '10.2.3.4', identity: { model: 'Synthetic TV' } }, connection: 'available', operation: null };
 
+test('manual addition MAC is normalized and invalid MACs are rejected', () => {
+  expect(contracts.addTvRequestSchema.parse({ ...request, mac: '02-ab-cd-ef-00-01' }).mac).toBe('02:AB:CD:EF:00:01');
+  for (const mac of ['', 'invalid', '00:00:00:00:00:00', 'FF:FF:FF:FF:FF:FF']) {
+    expect(contracts.addTvRequestSchema.safeParse({ ...request, mac }).success).toBe(false);
+  }
+});
+
 test('acceptsCanonicalWebosDevice', () => {
   expect(contracts).toHaveProperty('tvDevicesResponseSchema');
   expect(contracts.tvDevicesResponseSchema.parse({ devices: [{ tvId, platform: 'webos', status }] })).toEqual({ devices: [{ tvId, platform: 'webos', status }] });

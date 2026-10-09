@@ -25,16 +25,16 @@ function TvSetupContent({ tvId, platform = 'webos', onReady, username, csrfToken
   const [message, setMessage] = useState('');
   const [manualOperationId, setManualOperationId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [powerObservation, setPowerObservation] = useState<{ lastOperation: TvPowerState['operation']; shutdownAfterReadVersion: number | null }>({ lastOperation: null, shutdownAfterReadVersion: null });
+  const [powerObservation, setPowerObservation] = useState<{ observedPower: TvPowerState['observedPower']; lastOperation: TvPowerState['operation']; shutdownAfterReadVersion: number | null }>({ observedPower: undefined, lastOperation: null, shutdownAfterReadVersion: null });
   const observePowerState = useCallback((state: TvPowerState | null) => {
     const readVersion = getReadVersion();
     setPowerObservation((previous) => {
       const oldOperation = previous.lastOperation;
       const operation = state?.operation;
       const completedShutdown = oldOperation?.action === 'power_off' && oldOperation.status === 'running' && operation?.id === oldOperation.id && operation.status !== 'running';
-      return { lastOperation: state ? state.operation : previous.lastOperation, shutdownAfterReadVersion: completedShutdown ? readVersion : operation?.action === 'wake' ? null : previous.shutdownAfterReadVersion };
+      return { observedPower: state?.observedPower, lastOperation: state ? state.operation : previous.lastOperation, shutdownAfterReadVersion: platform === 'tizen' ? null : completedShutdown ? readVersion : operation?.action === 'wake' ? null : previous.shutdownAfterReadVersion };
     });
-  }, [getReadVersion]);
+  }, [getReadVersion, platform]);
   const [powerBusy, setPowerBusy] = useState(false);
   const [remoteBusy, setRemoteBusy] = useState(false);
   const [settingsTarget, setSettingsTarget] = useState<HTMLDivElement | null>(null);
@@ -64,6 +64,7 @@ function TvSetupContent({ tvId, platform = 'webos', onReady, username, csrfToken
   // carry "available". Only a subsequently started read ends the transition.
   const awaitingShutdownStatus = powerObservation.shutdownAfterReadVersion !== null && statusReadVersion <= powerObservation.shutdownAfterReadVersion;
   const poweringOff = (powerRunning && observedPowerOperation.action === 'power_off') || awaitingShutdownStatus;
+  const samsungNotOn = platform === 'tizen' && powerObservation.observedPower !== 'on';
   const controlsBusy = busy || powerRunning;
   const activityBusy = refreshing || busy || running || powerBusy || remoteBusy || awaitingShutdownStatus;
   const [showActivity, setShowActivity] = useState(false);
@@ -128,8 +129,8 @@ function TvSetupContent({ tvId, platform = 'webos', onReady, username, csrfToken
     void mutate((signal) => api.startTvOperation(parsed.data, csrfToken, signal, tvId));
   }
 
-  const connectionText = error ? 'Статус неизвестен' : poweringOff ? 'Выключение' : progress || (status ? connectionLabels[status.connection] : 'Загрузка статуса…');
-  const connectionAppearance = error ? 'unknown' : poweringOff ? 'connecting' : status?.connection;
+  const connectionText = error ? 'Статус неизвестен' : poweringOff && platform !== 'tizen' ? 'Выключение' : progress || (status ? connectionLabels[status.connection] : 'Загрузка статуса…');
+  const connectionAppearance = error ? 'unknown' : poweringOff && platform !== 'tizen' ? 'connecting' : status?.connection;
   // Keep autofocus ownership on the retained background diagnostic, separate
   // from the modal copy that unmounts when settings close.
   const activity = (withFocusRef: boolean) => <>
@@ -153,7 +154,7 @@ function TvSetupContent({ tvId, platform = 'webos', onReady, username, csrfToken
     {tv && <details className="settings-advanced"><summary>Дополнительно</summary><p>Повторите сопряжение, если телевизор отозвал доступ. Потребуется подтверждение на экране ТВ.</p><button type="button" disabled={controlsBusy} onClick={() => start({ action: 'repair' })}>Повторить сопряжение</button></details>}
   </>;
   const identity = tv && <div className="tv-info"><TvBrand className="tv-brand" platform={platform} /><p className="tv-model">{tv.identity.model}</p></div>;
-  const ledColor = error || status?.connection === 'authorization_error' || status?.connection === 'compatibility_error' || backgroundDiagnostic ? 'red' : progress || poweringOff ? 'gray' : connectionAppearance === 'available' ? 'green' : 'gray';
+  const ledColor = error || status?.connection === 'authorization_error' || status?.connection === 'compatibility_error' || backgroundDiagnostic ? 'red' : progress || poweringOff || samsungNotOn ? 'gray' : connectionAppearance === 'available' ? 'green' : 'gray';
   const connectionIndicator = <div className={tv ? 'connection-led' : 'connection-row'} tabIndex={tv ? 0 : undefined} aria-describedby={tv ? 'connection-tooltip' : undefined} data-color={ledColor} data-active={activityBusy && showActivity || undefined} title={tv ? undefined : connectionText}>
     <p className={tv ? 'visually-hidden' : 'connection-status'} data-connection={connectionAppearance} role="status" aria-label="Соединение с телевизором" aria-live="polite">{connectionText}</p>
     <span className="activity-slot">{activityBusy && showActivity && <span className="led-activity" role="img" aria-label="Выполняется запрос" />}</span>
@@ -165,8 +166,8 @@ function TvSetupContent({ tvId, platform = 'webos', onReady, username, csrfToken
     {tv && <div className={`connection-progress${settingsOpen ? ' reserved-activity' : ''}`} hidden={!running || powerRunning} aria-hidden={settingsOpen || undefined} inert={settingsOpen}>{running && !powerRunning && activity(!settingsOpen)}</div>}
     {tv && <div className="tv-card">
       <div className="remote-top">{connectionIndicator}</div>
-      <PowerControls {...(tvId ? { tvId } : {})} csrfToken={csrfToken} active quietOffline={quietOffline || running} settingsOpen={settingsOpen} settingsTarget={settingsTarget} activityTarget={powerActivityTarget} {...(onConfirmationChange ? { onConfirmationChange } : {})} onSessionExpired={onSessionExpired} onStateChange={observePowerState} onBusyChange={setPowerBusy} />
-      <Remote {...(tvId ? { tvId } : {})} csrfToken={csrfToken} active quietOffline={quietRemoteUnavailable} interactionBlocked={settingsOpen} activityTarget={remoteActivityTarget} onSessionExpired={onSessionExpired} onBusyChange={setRemoteBusy} />
+      <PowerControls {...(tvId ? { tvId } : {})} platform={platform} csrfToken={csrfToken} active quietOffline={quietOffline || running} settingsOpen={settingsOpen} settingsTarget={settingsTarget} activityTarget={powerActivityTarget} {...(onConfirmationChange ? { onConfirmationChange } : {})} onSessionExpired={onSessionExpired} onStateChange={observePowerState} onBusyChange={setPowerBusy} />
+      <Remote {...(tvId ? { tvId } : {})} csrfToken={csrfToken} active quietOffline={quietRemoteUnavailable || samsungNotOn} interactionBlocked={settingsOpen || samsungNotOn} activityTarget={remoteActivityTarget} onSessionExpired={onSessionExpired} onBusyChange={setRemoteBusy} />
     </div>}
     {tv && <Webcam />}
     <div className="tv-activity">

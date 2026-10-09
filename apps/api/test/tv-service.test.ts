@@ -83,14 +83,14 @@ describe('TV service persistence and projection', () => {
     } finally { await h.service.close(); }
   });
 
-  test('MAC discovery commits the first valid unicast address after snapshot succeeds', async () => {
+  test('pairing never adopts an automatically discovered MAC', async () => {
     const h = harness(); h.service.start({ action: 'pair', host: '192.168.1.10' }); await drain();
     const adapter = h.adapters[0]!;
     adapter.pairResult.resolve({ ...pairing, macAddresses: ['invalid', '01:00:00:00:00:01', '00:00:00:00:00:00', 'FF:FF:FF:FF:FF:FF', '02-ab-cd-ef-00-01', '02:00:00:00:00:02'] });
     await adapter.enteredRead.promise;
     expect(h.repository.load()).toBeNull();
     adapter.readResult.resolve(snapshot); await drain();
-    expect(h.repository.load()?.macAddress).toBe('02:AB:CD:EF:00:01');
+    expect(h.repository.load()?.macAddress).toBeNull();
     const status = await h.service.status();
     expect(status.operation?.status).toBe('succeeded');
     expect(tvStatusResponseSchema.safeParse(status).success).toBe(true);
@@ -121,24 +121,24 @@ describe('TV service persistence and projection', () => {
     await h.service.close(); await base.service.close();
   });
 
-  test.each([{ macAddresses: ['02:00:00:00:00:02'], expected: '02:00:00:00:00:02' }, { macAddresses: [], expected: null }])('MAC change_address discards the old physical address even when model matches: %j', async ({ macAddresses, expected }) => {
+  test.each([{ macAddresses: ['02:00:00:00:00:02'] }, { macAddresses: [] }])('MAC change_address preserves the user address: %j', async ({ macAddresses }) => {
     const base = harness(true); base.repository.replace({ ...base.repository.load()!, macAddress: '02:AB:CD:EF:00:01' });
     const h = harness(true, { repository: base.repository });
     h.service.start({ action: 'change_address', host: '192.168.1.11' }); await drain();
     const adapter = h.adapters[0]!; adapter.pairResult.resolve({ ...pairing, macAddresses });
     await adapter.enteredRead.promise; adapter.readResult.resolve(snapshot); await drain();
-    expect(base.repository.load()?.macAddress).toBe(expected);
+    expect(base.repository.load()?.macAddress).toBe('02:AB:CD:EF:00:01');
     await h.service.close(); await base.service.close();
   });
 
-  test('MAC changed identity cannot retain the old address on reconnect', async () => {
+  test('MAC belongs to the TV record even when reconnect reports changed identity', async () => {
     const base = harness(true); base.repository.replace({ ...base.repository.load()!, macAddress: '02:AB:CD:EF:00:01' });
     const h = harness(true, { repository: base.repository });
     h.service.start({ action: 'reconnect' }); await drain();
     const adapter = h.adapters[0]!;
     adapter.pairResult.resolve({ ...pairing, identity: { model: 'Synthetic Replacement' }, macAddresses: [] });
     await adapter.enteredRead.promise; adapter.readResult.resolve(snapshot); await drain();
-    expect(base.repository.load()?.macAddress).toBeNull();
+    expect(base.repository.load()?.macAddress).toBe('02:AB:CD:EF:00:01');
     await h.service.close(); await base.service.close();
   });
 
@@ -163,14 +163,14 @@ describe('TV service persistence and projection', () => {
     } finally { await h.service.close(); await base.service.close(); }
   });
 
-  test('MAC absent in saved configuration can be discovered during explicit repair', async () => {
+  test('repair never fills a missing user MAC from automatic discovery', async () => {
     const h = harness(true);
     try {
       h.service.start({ action: 'repair' }); await drain();
       const adapter = h.adapters[0]!;
       adapter.pairResult.resolve({ ...pairing, macAddresses: ['02:00:00:00:00:02'] });
       await adapter.enteredRead.promise; adapter.readResult.resolve(snapshot); await drain();
-      expect(h.repository.load()?.macAddress).toBe('02:00:00:00:00:02');
+      expect(h.repository.load()?.macAddress).toBeNull();
       expect((await h.service.status()).operation?.status).toBe('succeeded');
     } finally { await h.service.close(); }
   });
@@ -286,7 +286,7 @@ describe('TV service persistence and projection', () => {
     const fixture = await protocolFixture('success');
     let service = createTvService(fixture.dependencies);
     try {
-      service.start({ action: 'pair', host: '192.168.1.10' }); await fixture.committed.promise; await drain();
+      service.start({ action: 'pair', host: '192.168.1.10', mac: '02:00:00:00:00:01' }); await fixture.committed.promise; await drain();
       expect((await service.status()).connection).toBe('available');
       expect(fixture.mock.pairingPromptCount).toBe(1);
       expect(fixture.cipher.decrypt(fixture.repository.load()!.encryptedCredential)).toBe('synthetic-mock-client-key');

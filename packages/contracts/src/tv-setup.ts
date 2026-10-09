@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { tvConnectionStateSchema, tvIdentitySchema, type TvIdentity } from './tv.js';
+import { tvMacAddressSchema } from './tv-mac.js';
 
 export const localTvHostSchema = z.string().trim().refine((host) => {
   if (!/^(0|[1-9]\d{0,2})(\.(0|[1-9]\d{0,2})){3}$/.test(host)) return false;
@@ -61,7 +62,7 @@ export type TvStatusResponse = Readonly<Omit<z.infer<typeof tvStatusResponseSche
 }>;
 
 export const startTvOperationSchema = z.discriminatedUnion('action', [
-  z.strictObject({ action: z.literal('pair'), host: localTvHostSchema }),
+  z.strictObject({ action: z.literal('pair'), host: localTvHostSchema, mac: tvMacAddressSchema.optional() }),
   z.strictObject({ action: z.literal('change_address'), host: localTvHostSchema }),
   z.strictObject({ action: z.literal('reconnect') }),
   z.strictObject({ action: z.literal('repair') }),

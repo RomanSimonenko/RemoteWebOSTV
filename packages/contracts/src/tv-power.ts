@@ -1,12 +1,8 @@
 import { z } from 'zod';
 import { publicTvErrorSchema, timestampSchema } from './tv-setup.js';
 
-export const tvMacAddressSchema = z.string()
-  .regex(/^(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}$/i)
-  .transform((mac) => mac.replaceAll('-', ':').toUpperCase())
-  .refine((mac) => (Number.parseInt(mac.slice(0, 2), 16) & 1) === 0 && mac !== '00:00:00:00:00:00', {
-    message: 'Expected a nonzero unicast MAC address',
-  });
+import { tvMacAddressSchema } from './tv-mac.js';
+export { tvMacAddressSchema } from './tv-mac.js';
 
 export const tvPowerRequestSchema = z.discriminatedUnion('action', [
   z.strictObject({ id: z.uuid(), action: z.literal('power_off'), confirm: z.literal(true) }),
@@ -35,6 +31,7 @@ export const tvPowerStateSchema = z.strictObject({
   canPowerOff: z.boolean(),
   canWake: z.boolean(),
   wakeSupported: z.boolean().optional(),
+  observedPower: z.enum(['on', 'standby', 'unknown']).optional(),
   operation: tvPowerOperationSchema.nullable(),
 });
 export type TvPowerState = Readonly<z.infer<typeof tvPowerStateSchema>>;

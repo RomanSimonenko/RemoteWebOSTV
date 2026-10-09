@@ -1,24 +1,441 @@
 import { describe, expect, test } from 'vitest';
-import { tvPowerOperationSchema, tvPowerStateSchema } from '@remote-webos-tv/contracts';
+import { tvPowerOperationSchema, tvPowerStateSchema, type TvStatusResponse } from '@remote-webos-tv/contracts';
 import { Lgtv2Adapter, sendWakeOnLan, TvPowerSendError, WebOsError, type WakeSocket } from '@remote-webos-tv/webos';
 import { EventEmitter } from 'node:events';
 import { barrier, ControlledAdapter, drain, harness, pairing, snapshot, succeed } from './support/tv-harness.js';
+import type { TvPowerSetRequest, TvPowerSetResult } from '@remote-webos-tv/tv-adapter';
+import type { TvServiceDependencies } from '../src/tv/service.js';
 
 const id = '15e082b2-de7e-4d86-a049-19c7448264f1';
 const off = { id, action: 'power_off', confirm: true } as const;
 const wake = { id, action: 'wake' } as const;
+async function samsung(initial: 'on' | 'standby' = 'on', overrides: Partial<TvServiceDependencies> = {}) {
+  const base = harness(true); base.repository.replace({ ...base.repository.load()!, platform: 'tizen' });
+  let observed: 'on' | 'standby' | 'unknown' = initial;
+  let sendFailure: unknown;
+  let delivery: 'sent' | 'not_sent' = 'sent';
+  let setOverride: ((desired: 'on' | 'standby', request: TvPowerSetRequest) => Promise<TvPowerSetResult>) | undefined;
+  let readOverride: (() => Promise<'on' | 'standby' | 'unknown'>) | undefined;
+  const powerAdapters: ControlledAdapter[] = [];
+  const requests: unknown[] = [];
+  const h = harness(true, { repository: base.repository, recoveryTimeoutMs: 1_000, createAdapter(_host, staging) {
+    const adapter = new ControlledAdapter(staging);
+    powerAdapters.push(adapter);
+    adapter.pair = async (request) => { adapter.pairs++; adapter.enteredPair.resolve(request); return pairing; };
+    adapter.readSnapshot = async () => snapshot;
+    return Object.assign(adapter, {
+      readPowerState: async () => readOverride ? readOverride() : observed,
+      setPowerState: async (desired: 'on' | 'standby', request: TvPowerSetRequest) => {
+        requests.push(request);
+        if (setOverride) return setOverride(desired, request);
+        if (sendFailure) throw sendFailure;
+        observed = desired;
+        return { delivery };
+      },
+    });
+  }, ...overrides });
+  await h.service.status();
+  return { ...h, requests, base, powerAdapters, observe(value: typeof observed) { observed = value; }, fail(cause: unknown) { sendFailure = cause; }, noSend() { delivery = 'not_sent'; }, set(fn: NonNullable<typeof setOverride>) { setOverride = fn; }, read(fn: NonNullable<typeof readOverride>) { readOverride = fn; } };
+}
 async function connected() {
   const h = harness(true); h.service.start({ action: 'reconnect' }); await drain(); await succeed(h.adapters[0]!); return h;
 }
 
 describe('owned TV power operations', () => {
+  test('wake expires after twenty seconds without repeating the power command', async () => {
+    const h = await samsung('standby', { recoveryTimeoutMs: 60_000 });
+    try {
+      h.set(async () => ({ delivery: 'sent' }));
+      h.service.startPower(wake, 'owner'); await drain();
+      h.scheduler.advance(19_999); await drain();
+      expect(h.service.powerState().operation).toMatchObject({ status: 'running' });
+      h.scheduler.advance(1); await drain();
+      expect(h.service.powerState().operation).toMatchObject({ status: 'failed', error: { code: 'RECOVERY_TIMEOUT' } });
+      expect(h.requests).toHaveLength(1);
+    } finally { await h.service.close(); await h.base.service.close(); }
+  });
+  test.each(['success', 'deadline'] as const)('Samsung wake keeps a retryable handshake timeout nonterminal until %s', async outcome => {
+    const base = harness(true);
+    base.repository.replace({ ...base.repository.load()!, platform: 'tizen' });
+    let state: 'on' | 'standby' = 'standby';
+    let pairs = 0;
+    let sends = 0;
+    const h = harness(true, { repository: base.repository, recoveryTimeoutMs: 20_000, createAdapter(_host, staging) {
+      return Object.assign(new ControlledAdapter(staging), {
+        readPowerState: async () => state,
+        setPowerState: async () => { sends++; state = 'on'; return { delivery: 'sent' as const }; },
+        pair: async () => {
+          if (++pairs === 1 || outcome === 'deadline') throw new WebOsError('PAIRING_TIMEOUT', 'synthetic slow startup handshake');
+          return pairing;
+        },
+        readSnapshot: async () => snapshot,
+      });
+    } });
+    try {
+      await h.service.status();
+      h.service.startPower(wake, 'owner'); await drain();
+      expect(h.service.powerState().operation).toMatchObject({ status: 'running', delivery: 'sent' });
+      expect((await h.service.status()).error).toBeUndefined();
+      h.scheduler.advance(outcome === 'success' ? 1_000 : 20_000); await drain();
+      if (outcome === 'success') {
+        expect(h.service.powerState().operation).toMatchObject({ status: 'succeeded' });
+        expect(h.service.remoteState().enabled).toBe(true);
+      } else {
+        expect(h.service.powerState().operation).toMatchObject({ status: 'failed', error: { code: 'RECOVERY_TIMEOUT' } });
+        expect(h.service.remoteState().enabled).toBe(false);
+      }
+      expect(sends).toBe(1);
+    } finally { await h.service.close(); await base.service.close(); }
+  });
+  test('Samsung physical wake after intentional shutdown reconnects once without toggling power', async () => {
+    const h = await samsung();
+    try {
+      h.service.start({ action: 'reconnect' }); await drain();
+      h.service.startPower(off, 'owner'); await drain();
+      h.powerAdapters.at(-1)!.readSnapshot = async () => { throw new WebOsError('CONNECTION_LOST', 'synthetic standby socket loss'); };
+      await h.service.status(); await drain();
+      expect(h.service.powerState().observedPower).toBe('standby');
+      h.observe('on');
+      await h.service.status(); await drain();
+      expect((await h.service.status()).connection).toBe('available');
+      expect(h.service.remoteState().enabled).toBe(true);
+      expect(h.service.powerState().operation).toMatchObject({ action: 'recover', status: 'succeeded' });
+      expect(h.powerAdapters.reduce((n, adapter) => n + adapter.pairs, 0)).toBe(2);
+      expect(await h.powerAdapters.at(-1)!.enteredPair.promise).toMatchObject({ credential: 'synthetic-key' });
+      expect(h.requests).toHaveLength(1);
+    } finally { await h.service.close(); await h.base.service.close(); }
+  });
+  test('Samsung startup standby physical wake reconnects without any power request', async () => {
+    const h = await samsung('standby');
+    try {
+      h.observe('on'); await h.service.status(); await drain();
+      expect((await h.service.status()).connection).toBe('available');
+      expect(h.service.remoteState().enabled).toBe(true);
+      expect(h.requests).toEqual([]);
+      expect(h.powerAdapters.reduce((n, adapter) => n + adapter.pairs, 0)).toBe(1);
+    } finally { await h.service.close(); await h.base.service.close(); }
+  });
+  test('Samsung physical wake rechecks on before pairing and never wakes a TV returned to standby', async () => {
+    const h = await samsung('standby');
+    try {
+      let reads = 0;
+      h.read(async () => ++reads === 1 ? 'on' : 'standby');
+      await h.service.status(); await drain();
+      expect(h.powerAdapters.every(adapter => adapter.pairs === 0)).toBe(true);
+      h.scheduler.advance(1_000); await drain();
+      await h.service.status(); await drain();
+      expect(h.service.powerState().operation).toMatchObject({ action: 'recover', status: 'failed' });
+      expect(h.requests).toEqual([]);
+      expect(h.powerAdapters.every(adapter => adapter.pairs === 0)).toBe(true);
+    } finally { await h.service.close(); await h.base.service.close(); }
+  });
+  test('Samsung transient snapshot failure recovers only after fresh HTTP on', async () => {
+    const h = await samsung();
+    try {
+      h.service.start({ action: 'reconnect' }); await drain();
+      h.powerAdapters.at(-1)!.readSnapshot = async () => { throw new WebOsError('CONNECTION_LOST', 'synthetic snapshot loss'); };
+      expect((await h.service.status()).error?.code).toBe('CONNECTION_LOST'); await drain();
+      expect(h.powerAdapters.reduce((count, adapter) => count + adapter.pairs, 0)).toBe(2);
+      expect(h.service.powerState().operation).toMatchObject({ action: 'recover', status: 'succeeded' });
+    } finally { await h.service.close(); await h.base.service.close(); }
+  });
+  test.each(['standby', 'unknown'] as const)('Samsung recovery never pairs when fresh guard changes on to %s', async state => {
+    const h = await samsung('on', { recoveryTimeoutMs: 5_000 });
+    try {
+      h.service.start({ action: 'reconnect' }); await drain();
+      h.powerAdapters.at(-1)!.readSnapshot = async () => { throw new WebOsError('CONNECTION_LOST', 'synthetic snapshot loss'); };
+      let reads = 0;
+      h.read(async () => ++reads === 1 ? 'on' : state);
+      await h.service.status(); await drain();
+      expect(reads).toBeGreaterThanOrEqual(2);
+      expect(h.powerAdapters.reduce((count, adapter) => count + adapter.pairs, 0)).toBe(1);
+      expect((await h.service.status()).error?.code).toBe('CONNECTION_LOST');
+    } finally { await h.service.close(); await h.base.service.close(); }
+  });
+  test('Samsung recovery rechecks HTTP before retrying a failed handshake', async () => {
+    const h = await samsung('on', { recoveryTimeoutMs: 5_000 });
+    try {
+      h.service.start({ action: 'reconnect' }); await drain();
+      h.powerAdapters.at(-1)!.readSnapshot = async () => { throw new WebOsError('CONNECTION_LOST', 'synthetic snapshot loss'); };
+      let reads = 0;
+      h.read(async () => {
+        reads++;
+        if (reads === 2) {
+          h.powerAdapters.at(-1)!.pair = async () => { h.powerAdapters.at(-1)!.pairs++; throw new WebOsError('NETWORK_UNREACHABLE', 'synthetic handshake failure'); };
+        }
+        return reads <= 2 ? 'on' : 'standby';
+      });
+      await h.service.status(); await drain();
+      expect(h.powerAdapters.reduce((count, adapter) => count + adapter.pairs, 0)).toBe(2);
+      h.scheduler.advance(1_000); await drain();
+      expect(reads).toBe(3);
+      expect(h.powerAdapters.reduce((count, adapter) => count + adapter.pairs, 0)).toBe(2);
+    } finally { await h.service.close(); await h.base.service.close(); }
+  });
+  test.each(['standby', 'unknown'] as const)('Samsung temporary HTTP %s observation retains snapshot cause and never pairs', async state => {
+    const h = await samsung();
+    try {
+      h.service.start({ action: 'reconnect' }); await drain();
+      h.powerAdapters.at(-1)!.readSnapshot = async () => { throw new WebOsError('CONNECTION_LOST', 'synthetic snapshot loss'); };
+      h.observe('standby');
+      await h.service.status(); await drain();
+      h.observe(state);
+      expect((await h.service.status()).error?.code).toBe('CONNECTION_LOST'); await drain();
+      expect(h.powerAdapters.reduce((count, adapter) => count + adapter.pairs, 0)).toBe(1);
+      expect(h.service.powerState().operation).toBeNull();
+    } finally { await h.service.close(); await h.base.service.close(); }
+  });
+  test('Samsung close owns a pending recovery HTTP guard and rejects its late on before pairing', async () => {
+    const h = await samsung(); const reading = barrier<'on'>();
+    h.service.start({ action: 'reconnect' }); await drain();
+    h.powerAdapters.at(-1)!.readSnapshot = async () => { throw new WebOsError('CONNECTION_LOST', 'synthetic snapshot loss'); };
+    let reads = 0;
+    h.read(async () => ++reads === 1 ? 'on' : reading.promise);
+    await h.service.status(); await drain();
+    let closed = false; const closing = h.service.close().then(() => { closed = true; }); await drain();
+    expect(closed).toBe(false);
+    reading.resolve('on'); await closing;
+    expect(h.powerAdapters.reduce((count, adapter) => count + adapter.pairs, 0)).toBe(1);
+    expect(h.powerAdapters.every(adapter => adapter.closed)).toBe(true);
+    await h.base.service.close();
+  });
+  test('Samsung failed fresh recovery HTTP guard clears observed on without pairing', async () => {
+    const h = await samsung();
+    try {
+      h.service.start({ action: 'reconnect' }); await drain();
+      h.powerAdapters.at(-1)!.readSnapshot = async () => { throw new WebOsError('CONNECTION_LOST', 'synthetic snapshot loss'); };
+      let reads = 0;
+      h.read(async () => {
+        if (++reads === 1) return 'on';
+        throw new WebOsError('NETWORK_UNREACHABLE', 'synthetic HTTP failure');
+      });
+      await h.service.status(); await drain();
+      expect(h.service.powerState().observedPower).toBe('unknown');
+      expect((await h.service.status()).error?.code).toBe('NETWORK_UNREACHABLE');
+      expect(h.powerAdapters.reduce((count, adapter) => count + adapter.pairs, 0)).toBe(1);
+    } finally { await h.service.close(); await h.base.service.close(); }
+  });
+  test('Samsung recovery HTTP guard timeout invalidates on before its late result settles', async () => {
+    const h = await samsung(); const reading = barrier<'on'>();
+    try {
+      h.service.start({ action: 'reconnect' }); await drain();
+      h.powerAdapters.at(-1)!.readSnapshot = async () => { throw new WebOsError('CONNECTION_LOST', 'synthetic snapshot loss'); };
+      let reads = 0;
+      h.read(async () => ++reads === 1 ? 'on' : reading.promise);
+      await h.service.status(); await drain();
+      h.scheduler.advance(1_000); await drain();
+      expect(h.service.powerState().observedPower).toBe('unknown');
+      reading.resolve('on'); await drain();
+      expect(h.service.powerState()).toMatchObject({ observedPower: 'unknown', operation: { status: 'failed', error: { code: 'RECOVERY_TIMEOUT' } } });
+      expect(h.powerAdapters.reduce((count, adapter) => count + adapter.pairs, 0)).toBe(1);
+    } finally { reading.resolve('on'); await h.service.close(); await h.base.service.close(); }
+  });
+  test('Samsung reconnect retains verified WSS and reports unknown HTTP power at completion', async () => {
+    let completed: TvStatusResponse | undefined;
+    const h = await samsung('on', { onOperationFinished() {
+      void h.service.status().then(status => { completed = status; });
+    } });
+    h.observe('unknown');
+    h.service.start({ action: 'reconnect' }); await drain();
+    expect(completed).toMatchObject({ connection: 'available', error: { code: 'INVALID_TV_RESPONSE' } });
+    expect(h.service.powerState()).toMatchObject({ observedPower: 'unknown', canWake: false, canPowerOff: false });
+    expect(h.powerAdapters.at(-1)!.closed).toBe(false);
+    await h.service.close(); await h.base.service.close();
+  });
+  test('Samsung cleanup failure retains the shared admission gate', async () => {
+    const h = await samsung();
+    h.set(async () => {
+      h.powerAdapters.at(-1)!.disconnectResult = Promise.reject(new Error('synthetic cleanup'));
+      throw new TvPowerSendError('CONNECTION_LOST', 'not_sent', 'synthetic send');
+    });
+    h.service.startPower(off, 'owner'); await drain();
+    expect(h.service.powerState().operation).toMatchObject({ status: 'failed', error: { code: 'CONNECTION_LOST_CLEANUP_FAILED' } });
+    expect(() => h.service.startPower(wake, 'owner')).toThrowError(expect.objectContaining({ code: 'CLEANUP_FAILED' }));
+    await expect(h.service.close()).rejects.toMatchObject({ code: 'CLEANUP_FAILED' });
+    await h.base.service.close();
+  });
+  test('Samsung HTTP probe gates mutation and late close observation cannot publish', async () => {
+    const h = await samsung(); const reading = barrier<'on' | 'standby' | 'unknown'>();
+    h.read(() => reading.promise);
+    const probe = h.service.status(); await drain();
+    expect(() => h.service.startPower(off, 'owner')).toThrowError(expect.objectContaining({ code: 'OPERATION_CONFLICT' }));
+    const closing = h.service.close(); await drain();
+    expect(h.service.powerState().busy).toBe(true);
+    reading.resolve('standby'); await probe; await closing;
+    expect(h.service.powerState()).toMatchObject({ observedPower: 'on', canWake: false });
+    await h.base.service.close();
+  });
+  test('Samsung wake remains available when HTTP confirms standby and WSS stays usable', async () => {
+    const h = await samsung(); h.service.start({ action: 'reconnect' }); await drain();
+    h.service.startPower(off, 'owner'); await drain();
+    expect((await h.service.status()).connection).toBe('available');
+    expect(h.service.powerState()).toMatchObject({ observedPower: 'standby', canWake: true, operation: { status: 'succeeded' } });
+    await h.service.close(); await h.base.service.close();
+  });
+  test('Samsung HTTP failure after unknown send cannot prove standby', async () => {
+    const h = await samsung(); h.fail(new TvPowerSendError('CONNECTION_LOST', 'unknown', 'synthetic send'));
+    h.read(async () => { throw new WebOsError('NETWORK_UNREACHABLE', 'synthetic HTTP failure'); });
+    h.service.startPower(off, 'owner'); await drain();
+    for (let index = 0; index < 5; index++) { h.scheduler.advance(1_000); await drain(); }
+    expect(h.service.powerState()).toMatchObject({ observedPower: 'unknown', operation: { status: 'failed', delivery: 'unknown', error: { code: 'POWER_OFF_UNCONFIRMED' } } });
+    expect(h.requests).toHaveLength(1);
+    await h.service.close(); await h.base.service.close();
+  });
+  test('Samsung startup standby observes without pairing or automatic recovery', async () => {
+    const h = await samsung('standby');
+    await h.service.initialize(); await drain();
+    expect(h.requests).toHaveLength(0);
+    expect(h.powerAdapters.every(adapter => adapter.pairs === 0)).toBe(true);
+    expect(h.service.powerState()).toMatchObject({ observedPower: 'standby', canWake: true, operation: null });
+    expect((await h.service.status()).connection).toBe('unavailable');
+    await h.service.close(); await h.base.service.close();
+  });
+  test('Samsung cancellation during encryption prevents late repository replacement', async () => {
+    const cipher = harness().cipher;
+    const encrypting = barrier<ReturnType<typeof cipher.encrypt>>();
+    const h = await samsung('on', { cipher: { decrypt: cipher.decrypt, encrypt: () => encrypting.promise } });
+    h.set(async (_desired, request) => {
+      await request.onPaired?.({ ...pairing, credential: 'synthetic-rotated' });
+      return { delivery: 'sent' };
+    });
+    h.service.startPower(off, 'owner'); await drain();
+    await h.service.cancelOwnedPower('owner');
+    encrypting.resolve(cipher.encrypt('synthetic-rotated')); await drain();
+    expect(h.base.writes).toHaveLength(1);
+    expect(h.service.powerState().operation).toMatchObject({ status: 'cancelled' });
+    await h.service.close(); await h.base.service.close();
+  });
+  test('Samsung storage failure prevents a clean usable session and any toggle', async () => {
+    const h = await samsung(); let toggles = 0;
+    h.base.repository.replace = () => { throw new Error('synthetic storage failure'); };
+    h.set(async (_desired, request) => {
+      try { await request.onPaired?.({ ...pairing, credential: 'synthetic-rotated' }); }
+      catch (cause) { throw new TvPowerSendError('UNKNOWN', 'not_sent', 'synthetic storage', { cause }); }
+      toggles++; return { delivery: 'sent' };
+    });
+    h.service.startPower(off, 'owner'); await drain();
+    expect(toggles).toBe(0);
+    expect(h.service.powerState().operation).toMatchObject({ status: 'failed', delivery: 'not_sent', error: { code: 'STORAGE_FAILED' } });
+    expect((await h.service.status()).connection).toBe('unavailable');
+    await h.service.close(); await h.base.service.close();
+  });
+  test('Samsung rotated credential persists before send even when transport then fails', async () => {
+    const h = await samsung();
+    h.set(async (_desired, request) => {
+      await request.onPaired?.({ ...pairing, credential: 'synthetic-rotated' });
+      expect(h.cipher.decrypt(h.base.repository.load()!.encryptedCredential)).toBe('synthetic-rotated');
+      throw new TvPowerSendError('CONNECTION_LOST', 'not_sent', 'synthetic transport');
+    });
+    h.service.startPower(off, 'owner'); await drain();
+    expect(h.service.powerState().operation).toMatchObject({ status: 'failed', delivery: 'not_sent', error: { code: 'CONNECTION_LOST' } });
+    h.service.start({ action: 'reconnect' }); await drain();
+    expect(await h.powerAdapters.at(-1)!.enteredPair.promise).toMatchObject({ credential: 'synthetic-rotated' });
+    expect(h.cipher.decrypt(h.base.repository.load()!.encryptedCredential)).toBe('synthetic-key');
+    await h.service.close(); await h.base.service.close();
+  });
+  test('Samsung cancellation retains send ownership and rejects late persistence', async () => {
+    const h = await samsung(); const handshake = barrier<void>();
+    h.set(async (_desired, request) => {
+      await handshake.promise;
+      await request.onPaired?.({ ...pairing, credential: 'synthetic-late' });
+      return { delivery: 'sent' };
+    });
+    h.service.startPower(off, 'owner'); await drain();
+    const cancelled = h.service.cancelOwnedPower('owner'); await drain();
+    expect(h.service.powerState()).toMatchObject({ busy: true, operation: { status: 'cancelled' } });
+    handshake.resolve(); await cancelled;
+    expect(h.service.powerState().operation).toMatchObject({ status: 'cancelled', delivery: 'unknown' });
+    expect(h.cipher.decrypt(h.base.repository.load()!.encryptedCredential)).toBe('synthetic-key');
+    await h.service.close(); await h.base.service.close();
+  });
+  test('Samsung unknown delivery expiry preserves receipt and never retransmits', async () => {
+    const h = await samsung(); h.fail(new TvPowerSendError('CONNECTION_LOST', 'unknown', 'synthetic transport'));
+    h.service.startPower(off, 'owner'); await drain();
+    for (let index = 0; index < 5; index++) { h.scheduler.advance(1_000); await drain(); }
+    expect(h.requests).toHaveLength(1);
+    expect(h.service.powerState().operation).toMatchObject({ status: 'failed', delivery: 'unknown', error: { code: 'POWER_OFF_UNCONFIRMED' } });
+    await h.service.close(); await h.base.service.close();
+  });
+  test('Samsung wake without MAC confirms on and reconnects without WOL', async () => {
+    const h = await samsung('standby');
+    h.service.start({ action: 'reconnect' }); await drain();
+    expect((await h.service.status()).connection).toBe('available');
+    expect(h.service.powerState()).toMatchObject({ canWake: true, wakeSupported: true, mac: null });
+    h.service.startPower(wake, 'owner'); await drain();
+    expect(h.service.powerState()).toMatchObject({ observedPower: 'on', operation: { action: 'wake', status: 'succeeded', delivery: 'sent' } });
+    expect(h.requests).toHaveLength(1);
+    expect((await h.service.status()).connection).toBe('available');
+    expect(h.service.remoteState().enabled).toBe(true);
+    expect(h.powerAdapters.flatMap(adapter => adapter.wakes)).toEqual([]);
+    await h.service.close(); await h.base.service.close();
+  });
+  test('Samsung wake from a disconnected standby reconnects with the saved credential', async () => {
+    const h = await samsung('standby');
+    expect((await h.service.status()).connection).toBe('unavailable');
+    h.service.startPower(wake, 'owner'); await drain();
+    expect(h.requests).toHaveLength(1);
+    expect(h.requests[0]).toMatchObject({ credential: 'synthetic-key' });
+    expect(h.service.powerState()).toMatchObject({ observedPower: 'on', canPowerOff: true, canWake: false, operation: { status: 'succeeded' } });
+    expect(h.service.remoteState().enabled).toBe(true);
+    await h.service.close(); await h.base.service.close();
+  });
+  test('Samsung wake unknown delivery only observes on and never retransmits', async () => {
+    const h = await samsung('standby');
+    h.set(async () => { h.observe('on'); throw new TvPowerSendError('CONNECTION_LOST', 'unknown', 'synthetic delivery'); });
+    h.service.startPower(wake, 'owner'); await drain();
+    expect(h.requests).toHaveLength(1);
+    expect(h.service.powerState().operation).toMatchObject({ status: 'succeeded', delivery: 'unknown' });
+    await h.service.close(); await h.base.service.close();
+  });
+  test('Samsung wake unknown delivery expires without pairing or retransmission while still standby', async () => {
+    const h = await samsung('standby');
+    h.fail(new TvPowerSendError('CONNECTION_LOST', 'unknown', 'synthetic delivery'));
+    h.service.startPower(wake, 'owner'); await drain();
+    h.scheduler.advance(1_000); await drain();
+    expect(h.requests).toHaveLength(1);
+    expect(h.powerAdapters.every(adapter => adapter.pairs === 0)).toBe(true);
+    expect(h.service.powerState()).toMatchObject({ observedPower: 'standby', operation: { status: 'failed', delivery: 'unknown', error: { code: 'RECOVERY_TIMEOUT' } } });
+    await h.service.close(); await h.base.service.close();
+  });
+  test('Samsung already-desired live guard succeeds without send after cached on state', async () => {
+    const h = await samsung(); h.observe('standby'); h.noSend();
+    h.service.startPower(off, 'owner'); await drain();
+    expect(h.service.powerState()).toMatchObject({ observedPower: 'standby', operation: { status: 'succeeded', delivery: 'not_sent' } });
+    await h.service.close(); await h.base.service.close();
+  });
+  test('Samsung unknown delivery observes without retransmission and preserves delivery', async () => {
+    const h = await samsung(); h.observe('standby');
+    h.fail(new TvPowerSendError('CONNECTION_LOST', 'unknown', 'synthetic delivery'));
+    h.service.startPower(off, 'owner'); await drain();
+    expect(h.requests).toHaveLength(1);
+    expect(h.service.powerState().operation).toMatchObject({ status: 'succeeded', delivery: 'unknown' });
+    await h.service.close(); await h.base.service.close();
+  });
+  test.each(['on', 'standby', 'unknown'] as const)('Samsung HTTP observation controls admission independently of WSS: %s', async (observed) => {
+    const base = harness(true); base.repository.replace({ ...base.repository.load()!, platform: 'tizen' });
+    let pairs = 0;
+    const h = harness(true, { repository: base.repository, createAdapter(_host, staging) {
+      const adapter = new ControlledAdapter(staging);
+      adapter.pair = async () => { pairs++; return pairing; };
+      return Object.assign(adapter, { readPowerState: async () => observed });
+    } });
+    const status = await h.service.status();
+    expect(h.service.powerState()).toMatchObject({ observedPower: observed, wakeSupported: true, canPowerOff: observed === 'on', canWake: observed === 'standby' });
+    expect(pairs).toBe(0);
+    if (observed === 'unknown') {
+      expect(() => h.service.startPower(wake, 'owner')).toThrowError(expect.objectContaining({ code: 'INVALID_TV_RESPONSE' }));
+      expect(status.error?.code).toBe('INVALID_TV_RESPONSE');
+      expect(() => h.service.startPower(off, 'owner')).toThrowError(expect.objectContaining({ code: 'INVALID_TV_RESPONSE' }));
+    }
+    await h.service.close(); await base.service.close();
+  });
   test('offline Samsung cannot advertise or admit wake solely from a saved MAC', async () => {
     const base = harness(true); base.repository.replace({ ...base.repository.load()!, platform: 'tizen', macAddress: '02:00:00:00:00:02' });
     const h = harness(true, { repository: base.repository });
     try {
       expect(h.service.powerState().canWake).toBe(false);
-      expect(h.service.powerState()).toMatchObject({ wakeSupported: false });
-      expect(() => h.service.startPower(wake, 'owner')).toThrowError(expect.objectContaining({ code: 'UNSUPPORTED_CAPABILITY' }));
+      expect(h.service.powerState()).toMatchObject({ wakeSupported: true, observedPower: 'unknown' });
+      expect(() => h.service.startPower(wake, 'owner')).toThrowError(expect.objectContaining({ code: 'INVALID_TV_RESPONSE' }));
       expect(h.adapters).toEqual([]);
       await h.service.initialize(); await drain();
       expect(h.service.powerState().canWake).toBe(false);

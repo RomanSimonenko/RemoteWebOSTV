@@ -35,6 +35,20 @@ test('HTTP identity transport uses actual JSON boundary', async () => {
   expect(requests).toEqual(['/api/v2/']);
 });
 
+test('successive Samsung HTTP reads do not reuse a connection rejected by the TV', async () => {
+  const used = new WeakSet<object>();
+  const server = createServer((req, res) => {
+    if (used.has(req.socket)) { req.socket.destroy(); return; }
+    used.add(req.socket);
+    res.end(JSON.stringify(identitySample));
+  });
+  const port = await listen(server);
+  const url = `http://127.0.0.1:${port}/api/v2/`;
+  for (let index = 0; index < 3; index++) {
+    await expect(requestSamsungIdentity(url, new AbortController().signal)).resolves.toEqual(identitySample);
+  }
+});
+
 test('HTTP redirect is rejected without contacting its target', async () => {
   let redirected = 0;
   const target = createServer((_req, res) => { redirected++; res.end('{}'); });

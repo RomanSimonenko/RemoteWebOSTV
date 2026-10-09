@@ -1,5 +1,5 @@
 import type { TvIdentity } from '@remote-webos-tv/contracts';
-import { WebOsError } from '@remote-webos-tv/tv-adapter';
+import { WebOsError, type TvObservedPower } from '@remote-webos-tv/tv-adapter';
 
 function invalid(): never {
   // Raw response/payload must not become an error message or nested cause.
@@ -23,6 +23,11 @@ export function parseSamsungIdentity(payload: unknown): TvIdentity {
   const firmware = device.firmwareVersion;
   if (firmware !== undefined && typeof firmware !== 'string') invalid();
   return { model, ...(typeof firmware === 'string' && firmware.trim() ? { firmwareVersion: firmware } : {}) };
+}
+
+export function parseSamsungPowerState(payload: unknown): TvObservedPower {
+  const state = record(record(payload).device).PowerState;
+  return state === 'on' || state === 'standby' ? state : 'unknown';
 }
 
 export type SamsungEvent =

@@ -249,12 +249,35 @@ test('Samsung mutation paths retain authentication Origin CSRF and no-store poli
   for (const suffix of ['', '/remote', '/power']) {
     const response = await h.app.inject(`${url}${suffix}`); expect(response.statusCode).toBe(401); expect(response.headers['cache-control']).toBe('no-store');
   }
-  for (const payload of [{ id: id(200), app: 'wink' }, { id: id(201), action: 'power_off', confirm: true }, { id: id(202), action: 'wake' }]) {
+  for (const payload of [{ id: id(200), app: 'wink' }]) {
     const response = await h.app.inject({ method: 'POST', url: `${url}/${'app' in payload ? 'commands' : 'power'}`, headers: h.headers, payload });
     expect(response.statusCode).toBe(422); expect(response.json().error?.code ?? response.json().code).toBe('UNSUPPORTED_CAPABILITY'); expect(response.headers['cache-control']).toBe('no-store');
   }
   expect(h.repository.forDevice(samsung).load()).toEqual(before); expect(h.transports.sockets).toHaveLength(1);
   expect(h.transports.sockets[0]!.frames).toEqual([]); expect(h.transports.sockets[0]!.terminateCount).toBe(0); expect(h.transports.lg.pointerFrames).toEqual([]);
+  const accepted = await h.app.inject({ method: 'POST', url: `${url}/power`, headers: h.headers, payload: { id: id(201), action: 'power_off', confirm: true } });
+  expect(accepted.statusCode).toBe(202); expect(accepted.headers['cache-control']).toBe('no-store');
+  await drain();
+  expect(h.transports.sockets[0]!.frames).toHaveLength(1);
+  expect(JSON.parse(h.transports.sockets[0]!.frames[0]!).params.DataOfCmd).toBe('KEY_POWER');
+  const replay = await h.app.inject({ method: 'POST', url: `${url}/power`, headers: h.headers, payload: { id: id(201), action: 'power_off', confirm: true } });
+  expect(replay.statusCode).toBe(202); expect(replay.json().id).toBe(id(201));
+  expect((await h.app.inject({ method: 'POST', url: `${url}/power`, headers: h.headers, payload: { id: id(203), action: 'wake' } })).statusCode).toBe(409);
+  expect(h.transports.sockets[0]!.frames).toHaveLength(1);
+  const cancelled = await h.app.inject({ method: 'POST', url: `${url}/power/${id(201)}/cancel`, headers: h.headers });
+  expect(cancelled.statusCode).toBe(200); expect(cancelled.json()).toMatchObject({ status: 'cancelled' });
+  await drain();
+  expect(h.transports.lg.pointerFrames).toEqual([]);
+  const wake = await h.app.inject({ method: 'POST', url: `${url}/power`, headers: h.headers, payload: { id: id(202), action: 'wake' } });
+  expect(wake.statusCode).toBe(202);
+  expect(wake.headers['cache-control']).toBe('no-store');
+  await drain();
+  // The fixture still reports on: explicit wake must reconnect, not toggle it off.
+  await h.transports.finishSamsung(); await drain();
+  expect(h.registry.get(samsung)!.powerState().operation).toMatchObject({ action: 'wake', status: 'succeeded', delivery: 'not_sent' });
+  expect(h.transports.sockets).toHaveLength(2);
+  expect(h.transports.sockets[0]!.frames).toHaveLength(1);
+  expect(h.transports.sockets[1]!.frames).toEqual([]);
 });
 
 test('LG and Samsung share the command and setup attempt limits', async () => {

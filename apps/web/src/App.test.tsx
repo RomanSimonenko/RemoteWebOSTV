@@ -192,6 +192,7 @@ test('logout stays available while a pair submission is pending and aborts it wi
   await act(async () => {});
   fireEvent.click(screen.getByRole('button', { name: 'Добавить ТВ' }));
   fireEvent.change(screen.getByLabelText('IP-адрес телевизора'), { target: { value: '10.0.0.25' } });
+  fireEvent.change(screen.getByLabelText(/MAC-адрес телевизора/), { target: { value: '02:00:00:00:00:25' } });
   fireEvent.submit(screen.getByRole('button', { name: 'Подключить' }).closest('form')!);
   const signal = fetch.mock.calls[3]?.[1].signal as AbortSignal;
   expect((screen.getByRole('button', { name: 'Выйти' }) as HTMLButtonElement).disabled).toBe(false);
