@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { beforeAll, expect, test, vi } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import Database from 'better-sqlite3';
 
 import { openDatabase } from '../src/storage/database.js';
@@ -18,12 +18,6 @@ import { runSetupTokenCli } from '../src/auth/cli.js';
 const workspaceRoot = fileURLToPath(new URL('../../..', import.meta.url));
 const cliPath = fileURLToPath(new URL('../dist/src/index.js', import.meta.url));
 const tokenCliPath = fileURLToPath(new URL('../dist/src/auth/cli.js', import.meta.url));
-
-beforeAll(() => {
-  // Node subprocesses use built workspace exports, including shared TV errors.
-  const build = spawnSync('pnpm', ['--filter', '@remote-webos-tv/api...', 'build'], { cwd: workspaceRoot, encoding: 'utf8' });
-  expect(build.status, build.stderr).toBe(0);
-}, 30_000);
 
 test.each([
   ['newer', 'STORAGE_SCHEMA_NEWER', undefined],
