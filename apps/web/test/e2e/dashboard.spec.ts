@@ -28,6 +28,7 @@ test('dashboard adds the first TV, opens remote and returns without another pair
   await expect(page.getByLabel('IP-адрес телевизора')).toHaveCount(0);
   await openTvWorkspace(page);
   await page.getByLabel('IP-адрес телевизора').fill(tvHost);
+  await page.getByLabel(/MAC-адрес телевизора/).fill('02:00:00:00:00:03');
   await page.getByRole('button', { name: 'Подключить', exact: true }).click();
   await tv.tv.waitForRequestCount(1);
   tv.promptGate.release();

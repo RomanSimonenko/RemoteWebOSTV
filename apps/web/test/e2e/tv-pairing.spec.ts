@@ -16,6 +16,7 @@ async function competingBind(port: number) {
 async function startPair(page: Page, tv: TvFixture) {
   await expect(page.getByRole('button', { name: 'Подключить', exact: true })).toBeVisible();
   await page.getByLabel('IP-адрес телевизора').fill(tvHost);
+  await page.getByLabel(/MAC-адрес телевизора/).fill('02:00:00:00:00:03');
   const accepted = page.waitForResponse((response) => response.url() === `${tv.origin}/api/tvs` && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'Подключить', exact: true }).click();
   expect((await accepted).status()).toBe(202);
@@ -114,6 +115,7 @@ test('TV rejection is visible and leaves no saved TV', async ({ page, tv }) => {
   await tv.setupAndLogin(page);
   await openTvWorkspace(page);
   await page.getByLabel('IP-адрес телевизора').fill(tvHost);
+  await page.getByLabel(/MAC-адрес телевизора/).fill('02:00:00:00:00:03');
   await page.getByRole('button', { name: 'Подключить', exact: true }).click();
   await expect(page.getByRole('alert')).toHaveText('Запрос на сопряжение отклонён.');
   const status = await tv.status(page);

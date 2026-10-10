@@ -75,6 +75,7 @@ async function pair(page: Page, tv: TvFixture) {
   await tv.setupAndLogin(page);
   await openTvWorkspace(page);
   await page.getByLabel('IP-адрес телевизора').fill(tvHost);
+  await page.getByLabel(/MAC-адрес телевизора/).fill('02:00:00:00:00:01');
   await page.getByRole('button', { name: 'Подключить', exact: true }).click();
   await tv.tv.waitForRequestCount(1);
   tv.promptGate.release();
