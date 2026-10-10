@@ -12,6 +12,39 @@ beforeEach(() => {
 });
 
 const csrfToken = 'c'.repeat(43);
+test('Samsung standby blocks remote but allows wake while preserving available connection', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => response(path === '/api/tv' ? { ...saved, connection: 'available' }
+    : path === '/api/tv/power' ? { mac: null, canPowerOff: false, canWake: true, observedPower: 'standby', operation: null }
+    : { enabled: true, reason: null })));
+  render(<TvSetup platform="tizen" csrfToken={csrfToken} settingsOpen={false} onCloseSettings={vi.fn()} onSessionExpired={vi.fn()} />);
+  await act(async () => {});
+  expect(screen.getByRole('status', { name: 'Соединение с телевизором' }).textContent).toBe('Подключён');
+  expect(document.querySelector('.connection-led')?.getAttribute('data-color')).toBe('gray');
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Вверх' }).disabled).toBe(true);
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Включить ТВ' }).disabled).toBe(false);
+  expect(screen.getByRole('status', { name: 'Питание телевизора' }).textContent).toBe('');
+});
+test('Samsung settings retain IP controls but contain no network power section', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => response(path === '/api/tv' ? { ...saved, connection: 'available' }
+    : path === '/api/tv/power' ? { mac: null, canPowerOff: true, canWake: false, observedPower: 'on', operation: null }
+    : { enabled: true, reason: null })));
+  render(<TvSetup platform="tizen" csrfToken={csrfToken} settingsOpen onCloseSettings={vi.fn()} onSessionExpired={vi.fn()} />);
+  await act(async () => {});
+  const settings = screen.getByRole('dialog', { name: 'Настройки телевизора' });
+  expect(within(settings).getByLabelText('IP-адрес телевизора')).toBeTruthy();
+  expect(within(settings).queryByRole('heading', { name: 'Включение по сети' })).toBeNull();
+  expect(within(settings).queryByLabelText('MAC-адрес телевизора')).toBeNull();
+});
+test('Samsung shutdown activity preserves the independently available connection status', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => response(path === '/api/tv' ? { ...saved, connection: 'available' }
+    : path === '/api/tv/power' ? { mac: null, canPowerOff: false, canWake: false, observedPower: 'on', operation: { id: '00000000-0000-4000-8000-000000000001', action: 'power_off', status: 'running', phase: 'sending', delivery: 'sent', startedAt: 10000, deadlineAt: 70000 } }
+    : { enabled: false, reason: 'BUSY' })));
+  render(<TvSetup platform="tizen" csrfToken={csrfToken} settingsOpen={false} onCloseSettings={vi.fn()} onSessionExpired={vi.fn()} />);
+  await act(async () => {});
+  const connection = screen.getByRole('status', { name: 'Соединение с телевизором' });
+  expect(connection.textContent).toBe('Подключён');
+  expect(connection.getAttribute('data-connection')).toBe('available');
+});
 test('pending initial status is not presented as an unconfigured TV', async () => {
   vi.useFakeTimers();
   let finish!: (value: Response) => void;

@@ -1,7 +1,7 @@
 import { localTvHostSchema, tvButtonSchema, type TvButton, type TvIdentity, type TvCapabilities } from '@remote-webos-tv/contracts';
-import { TvButtonSendError, WebOsCleanupError, WebOsError, type PairingRequest, type PairingResult, type TvAdapter } from '@remote-webos-tv/tv-adapter';
+import { TvButtonSendError, TvPowerSendError, WebOsCleanupError, WebOsError, type PairingRequest, type PairingResult, type TvAdapter, type TvObservedPower, type TvPowerSetRequest, type TvPowerSetResult } from '@remote-webos-tv/tv-adapter';
 import { createSamsungSocket, requestSamsungIdentity } from './transport.js';
-import { parseSamsungEvent, parseSamsungIdentity } from './response-parsers.js';
+import { parseSamsungEvent, parseSamsungIdentity, parseSamsungPowerState } from './response-parsers.js';
 import { readSdbPlatformVersion, type SdbSocket } from './sdb-capability.js';
 
 export interface SamsungSocket {
@@ -34,7 +34,7 @@ export interface SamsungAdapterDependencies {
 
 const capabilities: TvCapabilities = Object.freeze({
   buttons: true, ssap: false, pointer: false, apps: false, inputs: false,
-  powerOff: false, wakeOnLan: false, textInput: false, notifications: false,
+  powerOff: true, wakeOnLan: false, textInput: false, notifications: false,
 });
 
 const keys = {
@@ -78,6 +78,64 @@ export function createSamsungAdapter(dependencies: SamsungAdapterDependencies): 
   }
   let current: Connection | undefined;
   let failedCleanup: { connection: Connection; error: WebOsError } | undefined;
+  const powerReads = new Set<AbortController>();
+
+  async function readPowerState(signal: AbortSignal): Promise<TvObservedPower> {
+    if (signal.aborted) throw new WebOsError('CONNECTION_LOST', 'Samsung power observation cancelled');
+    if (!acceptHost(dependencies.host)) throw new WebOsError('NETWORK_UNREACHABLE', 'Samsung host rejected by local address policy');
+    const controller = new AbortController();
+    powerReads.add(controller);
+    let timer: unknown;
+    let release = () => {};
+    const abort = () => controller.abort();
+    signal.addEventListener('abort', abort, { once: true });
+    try {
+      const payload = await new Promise<unknown>((resolve, reject) => {
+        const cancelled = () => reject(new WebOsError('CONNECTION_LOST', 'Samsung power observation cancelled'));
+        controller.signal.addEventListener('abort', cancelled, { once: true });
+        release = () => controller.signal.removeEventListener('abort', cancelled);
+        timer = scheduler.setTimeout(() => {
+          reject(new WebOsError('NETWORK_UNREACHABLE', 'Samsung power observation timed out'));
+          controller.abort();
+        }, dependencies.requestTimeoutMs);
+        Promise.resolve().then(() => {
+          if (controller.signal.aborted) return undefined;
+          return requestIdentity(`http://${dependencies.host}:8001/api/v2/`, controller.signal);
+        }).then(resolve, (cause: unknown) => reject(cause instanceof WebOsError ? cause
+          : new WebOsError('NETWORK_UNREACHABLE', 'Samsung power observation failed', { cause })));
+      });
+      if (signal.aborted || controller.signal.aborted) throw new WebOsError('CONNECTION_LOST', 'Samsung power observation cancelled');
+      return parseSamsungPowerState(payload);
+    } finally {
+      scheduler.clearTimeout(timer); release(); signal.removeEventListener('abort', abort);
+      powerReads.delete(controller); controller.abort();
+    }
+  }
+
+  async function setPowerState(desired: 'on' | 'standby', request: TvPowerSetRequest): Promise<TvPowerSetResult> {
+    let pairing: PairingResult | undefined;
+    try {
+      if (request.host !== dependencies.host) throw new WebOsError('NETWORK_UNREACHABLE', 'Samsung host rejected by local address policy');
+      if (desired !== 'on' && desired !== 'standby') throw new WebOsError('INVALID_TV_RESPONSE', 'Invalid desired Samsung power state');
+      const before = await readPowerState(request.signal);
+      if (before === 'unknown') throw new WebOsError('INVALID_TV_RESPONSE', 'Samsung power state is unknown');
+      if (before === desired) return { delivery: 'not_sent' };
+      if (failedCleanup) throw failedCleanup.error;
+      if (!current?.ready || current.disposed || current.socket?.readyState !== 1) {
+        if (request.credential === undefined) throw new WebOsError('AUTHORIZATION_FAILED', 'Samsung power requires saved authorization');
+        pairing = await pair(request);
+        await request.onPaired?.(pairing);
+      }
+      const after = await readPowerState(request.signal);
+      if (after === 'unknown') throw new WebOsError('INVALID_TV_RESPONSE', 'Samsung power state is unknown');
+      if (after === desired) return { delivery: 'not_sent', ...(pairing ? { pairing } : {}) };
+      await sendKey('KEY_POWER', request.signal, 'power');
+      return { delivery: 'sent', ...(pairing ? { pairing } : {}) };
+    } catch (cause) {
+      if (cause instanceof TvPowerSendError) throw cause;
+      throw new TvPowerSendError(cause instanceof WebOsError ? cause.code : 'UNKNOWN', 'not_sent', 'Samsung power was not sent', { cause });
+    }
+  }
 
   function stopTimer(connection: Connection) {
     if (connection.timer !== undefined) scheduler.clearTimeout(connection.timer);
@@ -180,13 +238,21 @@ export function createSamsungAdapter(dependencies: SamsungAdapterDependencies): 
   }
 
   async function sendButton(button: TvButton, signal: AbortSignal): Promise<void> {
-    let connection: Connection;
-    try { connection = requireReady(signal); }
+    // Preserve the existing connection-first button validation contract.
+    try { requireReady(signal); }
     catch (cause) { throw new TvButtonSendError('CONNECTION_LOST', 'not_sent', 'Samsung button was not sent', { cause }); }
     const parsed = tvButtonSchema.safeParse(button);
     if (!parsed.success) throw new TvButtonSendError('UNSUPPORTED_CAPABILITY', 'not_sent', 'Unsupported Samsung button');
+    return sendKey(keys[parsed.data], signal, 'button');
+  }
+
+  async function sendKey(key: string, signal: AbortSignal, operation: 'button' | 'power'): Promise<void> {
+    const SendError = operation === 'power' ? TvPowerSendError : TvButtonSendError;
+    let connection: Connection;
+    try { connection = requireReady(signal); }
+    catch (cause) { throw new SendError('CONNECTION_LOST', 'not_sent', `Samsung ${operation} was not sent`, { cause }); }
     const frame = JSON.stringify({ method: 'ms.remote.control', params: {
-      Cmd: 'Click', DataOfCmd: keys[parsed.data], Option: 'false', TypeOfRemote: 'SendRemoteKey',
+      Cmd: 'Click', DataOfCmd: key, Option: 'false', TypeOfRemote: 'SendRemoteKey',
     } });
     return new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -194,24 +260,25 @@ export function createSamsungAdapter(dependencies: SamsungAdapterDependencies): 
         if (settled) return;
         settled = true; scheduler.clearTimeout(timer);
         signal.removeEventListener('abort', abort); connection.cancelSends.delete(cancel);
-        if (cause) reject(new TvButtonSendError(cause.code, 'unknown', 'Samsung button delivery is unknown', { cause }));
+        if (cause) reject(new SendError(cause.code, 'unknown', `Samsung ${operation} delivery is unknown`, { cause }));
         else resolve();
       };
       const cancel = (cause: WebOsError) => finish(cause);
-      const abort = () => finish(new WebOsError('CONNECTION_LOST', 'Samsung button cancelled after send'));
+      const abort = () => finish(new WebOsError('CONNECTION_LOST', `Samsung ${operation} cancelled after send`));
       const timer = scheduler.setTimeout(() => {
-        const error = new WebOsError('CONNECTION_LOST', 'Samsung button write timed out');
+        const error = new WebOsError('CONNECTION_LOST', `Samsung ${operation} write timed out`);
         fail(connection, error);
       }, dependencies.requestTimeoutMs);
       connection.cancelSends.add(cancel); signal.addEventListener('abort', abort, { once: true });
       try {
         connection.socket!.send(frame, (cause) => {
-          if (cause) { const error = new WebOsError('CONNECTION_LOST', 'Samsung button write failed', { cause }); fail(connection, error); }
+          if (settled) return;
+          if (cause) { const error = new WebOsError('CONNECTION_LOST', `Samsung ${operation} write failed`, { cause }); fail(connection, error); }
           else if (signal.aborted || current !== connection || !connection.ready) abort();
           else finish();
         });
       } catch (cause) {
-        const error = new WebOsError('CONNECTION_LOST', 'Samsung button write failed', { cause });
+        const error = new WebOsError('CONNECTION_LOST', `Samsung ${operation} write failed`, { cause });
         fail(connection, error);
       }
     });
@@ -219,6 +286,8 @@ export function createSamsungAdapter(dependencies: SamsungAdapterDependencies): 
 
   return {
     pair,
+    readPowerState,
+    setPowerState,
     async readPlatformVersion(signal) {
       const connection = requireReady(signal);
       if (connection.versionRead) throw new WebOsError('UNKNOWN', 'Samsung metadata was already requested on this connection');
@@ -242,6 +311,7 @@ export function createSamsungAdapter(dependencies: SamsungAdapterDependencies): 
     async prepareRemote(signal) { requireReady(signal); },
     sendButton,
     async disconnect() {
+      for (const controller of powerReads) controller.abort();
       const connection = current ?? failedCleanup?.connection;
       if (connection) {
         const failure = dispose(connection, new WebOsError('CONNECTION_LOST', 'Samsung disconnected'));

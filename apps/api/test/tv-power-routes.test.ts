@@ -10,7 +10,7 @@ import { openDatabase } from '../src/storage/database.js';
 import { createOwnerRepository } from '../src/auth/repository.js';
 import { createOwnerSetupService } from '../src/auth/service.js';
 import { createAuthSessionService } from '../src/auth/sessions.js';
-import { barrier, drain, harness, pairing, snapshot, succeed } from './support/tv-harness.js';
+import { barrier, ControlledAdapter, drain, harness, pairing, snapshot, succeed } from './support/tv-harness.js';
 
 const origin = 'https://remote.example.test';
 const id = '00000000-0000-4000-8000-000000000001';
@@ -20,7 +20,7 @@ const wake = { id, action: 'wake' } as const;
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { vi.restoreAllMocks(); for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
-async function fixture(ready = true, powerOff = true, saved = true) {
+async function fixture(ready = true, powerOff = true, saved = true, samsung = false) {
   const directory = await mkdtemp(join(tmpdir(), 'tv-power-routes-'));
   const database = await openDatabase({ dataDir: directory });
   const repository = createOwnerRepository(database.sqlite);
@@ -31,7 +31,20 @@ async function fixture(ready = true, powerOff = true, saved = true) {
   const login = (await sessions.login('owner', 'synthetic password 123'))!;
   const headersFor = (token: string) => ({ cookie: `remote_webos_session=${token}`, origin, 'x-csrf-token': sessions.authenticate(token)!.csrfToken });
   let internalId = 1000;
-  const h = harness(saved, { newId: () => `00000000-0000-4000-8000-${String(++internalId).padStart(12, '0')}` });
+  const base = harness(saved);
+  const samsungAdapters: ControlledAdapter[] = [];
+  let samsungPower: 'on' | 'standby' = 'standby';
+  const samsungPowerRequests: string[] = [];
+  if (samsung) base.repository.replace({ ...base.repository.load()!, platform: 'tizen' });
+  const h = harness(saved, { ...(samsung ? { repository: base.repository, createAdapter(_host, staging) {
+    const adapter = Object.assign(new ControlledAdapter(staging), {
+      readPowerState: async () => samsungPower,
+      setPowerState: async (desired: 'on' | 'standby') => { samsungPowerRequests.push(desired); samsungPower = desired; return { delivery: 'sent' as const }; },
+    });
+    adapter.pair = async () => { adapter.pairs++; return pairing; };
+    adapter.readSnapshot = async () => snapshot;
+    samsungAdapters.push(adapter); return adapter;
+  } } : {}), newId: () => `00000000-0000-4000-8000-${String(++internalId).padStart(12, '0')}` });
   if (ready) {
     h.service.start({ action: 'reconnect' }); await drain();
     const adapter = h.adapters[0]!;
@@ -44,12 +57,34 @@ async function fixture(ready = true, powerOff = true, saved = true) {
     getSetupState: async () => repository.getSetupState(), auth: { setup, sessions }, tv: h.service,
     logStream: new Writable({ write(chunk, _encoding, done) { logs.push(String(chunk)); done(); } }),
   });
-  cleanups.push(async () => { await app.close(); await h.service.close(); database.close(); await rm(directory, { recursive: true, force: true }); });
+  cleanups.push(async () => { await app.close(); await h.service.close(); await base.service.close(); database.close(); await rm(directory, { recursive: true, force: true }); });
   const headers = headersFor(login.token);
   const post = (payload: unknown = off, supplied = headers) => app.inject({ method: 'POST', url: '/api/tv/power', headers: { ...supplied, 'content-type': 'application/json' }, payload: JSON.stringify(payload) });
   const cancel = (operationId = id, supplied = headers) => app.inject({ method: 'POST', url: `/api/tv/power/${operationId}/cancel`, headers: supplied });
-  return { app, h, sessions, login, headers, headersFor, logs, post, cancel };
+  return { app, h, sessions, login, headers, headersFor, logs, post, cancel, samsungAdapters, samsungPowerRequests };
 }
+
+test('Samsung power GET observes standby without opening a remote session', async () => {
+  const { app, h, headers, samsungAdapters } = await fixture(false, true, true, true);
+  const response = await app.inject({ url: '/api/tv/power', headers });
+  expect(response.statusCode).toBe(200);
+  expect(response.json()).toMatchObject({ observedPower: 'standby', wakeSupported: true, canWake: true, canPowerOff: false, mac: null });
+  expect((await h.service.status()).connection).toBe('unavailable');
+  expect(samsungAdapters.every(adapter => adapter.pairs === 0)).toBe(true);
+});
+
+test('Samsung wake without MAC preserves authenticated receipts and never resends on replay', async () => {
+  const { app, h, headers, post, samsungPowerRequests } = await fixture(false, true, true, true);
+  await app.inject({ url: '/api/tv/power', headers });
+  const accepted = await post(wake);
+  expect(accepted.statusCode).toBe(202);
+  await drain();
+  expect(h.service.powerState()).toMatchObject({ observedPower: 'on', operation: { action: 'wake', status: 'succeeded', delivery: 'sent' } });
+  const replay = await post(wake);
+  expect(replay.statusCode).toBe(202);
+  expect(replay.json()).toMatchObject({ id, action: 'wake', status: 'succeeded' });
+  expect(samsungPowerRequests).toEqual(['on']);
+});
 
 test('power routes enforce actual session, Origin, CSRF and no-store, including encoded aliases', async () => {
   const { app, h, headers } = await fixture();

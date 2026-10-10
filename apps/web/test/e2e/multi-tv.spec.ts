@@ -5,6 +5,7 @@ async function add(page: Page, host: string, platform = 'webos') {
   await page.getByRole('button', { name: 'Добавить ТВ', exact: true }).click();
   await page.getByLabel('Платформа телевизора').selectOption(platform);
   await page.getByLabel('IP-адрес телевизора').fill(host);
+  if (platform === 'webos') await page.getByLabel(/MAC-адрес телевизора/).fill(host === secondHost ? '02:00:00:00:00:02' : '02:00:00:00:00:01');
   const accepted = page.waitForResponse(response => response.url().endsWith('/api/tvs') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'Подключить', exact: true }).click();
   const response = await accepted; expect(response.status()).toBe(202);
@@ -73,6 +74,10 @@ test('API restart preserves both device IDs and independent control', async ({ p
   await expect(page.locator('.device-card')).toHaveCount(2);
   const list = await page.request.get(`${tv.origin}/api/tvs`);
   expect((await list.json()).devices.map((device: { tvId: string }) => device.tvId)).toEqual([ids.first, ids.second]);
+  for (const [tvId, mac] of [[ids.first, '02:00:00:00:00:01'], [ids.second, '02:00:00:00:00:02']]) {
+    const power = await page.request.get(`${tv.origin}/api/tvs/${tvId}/power`);
+    expect((await power.json()).mac).toBe(mac);
+  }
   await open(page, 1); await page.getByRole('button', { name: 'Назад', exact: true }).click(); await tv.secondTv.waitForPointerFrameCount(1);
   expect(tv.tv.pointerFrames).toHaveLength(0);
   expect(tv.secondTv.pointerFrames).toEqual(['type:button\nname:BACK\n\n']);
@@ -147,7 +152,7 @@ test('Samsung uses shared desktop geometry, unsupported controls and camera clea
   const samsungGeometry = await page.locator('.tv-card').boundingBox();
   expect(samsungGeometry).toEqual(lgGeometry);
   expect((await page.locator('.webcam-actions').boundingBox())!.height).toBe(44);
-  await expect(page.getByRole('button', { name: 'Питание ТВ', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Выключить ТВ', exact: true })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Запустить Wink', exact: true })).toBeDisabled();
   await expect(page.getByRole('img', { name: 'LG', exact: true })).toHaveCount(0);
   await expect(page.locator('.tv-info')).toContainText('Samsung');
@@ -155,7 +160,7 @@ test('Samsung uses shared desktop geometry, unsupported controls and camera clea
   await page.getByRole('button', { name: 'Настройки', exact: true }).click();
   await expect(page.getByRole('dialog')).toContainText('Tizen');
   await expect(page.getByRole('dialog')).not.toContainText('2.0.25');
-  await expect(page.getByRole('dialog')).toContainText('Включение по сети для этого телевизора пока недоступно в приложении.');
+  await expect(page.getByRole('dialog').getByRole('heading', { name: 'Включение по сети' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Сохранить MAC', exact: true })).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('samsung-shared-settings.png'), fullPage: true });
   await page.getByRole('button', { name: 'Закрыть настройки', exact: true }).click();

@@ -1,5 +1,5 @@
 import { startTvOperationSchema, supportsTvButtons, tvCommandRequestSchema, tvIdentitySchema, tvMacAddressSchema, tvPlatformSchema, tvPowerRequestSchema, tvSnapshotSchema, type StartTvOperation, type TvCommandRequest, type TvCommandResult, type TvConnectionState, type TvOperation, type TvPlatform, type TvPowerOperation, type TvPowerRequest, type TvPowerState, type TvRemoteState, type TvStatusResponse } from '@remote-webos-tv/contracts';
-import type { TvAdapter } from '@remote-webos-tv/tv-adapter';
+import type { PairingResult, TvAdapter, TvObservedPower } from '@remote-webos-tv/tv-adapter';
 import { TvPowerSendError, WebOsError } from '@remote-webos-tv/tv-adapter';
 import type { ClientKeyCipher, ClientKeyStore, EncryptedEnvelopeV1 } from '@remote-webos-tv/webos';
 import type { StoredTv, TvRepository } from './repository.js';
@@ -93,7 +93,9 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
   let remoteCapability: { readonly generation: number; readonly buttons: boolean; readonly apps: boolean; readonly powerOff: boolean } | undefined;
   let power: Power | undefined;
   let intentionalOff = false;
+  let observedPower: 'on' | 'standby' | 'unknown' = 'unknown';
   let recoverAfterProbe = false;
+  let recoveryFailure: unknown;
   const serverOwner = Symbol('automatic TV recovery');
   let generation = 0;
   let initialized = false;
@@ -142,7 +144,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
   }
 
   function budgetFailure(context: Attempt): Error {
-    if (context.power?.operation.action === 'power_off') return new TvServiceError('POWER_OFF_UNCONFIRMED');
+    if (context.power?.operation.action === 'power_off') return new TvServiceError('POWER_OFF_UNCONFIRMED', 500, context.lastFailure === undefined ? undefined : { cause: context.lastFailure });
     return context.operation.action === 'reconnect'
       ? new TvServiceError('RECOVERY_TIMEOUT', 500, context.lastFailure === undefined ? undefined : { cause: context.lastFailure })
       : new WebOsError('PAIRING_TIMEOUT', 'TV operation budget expired');
@@ -162,6 +164,21 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     const staging = createStagingKeyStore(initialKey);
     const adapter = dependencies.createAdapter(host, staging, budget, allowPrompt, platform);
     activeAdapter = adapter;
+    if (platform === 'tizen' && context.power?.operation.action === 'recover') {
+      if (!adapter.readPowerState) throw new WebOsError('UNSUPPORTED_CAPABILITY', 'Power observation unavailable');
+      const version = generation;
+      const reading = adapter.readPowerState(signal);
+      let state: TvObservedPower;
+      try { state = await abortable(reading, signal); }
+      catch (cause) {
+        if (!closed && generation === version && attempt === context) observedPower = 'unknown';
+        checkConnection(); throw cause;
+      }
+      finally { await reading.catch(() => undefined); }
+      checkConnection();
+      observedPower = state;
+      if (state !== 'on') throw context.lastFailure ?? unknownPowerObservation();
+    }
     const result = await abortable(adapter.pair({ host, signal, ...(initialKey === undefined ? {} : { credential: initialKey }) }), signal);
     checkConnection();
     if (!result.credential) throw new WebOsError('INVALID_TV_RESPONSE', 'Registered response lacks a credential');
@@ -180,14 +197,9 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     const identityChanged = previous?.identity.model !== identity.data.model
       || (platform !== 'tizen' && previous.identity.platformVersion !== identity.data.platformVersion)
       || previous.identity.firmwareVersion !== identity.data.firmwareVersion;
-    let discoveredMac: string | null = null;
-    for (const candidate of result.macAddresses) {
-      const parsed = tvMacAddressSchema.safeParse(candidate);
-      if (parsed.success) { discoveredMac = parsed.data; break; }
-    }
-    const macAddress = input.action === 'change_address' || identityChanged
-      ? discoveredMac
-      : input.action === 'reconnect' ? previous!.macAddress : previous?.macAddress ?? discoveredMac;
+    // Network discovery may return another interface's MAC. Only the user
+    // chooses the wake address; reconnect and identity/IP changes preserve it.
+    const macAddress = previous ? previous.macAddress : input.action === 'pair' ? input.mac ?? null : null;
     if (input.action !== 'reconnect' || initialKey !== result.credential || identityChanged
       || previous?.identity.platformVersion !== identity.data.platformVersion) {
       let encryptedCredential: EncryptedEnvelopeV1;
@@ -200,6 +212,12 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       saved = replacement;
     }
     connection = 'available'; error = undefined;
+    if (platform === 'tizen' && adapter.readPowerState) {
+      const state = await abortable(adapter.readPowerState(signal), signal);
+      checkConnection();
+      observedPower = state;
+      if (state === 'unknown') error = projectTvError(unknownPowerObservation());
+    }
     remoteCapability = { generation, buttons: supportsTvButtons(snapshot.capabilities), apps: snapshot.capabilities.apps === true, powerOff: snapshot.capabilities.powerOff === true };
     startVersionRead(adapter);
   }
@@ -314,7 +332,9 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
             catch (cleanupCause) { if (signal.aborted) throw signal.reason; throw cleanupFailure(cause, cleanupCause); }
           }
           check(context);
-          error = projectTvError(cause);
+          // Wake recovery owns one overall deadline. An individual retry is
+          // diagnostic context, not a terminal failure of that operation.
+          if (context.power?.operation.action !== 'wake') error = projectTvError(cause);
           await waitForTv(scheduler, Math.min(recoveryCooldown(++failedAttempts), context.expiresAt - scheduler.now()), signal);
         } finally {
           scheduler.clearTimeout(timer); signal.removeEventListener('abort', abort);
@@ -367,6 +387,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     const context: Attempt = { operation, controller, timer, expiresAt: scheduler.now() + budget, ...(owner === undefined ? {} : { owner }) };
     intentionalOff = false; recoverAfterProbe = false;
     attempt = context; generation++;
+    observedPower = 'unknown';
     currentTizenVersion = false;
     metadata?.controller.abort(new TvServiceError('CANCELLED'));
     remoteCapability = undefined;
@@ -413,6 +434,7 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
         latchCleanupFailure(failure);
         connection = failedConnection(failure); error = projectTvError(failure);
         recoverAfterProbe = !intentionalOff && isTransientTvFailure(failure);
+        if (recoverAfterProbe) recoveryFailure = failure;
         // GET resolves on its own budget. The service still owns and awaits this
         // tracked cleanup on shutdown, and start rejects while it is pending.
         void disconnect(adapter).catch((cleanupCause: unknown) => {
@@ -423,21 +445,50 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
   }
 
   async function status(): Promise<TvStatusResponse> {
-    if (!closed && !work && !command && activeAdapter) {
+    if (!closed && !work && !command && !cleanup && (activeAdapter || platform === 'tizen' && saved)) {
       if (!probe) {
         const controller = new AbortController();
-        const pending = readStatus(activeAdapter, controller, generation);
+        const pending = platform === 'tizen' ? readSamsungStatus(controller, generation) : readStatus(activeAdapter!, controller, generation);
         const current: Probe = { controller, promise: pending.finally(() => { if (probe === current) probe = undefined; }) };
         probe = current;
       }
       await probe.promise;
     }
     const result = view();
-    if (recoverAfterProbe && !closed && !work && !command && !probe && !unsafeCleanup && saved) {
-      recoverAfterProbe = false;
+    if (recoverAfterProbe && (platform !== 'tizen' || observedPower === 'on') && !closed && !work && !command && !probe && !unsafeCleanup && saved) {
       beginPower({ id: dependencies.newId(), action: 'recover' }, serverOwner);
     }
     return result;
+  }
+
+  async function readSamsungStatus(controller: AbortController, version: number): Promise<void> {
+    const adapter = activeAdapter ?? dependencies.createAdapter(saved!.host, createStagingKeyStore(), statusBudgetMs, false, platform);
+    const temporary = adapter !== activeAdapter;
+    let reading: Promise<TvObservedPower> | undefined;
+    const timer = scheduler.setTimeout(() => controller.abort(new WebOsError('INVALID_TV_RESPONSE', 'Power observation budget expired')), statusBudgetMs);
+    try {
+      if (!adapter.readPowerState) throw new WebOsError('UNSUPPORTED_CAPABILITY', 'Power observation unavailable');
+      reading = adapter.readPowerState(controller.signal);
+      const state = await abortable(reading, controller.signal);
+      if (state === 'unknown') throw unknownPowerObservation();
+      const physicallyWoke = observedPower === 'standby' && state === 'on';
+      if (!closed && generation === version && !controller.signal.aborted) { observedPower = state; if (!recoverAfterProbe) error = undefined; }
+      if (!temporary && !controller.signal.aborted) await readStatus(adapter, controller, version);
+      if (physicallyWoke && !closed && generation === version && !controller.signal.aborted) {
+        intentionalOff = false;
+        if (connection === 'unavailable') recoverAfterProbe = true;
+      }
+    } catch (cause) {
+      if (!closed && generation === version) { observedPower = 'unknown'; if (!recoverAfterProbe) error = projectTvError(controller.signal.aborted ? controller.signal.reason : cause); }
+    } finally {
+      scheduler.clearTimeout(timer);
+      if (reading) await reading.catch(() => undefined);
+      if (temporary) await disconnect(adapter);
+    }
+  }
+
+  function unknownPowerObservation(): WebOsError {
+    return new WebOsError('INVALID_TV_RESPONSE', 'Samsung power observation is unknown');
   }
 
   function assertIdle(): void {
@@ -458,13 +509,14 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
       busy: !!(work || cleanup || command || probe),
       mac: saved?.macAddress ?? null,
       wakeSupported: supportsWake(),
-      canPowerOff: idle && connection === 'available' && !!activeAdapter?.powerOff && remoteCapability?.generation === generation && remoteCapability.powerOff === true,
-      canWake: supportsWake() && !!saved?.macAddress && (idle && connection === 'unavailable' || canReplaceReconnect()),
+      ...(platform === 'tizen' ? { observedPower } : {}),
+      canPowerOff: platform === 'tizen' ? idle && !!saved && observedPower === 'on' : idle && connection === 'available' && !!activeAdapter?.powerOff && remoteCapability?.generation === generation && remoteCapability.powerOff === true,
+      canWake: platform === 'tizen' ? idle && !!saved && observedPower === 'standby' : supportsWake() && !!saved?.macAddress && (idle && connection === 'unavailable' || canReplaceReconnect()),
       operation: power ? { ...power.operation, ...(power.operation.error ? { error: { ...power.operation.error } } : {}) } : null,
     };
   }
 
-  function supportsWake(): boolean { return platform === 'webos'; }
+  function supportsWake(): boolean { return platform === 'webos' || platform === 'tizen'; }
 
   function setMac(mac: string | null): TvPowerState {
     assertIdle();
@@ -482,6 +534,11 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     const parsed = tvPowerRequestSchema.safeParse(input);
     if (!parsed.success) throw new TvServiceError('INVALID_REQUEST', 400);
     if (!(parsed.data.action === 'wake' && canReplaceReconnect())) assertIdle();
+    if (platform === 'tizen') {
+      if (!saved) throw new TvServiceError('INVALID_ACTION', 409);
+      if (observedPower === 'unknown') throw unknownPowerObservation();
+      return parsed.data;
+    }
     if (parsed.data.action === 'wake') {
       if (!supportsWake()) throw new TvServiceError('UNSUPPORTED_CAPABILITY', 409);
       if (!saved?.macAddress) throw new TvServiceError('WOL_NOT_CONFIGURED', 409);
@@ -495,18 +552,19 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
 
   function beginPower(input: { readonly id: string; readonly action: TvPowerOperation['action'] }, owner: string | symbol, previousWork?: Promise<void>): TvPowerOperation {
     const startedAt = dependencies.now();
-    const budget = input.action === 'power_off' ? 5_000 : recoveryTimeoutMs;
+    const budget = input.action === 'power_off' ? 5_000 : input.action === 'wake' ? Math.min(20_000, recoveryTimeoutMs) : recoveryTimeoutMs;
     const controller = new AbortController();
     const operation: TvPowerOperation = { id: input.id, action: input.action, startedAt, deadlineAt: startedAt + budget, status: 'running', phase: input.action === 'recover' ? 'connecting' : 'sending', delivery: 'not_sent' };
     const current: Power = { operation, owner };
     const timer = scheduler.setTimeout(() => controller.abort(budgetFailure(context)), budget);
     const context: Attempt = { operation: { id: input.id, action: 'reconnect', status: 'running', startedAt, deadlineAt: startedAt + budget }, power: current, owner, controller, timer, expiresAt: scheduler.now() + budget };
+    if (platform === 'tizen' && input.action === 'recover') context.lastFailure = recoveryFailure;
     attempt = context; power = current; generation++;
     metadata?.controller.abort(new TvServiceError('CANCELLED'));
     // Power-off retains the verified capability for its own observation.
     if (remoteCapability) remoteCapability = { ...remoteCapability, generation };
     recoverAfterProbe = false;
-    if (input.action !== 'power_off') { intentionalOff = false; connection = 'connecting'; remoteCapability = undefined; }
+    if (input.action !== 'power_off') { intentionalOff = false; if (platform !== 'tizen') connection = 'connecting'; remoteCapability = undefined; }
     error = undefined;
     const previous = saved!;
     const pending = Promise.resolve().then(() => runPower(context, previous, previousWork)).finally(() => { if (work === pending) work = undefined; });
@@ -557,9 +615,97 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
     }
   }
 
+  async function persistPowerPairing(context: Attempt, previous: StoredTv, pairing: PairingResult): Promise<void> {
+    check(context);
+    const identity = tvIdentitySchema.strict().safeParse(pairing.identity);
+    if (!identity.success || !pairing.credential) throw new WebOsError('INVALID_TV_RESPONSE', 'Power registration metadata is invalid');
+    let encryptedCredential: EncryptedEnvelopeV1;
+    try { encryptedCredential = await abortable(Promise.resolve(cipher.encrypt(pairing.credential)), context.controller.signal); }
+    catch (cause) { if (context.controller.signal.aborted) throw context.controller.signal.reason; throw new WebOsError('KEY_STORE_WRITE_FAILED', 'Unable to encrypt the registered key', { cause }); }
+    check(context);
+    const replacement = { ...previous, identity: identity.data, encryptedCredential };
+    try { repository.replace(replacement); }
+    catch (cause) { throw new TvServiceError('STORAGE_FAILED', 500, { cause }); }
+    saved = replacement;
+  }
+
+  async function runSamsungPower(context: Attempt, previous: StoredTv, previousWork?: Promise<void>): Promise<void> {
+    const current = context.power!;
+    const signal = context.controller.signal;
+    let adapter: TvAdapter | undefined;
+    let pending: Promise<unknown> | undefined;
+    let sendFailure: unknown;
+    let persisted = false;
+    try {
+      if (previousWork) await abortable(previousWork, signal);
+      check(context);
+      const credential = cipher.decrypt(previous.encryptedCredential);
+      adapter = activeAdapter ?? dependencies.createAdapter(previous.host, createStagingKeyStore(credential), Math.min(5_000, context.expiresAt - scheduler.now()), false, platform);
+      if (!adapter.setPowerState || !adapter.readPowerState) throw new WebOsError('UNSUPPORTED_CAPABILITY', 'Samsung power operation unavailable');
+      const desired = current.operation.action === 'power_off' ? 'standby' : 'on';
+      current.operation = { ...current.operation, delivery: 'unknown' };
+      pending = adapter.setPowerState(desired, { host: previous.host, credential, signal, async onPaired(pairing) {
+        await persistPowerPairing(context, previous, pairing); persisted = true;
+      } });
+      try {
+        const result = await abortable(pending as ReturnType<NonNullable<TvAdapter['setPowerState']>>, signal);
+        check(context);
+        current.operation = { ...current.operation, delivery: result.delivery, phase: 'connecting' };
+        if (result.pairing && !persisted) await persistPowerPairing(context, previous, result.pairing);
+      } catch (cause) {
+        check(context);
+        if (!(cause instanceof TvPowerSendError)) throw cause;
+        current.operation = { ...current.operation, delivery: cause.delivery, phase: 'connecting' };
+        if (cause.cause instanceof TvServiceError) throw cause.cause;
+        if (cause.delivery !== 'unknown') throw cause;
+        sendFailure = cause; context.lastFailure = cause;
+      }
+      while (true) {
+        check(context);
+        try {
+          pending = adapter.readPowerState(signal);
+          const state = await abortable(pending as Promise<TvObservedPower>, signal);
+          check(context); observedPower = state;
+          if (state === desired) break;
+          if (state === 'unknown') throw unknownPowerObservation();
+        } catch (cause) {
+          check(context); observedPower = 'unknown'; context.lastFailure = cause;
+          if (!isTransientTvFailure(cause)) throw cause;
+        }
+        await waitForTv(scheduler, Math.min(1_000, context.expiresAt - scheduler.now()), signal);
+      }
+      check(context);
+      if (desired === 'standby') {
+        intentionalOff = true;
+        // HTTP standby says nothing about whether the owned WSS is usable.
+        if (adapter !== activeAdapter) await abortable(disconnect(adapter), signal);
+        check(context); error = undefined; finish(context, 'succeeded');
+      } else {
+        if (adapter !== activeAdapter) await abortable(disconnect(adapter), signal);
+        check(context);
+        await run(context, { action: 'reconnect' }, saved ?? previous);
+      }
+    } catch (cause) {
+      const failure = signal.aborted ? signal.reason : cause;
+      if (failure instanceof Error && sendFailure && failure !== sendFailure) failure.cause = sendFailure;
+      latchCleanupFailure(cause);
+      if (attempt === context && context.operation.status === 'running') {
+        error = projectTvError(failure); finish(context, 'failed', failure);
+      }
+      if (pending) await pending.catch((lateCause: unknown) => { latchCleanupFailure(lateCause); });
+      if (adapter) {
+        try { await disconnect(adapter); }
+        catch (cleanupCause) {
+          if (attempt === context) { error = projectTvError(cleanupFailure(failure, cleanupCause)); if (context.operation.status !== 'cancelled') finish(context, 'failed', cleanupFailure(failure, cleanupCause)); }
+        }
+      }
+    } finally { scheduler.clearTimeout(context.timer); }
+  }
+
   async function runPower(context: Attempt, previous: StoredTv, previousWork?: Promise<void>): Promise<void> {
     const current = context.power!;
     if (current.operation.action === 'recover') { await run(context, { action: 'reconnect' }, previous); return; }
+    if (platform === 'tizen') { await runSamsungPower(context, previous, previousWork); return; }
     const signal = context.controller.signal;
     let adapter: TvAdapter | undefined;
     let pending: Promise<void> | undefined;
@@ -692,7 +838,11 @@ export function createTvService(dependencies: TvServiceDependencies): TvService 
   async function initialize(): Promise<void> {
     if (initialized || closed) return;
     initialized = true;
-    if (saved && !work) start({ action: 'reconnect' });
+    if (platform === 'tizen' && saved) {
+      await status();
+      if (observedPower !== 'on') return;
+    }
+    if (saved && !work && !closed) start({ action: 'reconnect' });
   }
 
   function close(): Promise<void> {

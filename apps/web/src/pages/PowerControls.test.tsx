@@ -3,6 +3,71 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { PowerControls } from './PowerControls.js';
 
 const csrfToken = 'c'.repeat(43);
+test('Samsung power transport failure explains the failed control connection', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ ...off, observedPower: 'on', operation: { ...operation, action: 'power_off', status: 'failed', delivery: 'not_sent', error: { code: 'NETWORK_UNREACHABLE', message: 'Телевизор недоступен по сети.' } } })));
+  render(<PowerControls platform="tizen" csrfToken={csrfToken} active onSessionExpired={vi.fn()} />);
+  await act(async () => {});
+  expect(screen.getByRole('alert').textContent).toBe('Не удалось установить соединение управления с телевизором.');
+});
+test('Samsung standby enables wake without MAC and removes the entire network settings section', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => response({ ...wake, mac: null, observedPower: 'standby' })));
+  render(<PowerControls platform="tizen" csrfToken={csrfToken} active settingsOpen onSessionExpired={vi.fn()} />);
+  await act(async () => {});
+  expect(screen.queryByRole('heading', { name: 'Включение по сети' })).toBeNull();
+  expect(screen.queryByLabelText('MAC-адрес телевизора')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'О включении по сети' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Сохранить MAC' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Очистить MAC' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Обновить статус питания' })).toBeNull();
+  cleanup();
+  render(<PowerControls platform="tizen" csrfToken={csrfToken} active onSessionExpired={vi.fn()} />);
+  await act(async () => {});
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Включить ТВ' }).disabled).toBe(false);
+  expect(screen.getByRole('status', { name: 'Питание телевизора' }).textContent).toBe('');
+});
+test.each([
+  ['unknown', false, false], ['unknown', true, false], ['standby', true, false], ['on', false, true], ['on', true, true],
+])('Samsung rejects inconsistent observed state %s and permissions %s/%s', async (observedPower, canPowerOff, canWake) => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ ...off, observedPower, canPowerOff, canWake })));
+  render(<PowerControls platform="tizen" csrfToken={csrfToken} active onSessionExpired={vi.fn()} />);
+  await act(async () => {});
+  expect(powerButton().disabled).toBe(true);
+  expect(screen.queryByText(/сохраните MAC/)).toBeNull();
+  if (observedPower === 'unknown') expect(screen.getByRole('status', { name: 'Питание телевизора' }).textContent).toContain('неизвестен');
+});
+test('Samsung confirmation keeps cancel focus and Escape without connection-loss details', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ ...off, observedPower: 'on' })));
+  render(<PowerControls platform="tizen" csrfToken={csrfToken} active onSessionExpired={vi.fn()} />);
+  await act(async () => {});
+  fireEvent.click(powerButton());
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Отмена' }));
+  expect(screen.getByRole('button', { name: 'Закрыть подтверждение' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Выключить' })).toBeTruthy();
+  expect(screen.queryByText('О статусе питания')).toBeNull();
+  fireEvent.keyDown(document, { key: 'Escape' });
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(document.activeElement).toBe(powerButton());
+});
+test('Samsung succeeded shutdown does not show a redundant confirmation message', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ ...wake, mac: null, observedPower: 'standby', operation: { ...operation, action: 'power_off', status: 'succeeded', phase: 'finished', delivery: 'sent' } })));
+  render(<PowerControls platform="tizen" csrfToken={csrfToken} active onSessionExpired={vi.fn()} />);
+  await act(async () => {});
+  expect(screen.getByRole('status', { name: 'Питание телевизора' }).textContent).toBe('');
+  expect(powerButton().disabled).toBe(false);
+});
+test('Samsung unknown power stays visible offline even after a previously successful shutdown', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => response({ ...off, canPowerOff: false, observedPower: 'unknown', operation: { ...operation, action: 'power_off', status: 'succeeded', phase: 'finished', delivery: 'sent' } })));
+  render(<PowerControls platform="tizen" csrfToken={csrfToken} active quietOffline onSessionExpired={vi.fn()} />);
+  await act(async () => {});
+  expect(screen.getByRole('status', { name: 'Питание телевизора' }).textContent).toBe('Статус питания неизвестен');
+});
+test('Samsung external wake supersedes the historical successful shutdown message', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => response({ ...off, observedPower: 'on', operation: { ...operation, action: 'power_off', status: 'succeeded', phase: 'finished', delivery: 'sent' } })));
+  render(<PowerControls platform="tizen" csrfToken={csrfToken} active onSessionExpired={vi.fn()} />);
+  await act(async () => {});
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Выключить ТВ' }).disabled).toBe(false);
+  expect(screen.getByRole('status', { name: 'Питание телевизора' }).textContent).toBe('');
+});
 test('unsupported network power explains its limit without enabling MAC guidance', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ mac: null, canPowerOff: false, canWake: false, wakeSupported: false, operation: null })));
   await mount();
@@ -120,9 +185,10 @@ test('the single power button opens power-off confirmation without dispatching a
   expect(fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
 });
 
-test('the single wake button sends one protected wake request and no power-off confirmation', async () => {
+test.each(['webos', 'tizen'] as const)('the single %s wake button sends one protected wake request and no power-off confirmation', async platform => {
   const pending = barrier<Response>();
-  const fetch = vi.fn().mockResolvedValueOnce(response(wake)).mockReturnValueOnce(pending.promise); vi.stubGlobal('fetch', fetch); await mount();
+  const fetch = vi.fn().mockResolvedValueOnce(response(platform === 'tizen' ? { ...wake, mac: null, observedPower: 'standby' } : wake)).mockReturnValueOnce(pending.promise); vi.stubGlobal('fetch', fetch);
+  render(<PowerControls platform={platform} csrfToken={csrfToken} active onSessionExpired={vi.fn()} />); await act(async () => {});
   expect(screen.getAllByRole('button', { name: /^(Выключить ТВ|Включить ТВ|Питание ТВ)$/ })).toHaveLength(1);
   const button = screen.getByRole('button', { name: 'Включить ТВ' }); fireEvent.click(button); fireEvent.click(button);
   expect(screen.queryByRole('dialog')).toBeNull(); expect(powerButton().disabled).toBe(true);
@@ -260,13 +326,22 @@ test.each([
 });
 
 test.each([
-  ['RECOVERY_TIMEOUT', 'Не удалось подключиться к телевизору'],
+  ['RECOVERY_TIMEOUT', 'Телевизор не ответил'],
   ['AUTHORIZATION_FAILED', 'Повторите сопряжение'],
   ['UNSUPPORTED_CAPABILITY', 'не поддерживает'],
   ['POWER_OFF_UNCONFIRMED', 'Не удалось подтвердить выключение'],
 ])('terminal %s offers a distinct safe diagnostic', async (code, text) => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ ...wake, operation: { ...operation, action: code === 'POWER_OFF_UNCONFIRMED' ? 'power_off' : 'wake', status: 'failed', phase: 'finished', delivery: 'sent', error: { code, message: 'Synthetic safe diagnostic' } } }))); await mount();
   expect(screen.getByRole('alert').textContent).toContain(text); expect(screen.queryByRole('button', { name: 'Отменить ожидание' })).toBeNull();
+});
+
+test.each(['not_sent', 'unknown', 'sent'] as const)('wake failure distinguishes delivery %s without requesting pairing', async (delivery) => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ ...wake, operation: { ...operation, action: 'wake', status: 'failed', phase: 'finished', delivery, error: { code: delivery === 'not_sent' ? 'NETWORK_UNREACHABLE' : 'RECOVERY_TIMEOUT', message: 'Synthetic diagnostic' } } })));
+  await mount();
+  const text = screen.getByRole('alert').textContent!;
+  expect(text).toContain(delivery === 'not_sent' ? 'Не удалось отправить запрос включения' : 'Телевизор не ответил');
+  expect(text.includes('Результат отправки неизвестен')).toBe(delivery === 'unknown');
+  expect(text).not.toMatch(/сопряжение|Подключитесь снова вручную|Телевизор включился/);
 });
 
 test('reload restores deadline and cancellation without starting or replaying wake', async () => {

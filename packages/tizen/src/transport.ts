@@ -8,7 +8,9 @@ const maximumResponseBytes = 1024 * 1024;
 
 export function requestSamsungIdentity(url: string, signal: AbortSignal): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    const request = get(url, { signal }, (response) => {
+    // Samsung can reset a reused HTTP socket despite advertising keep-alive.
+    // Each observation owns its connection; never retry a power command here.
+    const request = get(url, { signal, agent: false }, (response) => {
       if (response.statusCode !== 200) {
         response.destroy();
         reject(new WebOsError('INVALID_TV_RESPONSE', 'Samsung identity returned an unexpected HTTP status'));

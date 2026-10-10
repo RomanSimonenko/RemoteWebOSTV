@@ -18,6 +18,18 @@ export interface PairingResult {
   readonly macAddresses: readonly string[];
 }
 
+export interface TvPowerSetRequest extends PairingRequest {
+  /** Persist fresh authorization before any power command may be sent. */
+  readonly onPaired?: (result: PairingResult) => Promise<void>;
+}
+
+export type TvObservedPower = 'on' | 'standby' | 'unknown';
+
+export interface TvPowerSetResult {
+  readonly delivery: 'not_sent' | 'sent';
+  readonly pairing?: PairingResult;
+}
+
 export interface PlatformVersionDiagnostic {
   readonly operation: 'hello' | 'sdb_capability';
   readonly code: 'timeout' | 'invalid_response' | 'version_unavailable' | 'request_rejected' | 'send_failed';
@@ -39,5 +51,7 @@ export interface TvAdapter {
   listApps?(signal: AbortSignal): Promise<readonly TvApp[]>;
   listInputs?(signal: AbortSignal): Promise<readonly TvInput[]>;
   powerOff?(signal: AbortSignal): Promise<void>;
+  readPowerState?(signal: AbortSignal): Promise<TvObservedPower>;
+  setPowerState?(desired: 'on' | 'standby', request: TvPowerSetRequest): Promise<TvPowerSetResult>;
   wake?(macAddresses: readonly string[], signal: AbortSignal): Promise<void>;
 }

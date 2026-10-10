@@ -69,6 +69,7 @@ export class TvFixture {
   readonly wakes: Array<{ macs: readonly string[]; signal: AbortSignal }> = [];
   readonly samsungSockets: ControlledSocket[] = [];
   readonly samsungConnections: Array<{ prompted: boolean }> = [];
+  samsungPower: 'on' | 'standby' | 'unknown' = 'on';
   #wakeGate: ReturnType<typeof gate> | undefined;
   readonly #mocks: MockWebOsTv[] = [];
   readonly #logs: string[] = [];
@@ -150,9 +151,15 @@ export class TvFixture {
             if (host !== samsungHost) throw new Error('Unmapped synthetic Samsung address');
             this.policies.push({ host, prompt: allowPairingPrompt });
             return createSamsungAdapter({ host, requestTimeoutMs, handshakeTimeoutMs: requestTimeoutMs, allowPairingPrompt, scheduler: this.clock,
-              requestIdentity: async () => identitySample,
+              requestIdentity: async () => ({ ...identitySample, device: { ...identitySample.device, PowerState: this.samsungPower } }),
               createSocket: (url) => {
                 const socket = new ControlledSocket();
+                const send = socket.send.bind(socket);
+                socket.send = (text, callback) => {
+                  const frame = JSON.parse(text) as { params?: { DataOfCmd?: string } };
+                  if (frame.params?.DataOfCmd === 'KEY_POWER') this.samsungPower = this.samsungPower === 'on' ? 'standby' : 'on';
+                  send(text, callback);
+                };
                 this.samsungSockets.push(socket);
                 this.samsungConnections.push({ prompted: !new URL(url).searchParams.has('token') });
                 queueMicrotask(() => { socket.open(); socket.message(connectSample()); });

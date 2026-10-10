@@ -23,6 +23,30 @@ function setup() {
 }
 const request = (id: number, host = '10.2.3.4') => ({ id: `00000000-0000-4000-8000-${String(id).padStart(12, '0')}`, platform: 'webos' as const, host });
 
+test('manual MACs stay bound to two separate LG ids through reconnect and explicit edits', async () => {
+  const h = setup();
+  const first = h.registry.add({ ...request(100), mac: '02-00-00-00-00-01' }, 'session'); await drain(); await succeed(h.adapters[0]!);
+  const second = h.registry.add({ ...request(101, '10.2.3.5'), mac: '02:00:00:00:00:02' }, 'session'); await drain(); await succeed(h.adapters[1]!);
+  expect(h.repository.forDevice(first.tvId).load()?.macAddress).toBe('02:00:00:00:00:01');
+  expect(h.repository.forDevice(second.tvId).load()?.macAddress).toBe('02:00:00:00:00:02');
+  expect(() => h.registry.add({ ...request(100), mac: '02:00:00:00:00:03' }, 'session')).toThrowError(expect.objectContaining({ code: 'OPERATION_CONFLICT' }));
+  h.registry.get(first.tvId)!.start({ action: 'change_address', host: '10.2.3.6' }); await drain(); await succeed(h.adapters[2]!);
+  h.registry.get(first.tvId)!.setMac('02:00:00:00:00:03');
+  expect(h.repository.forDevice(first.tvId).load()?.macAddress).toBe('02:00:00:00:00:03');
+  expect(h.repository.forDevice(second.tvId).load()?.macAddress).toBe('02:00:00:00:00:02');
+  for (const [tvId, mac] of [[first.tvId, '02:00:00:00:00:03'], [second.tvId, '02:00:00:00:00:02']] as const) {
+    const adapters: ControlledAdapter[] = [];
+    const service = createTvService({ repository: h.repository.forDevice(tvId), scheduler: new ControlledScheduler(),
+      cipher: createClientKeyCipher(Buffer.alloc(32, 7)), now: () => 0, newId: () => 'wake-reconnect',
+      createAdapter(_host, staging) { const adapter = new ControlledAdapter(staging); adapters.push(adapter); return adapter; },
+    });
+    try {
+      service.startPower({ id: request(200).id, action: 'wake' }, 'session'); await drain();
+      expect(adapters.flatMap(adapter => adapter.wakes)).toEqual([[mac]]);
+    } finally { await service.close(); }
+  }
+});
+
 test('isolatesTwoServices', async () => {
   const h = setup(); const first = h.registry.add(request(100), 'session'); await drain(); await succeed(h.adapters[0]!);
   const second = h.registry.add(request(101, '10.2.3.5'), 'session'); await drain(); await succeed(h.adapters[1]!);
@@ -114,6 +138,15 @@ test('retryingDraftCancelsOldRetentionAndKeepsSuccessfullySavedService', async (
   expect(h.registry.add(request(100), 'session').tvId).toBe(accepted.tvId);
   await service.sendCommand({ id: request(200).id, button: 'UP' }, new AbortController().signal);
   expect(h.adapters[1]!.sent).toEqual(['UP']);
+});
+
+test('failed addition retains its manual MAC through a pairing retry', async () => {
+  const h = setup();
+  const accepted = h.registry.add({ ...request(100), mac: '02:00:00:00:00:01' }, 'session'); await drain();
+  h.adapters[0]!.pairResult.reject(new WebOsError('PAIRING_REJECTED', 'synthetic rejection')); await drain();
+  h.registry.get(accepted.tvId)!.start({ action: 'pair', host: '10.2.3.4' }); await drain();
+  await succeed(h.adapters[1]!);
+  expect(h.repository.forDevice(accepted.tvId).load()?.macAddress).toBe('02:00:00:00:00:01');
 });
 
 test('failedRetryRetainsDraftForTenMinutesFromLatestTerminalResult', async () => {

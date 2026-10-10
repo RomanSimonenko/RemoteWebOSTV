@@ -5,6 +5,13 @@ const id = '15e082b2-de7e-4d86-a049-19c7448264f1';
 const operation = { id, action: 'wake', status: 'running', phase: 'connecting', delivery: 'sent', startedAt: 1000, deadlineAt: 61000 };
 const state = { mac: null, canPowerOff: false, canWake: false, operation: null };
 
+test.each(['on', 'standby', 'unknown'])('accepts observed Samsung power %s', (observedPower) => {
+  expect(contracts.tvPowerStateSchema.parse({ ...state, observedPower })).toEqual({ ...state, observedPower });
+});
+test('rejects invalid observed power', () => {
+  expect(contracts.tvPowerStateSchema.safeParse({ ...state, observedPower: 'off' }).success).toBe(false);
+});
+
 test('exports the power contract schemas', () => {
   expect(contracts.tvPowerRequestSchema).toBeDefined();
   expect(contracts.tvPowerOperationSchema).toBeDefined();

@@ -61,7 +61,7 @@ export function createTvDeviceRegistry(dependencies: {
     void pending.then(() => pendingClosures.delete(pending), (cause: unknown) => { pendingClosures.delete(pending); cleanupFailures.push(cause); });
     return pending;
   }
-  function ensure(tvId: TvId, platform: TvPlatform = 'webos'): TvService {
+  function ensure(tvId: TvId, platform: TvPlatform = 'webos', draftMac?: string): TvService {
     const existing = entries.get(tvId); if (existing) return existing.service;
     const scoped = repository.forDevice(tvId);
     const finished = (operation: TvOperation) => {
@@ -77,7 +77,11 @@ export function createTvDeviceRegistry(dependencies: {
     const inner = dependencies.createService({ ...scoped, replace(value) { checkHost(value.host, tvId); scoped.replace(value); } }, finished, scoped.load()?.platform ?? platform);
     const assertCanStart = (input: StartTvOperation) => {
       if (closed) throw new TvServiceError('SERVICE_CLOSED', 409);
-      const parsed = inner.assertCanStart(input); if ('host' in parsed) checkHost(parsed.host, tvId); return parsed;
+      // A failed first pairing has no saved record yet. Keep the user's
+      // original addition setting scoped to this draft across retries.
+      const request = input.action === 'pair' && input.mac === undefined && draftMac !== undefined && !scoped.hasStoredKey()
+        ? { ...input, mac: draftMac } : input;
+      const parsed = inner.assertCanStart(request); if ('host' in parsed) checkHost(parsed.host, tvId); return parsed;
     };
     const service: TvService = { ...inner, assertCanStart,
       start(input, owner) {
@@ -101,7 +105,7 @@ export function createTvDeviceRegistry(dependencies: {
     const previous = owned?.get(request.id);
     if (previous) {
       if (previous.expired) throw new TvServiceError('OPERATION_NOT_FOUND', 404);
-      if (previous.request.host !== request.host || previous.request.platform !== request.platform) throw new TvServiceError('OPERATION_CONFLICT', 409);
+      if (previous.request.host !== request.host || previous.request.platform !== request.platform || previous.request.mac !== request.mac) throw new TvServiceError('OPERATION_CONFLICT', 409);
       return { tvId: previous.tvId, operation: previous.operation };
     }
     if (owned && owned.size >= receiptCapacity) throw new TvServiceError('OPERATION_CONFLICT', 409);
@@ -146,8 +150,8 @@ export function createTvDeviceRegistry(dependencies: {
       const request = addTvRequestSchema.parse(input);
       const owned = receipts.get(owner) ?? new Map<string, Receipt>();
       const tvId = tvIdSchema.parse(dependencies.newId()); checkHost(request.host, tvId);
-      const service = ensure(tvId, request.platform);
-      const operation = service.start({ action: 'pair', host: request.host }, owner);
+      const service = ensure(tvId, request.platform, request.mac);
+      const operation = service.start({ action: 'pair', host: request.host, ...(request.mac === undefined ? {} : { mac: request.mac }) }, owner);
       entries.get(tvId)!.owner = owner;
       owned.set(request.id, { request, tvId, operation, expired: false }); receipts.set(owner, owned);
       return { tvId, operation };

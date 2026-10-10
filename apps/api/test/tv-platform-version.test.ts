@@ -115,7 +115,7 @@ test.each([{ model: 'Replacement' }, { model: 'Synthetic Model', firmwareVersion
     const adapter = h.adapters[0]!;
     adapter.pairResult.resolve({ ...pairing, identity }); adapter.readResult.resolve(snapshot); await drain();
     expect(base.repository.load()?.identity.platformVersion).toBeUndefined();
-    expect(base.repository.load()?.macAddress).toBeNull();
+    expect(base.repository.load()?.macAddress).toBe('02:00:00:00:00:03');
   } finally { await h.service.close(); await base.service.close(); }
 });
 
